@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-28T15:11:06+08:00",
+  "title": "Design System: 今序 JinXu",
+  "extensions": {
+    "colorMeta": {
+      "ink": { "role": "neutral", "displayName": "主墨色", "canonical": "#20221f", "tonalRamp": ["#171816", "#20221f", "#343731", "#555850", "#777a72", "#a4a69f", "#d1d2cb", "#f4f5f0"] },
+      "ink-soft": { "role": "neutral", "displayName": "柔墨色", "canonical": "#555850", "tonalRamp": ["#171816", "#2b2d29", "#42453e", "#555850", "#777a72", "#a4a69f", "#d1d2cb", "#f4f5f0"] },
+      "muted": { "role": "neutral", "displayName": "说明灰", "canonical": "#686a63", "tonalRamp": ["#1d1e1b", "#343630", "#50524b", "#686a63", "#898b83", "#afb1aa", "#d7d8d2", "#f5f5f2"] },
+      "paper": { "role": "neutral", "displayName": "工作台纸色", "canonical": "#f8f8f5", "tonalRamp": ["#242520", "#494a43", "#707168", "#999a91", "#c2c3bb", "#deded8", "#eeeeea", "#f8f8f5"] },
+      "surface": { "role": "neutral", "displayName": "账本纸色", "canonical": "#fdfdfb", "tonalRamp": ["#282924", "#505149", "#77786f", "#9fa098", "#c6c7c0", "#deded8", "#efefeb", "#fdfdfb"] },
+      "surface-raised": { "role": "neutral", "displayName": "抬升纸色", "canonical": "#ffffff", "tonalRamp": ["#292a25", "#51524b", "#797a72", "#a1a29a", "#c9cac3", "#e1e1dc", "#f1f1ed", "#ffffff"] },
+      "border": { "role": "neutral", "displayName": "铅笔分隔色", "canonical": "#deded8", "tonalRamp": ["#252620", "#4a4b44", "#6f7068", "#95968e", "#bbbbb4", "#deded8", "#ecece7", "#fafaf7"] },
+      "primary": { "role": "primary", "displayName": "确认靛蓝", "canonical": "#536dff", "tonalRamp": ["#17235a", "#26347d", "#3547a4", "#4358cc", "#536dff", "#8495ff", "#b9c3ff", "#eef0ff"] },
+      "primary-soft": { "role": "primary", "displayName": "淡靛蓝纸面", "canonical": "#ebeefc", "tonalRamp": ["#18204b", "#2b3974", "#46558f", "#6877aa", "#929ec8", "#bec7e4", "#dce2f4", "#f5f6fd"] },
+      "danger": { "role": "tertiary", "displayName": "危险墨红", "canonical": "#884d4d", "tonalRamp": ["#351919", "#552929", "#733b3b", "#884d4d", "#ad7070", "#cf9d9d", "#e8caca", "#fff7f7"] },
+      "danger-soft": { "role": "tertiary", "displayName": "危险浅底", "canonical": "#fff7f7", "tonalRamp": ["#441d1d", "#713636", "#995858", "#bd7e7e", "#dca9a9", "#efd0d0", "#f9e7e7", "#fff7f7"] },
+      "success": { "role": "tertiary", "displayName": "完成绿", "canonical": "#6f9174", "tonalRamp": ["#19351f", "#2c5033", "#456c4d", "#5a805f", "#6f9174", "#9eb1a1", "#cad5ca", "#f3f7f2"] },
+      "timeline-now": { "role": "tertiary", "displayName": "当前时间红", "canonical": "#b25a54", "tonalRamp": ["#411816", "#652a26", "#873d38", "#a64e48", "#b25a54", "#d18b87", "#e8bfbc", "#faefee"] },
+      "timeline-fixed": { "role": "tertiary", "displayName": "固定日程棕", "canonical": "#9b7b50", "tonalRamp": ["#332514", "#524024", "#705a36", "#897047", "#9b7b50", "#bda783", "#ddd0b8", "#f8f3e9"] },
+      "cancelled": { "role": "tertiary", "displayName": "取消棕", "canonical": "#a98258", "tonalRamp": ["#382613", "#594124", "#795c38", "#94734d", "#a98258", "#c9ac88", "#e4d2bb", "#faf4eb"] },
+      "deleted": { "role": "tertiary", "displayName": "删除红", "canonical": "#9a6969", "tonalRamp": ["#381d1d", "#5c3333", "#7b4b4b", "#9a6969", "#b78b8b", "#d4b2b2", "#ead6d6", "#fcf5f5"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "页面方向", "purpose": "页面一级标题与今日主句，最多两行。" },
+      "title": { "displayName": "检查器标题", "purpose": "任务编辑器、日期浮层和重要模块标题。" },
+      "body": { "displayName": "操作正文", "purpose": "任务备注、说明、反馈和错误恢复。" },
+      "label": { "displayName": "操作标签", "purpose": "筛选、字段、状态和按钮。" }
+    },
+    "shadows": [
+      { "name": "brand-lift", "value": "0 5px 14px rgb(32 34 31 / 16%)", "purpose": "品牌标记与纸面分离。" },
+      { "name": "floating-action", "value": "0 10px 28px rgb(32 34 31 / 12%)", "purpose": "未保存更改操作层。" },
+      { "name": "toast-ambient", "value": "0 12px 32px rgb(32 34 31 / 14%)", "purpose": "短暂反馈与页面内容分离。" },
+      { "name": "dialog-focus", "value": "0 26px 80px rgb(32 34 31 / 24%)", "purpose": "日期时间选择和受保护确认层。" }
+    ],
+    "motion": [
+      { "name": "state-quick", "value": "160ms ease", "purpose": "任务胶囊、筛选和边界状态变化。" },
+      { "name": "surface-standard", "value": "180ms ease", "purpose": "输入聚焦和轻量悬停。" },
+      { "name": "overlay-enter", "value": "200ms cubic-bezier(.16, 1, .3, 1)", "purpose": "日期浮层进入。" },
+      { "name": "feedback-enter", "value": "240ms cubic-bezier(.2, .8, .2, 1)", "purpose": "Toast 与未保存操作层进入。" }
+    ],
+    "breakpoints": [
+      { "name": "compact-desktop", "value": "1180px" },
+      { "name": "desktop-stack", "value": "1100px" },
+      { "name": "single-column", "value": "860px" },
+      { "name": "editor-compact", "value": "560px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "创建、确认和保存使用的深墨色主操作。",
+      "html": "<button class=\"ds-btn-primary\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"/></svg>确认创建任务</button>",
+      "css": ".ds-btn-primary { display:inline-flex; min-width:142px; min-height:36px; align-items:center; justify-content:center; gap:7px; padding:0 14px; border:0; border-radius:9px; color:#fff; background:#20221f; font:800 12px 'Segoe UI Variable','Microsoft YaHei UI',sans-serif; transition:background .18s ease; } .ds-btn-primary svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; } .ds-btn-primary:hover { background:#555850; } .ds-btn-primary:focus-visible { outline:2px solid #536dff; outline-offset:2px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "取消、恢复和任务状态变化的克制次级操作。",
+      "html": "<button class=\"ds-btn-secondary\">继续编辑</button>",
+      "css": ".ds-btn-secondary { min-height:36px; padding:0 11px; border:1px solid #d1d2cb; border-radius:8px; color:#555850; background:#fff; font:750 12px 'Segoe UI Variable','Microsoft YaHei UI',sans-serif; transition:border-color .18s ease,background .18s ease; } .ds-btn-secondary:hover { border-color:#b5b7ae; color:#343631; background:#f8f8f5; } .ds-btn-secondary:focus-visible { outline:2px solid #536dff; outline-offset:2px; }"
+    },
+    {
+      "name": "Queue Filter Button",
+      "kind": "button",
+      "description": "任务队列右上角的圆形筛选入口，激活筛选时才使用靛蓝底。",
+      "html": "<button class=\"ds-filter-button\" aria-label=\"筛选任务\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 6h16M7 12h10M10 18h4\"/></svg><i></i></button>",
+      "css": ".ds-filter-button { position:relative; display:grid; width:40px; height:40px; padding:0; place-items:center; border:0; border-radius:50%; color:#fff; background:#4056c8; box-shadow:0 5px 14px rgb(64 86 200 / 22%); transition:background .16s ease,transform .16s ease; } .ds-filter-button svg { width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; } .ds-filter-button i { position:absolute; top:7px; right:7px; width:6px; height:6px; border:2px solid #fff; border-radius:50%; background:#4056c8; } .ds-filter-button:hover { background:#344bbc; transform:translateY(-1px); } .ds-filter-button:focus-visible { outline:2px solid #536dff; outline-offset:2px; }"
+    },
+    {
+      "name": "Task Queue Capsule",
+      "kind": "custom",
+      "refersTo": "ledger-row",
+      "description": "展示标题、备注、优先级、时间、工作量、来源和明确状态的任务胶囊。",
+      "html": "<button class=\"ds-task-row\" aria-pressed=\"true\"><i class=\"ds-accent\"></i><span class=\"ds-task-copy\"><strong>测试跨天任务</strong><small>整理本周计划边界</small><em><b>低优先级</b> 截止 8/29 12:00 · 1000 分钟</em></span><span class=\"ds-task-meta\"><svg viewBox=\"0 0 24 24\" aria-label=\"手动创建\"><circle cx=\"12\" cy=\"8\" r=\"3.2\"/><path d=\"M5.5 20a6.5 6.5 0 0 1 13 0\"/></svg><small>待办</small></span></button>",
+      "css": ".ds-task-row { display:grid; grid-template-columns:4px minmax(0,1fr) auto; gap:12px; width:100%; min-height:94px; padding:13px 13px 13px 0; overflow:hidden; border:1px solid #c1cbed; border-radius:12px; color:#1e293f; background:#f6f7ff; text-align:left; transition:border-color .16s ease,background .16s ease; } .ds-accent { width:4px; min-height:64px; align-self:stretch; background:#587fc5; } .ds-task-copy strong,.ds-task-copy small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .ds-task-copy strong { font:750 14px/1.42 'Segoe UI Variable','Microsoft YaHei UI',sans-serif; } .ds-task-copy small { margin-top:5px; color:#46536b; font:500 13px/1.5 'Segoe UI Variable','Microsoft YaHei UI',sans-serif; } .ds-task-copy em { display:block; margin-top:8px; color:#55627a; font:normal 700 11px 'Segoe UI Variable','Microsoft YaHei UI',sans-serif; } .ds-task-copy b { margin-right:7px; padding:2px 7px; border-radius:5px; color:#315995; background:#e9f0ff; } .ds-task-meta { display:grid; min-height:64px; justify-items:end; align-content:space-between; color:#46516b; font:800 11px 'Segoe UI Variable','Microsoft YaHei UI',sans-serif; } .ds-task-meta svg { width:23px; height:23px; padding:5px; border-radius:7px; fill:none; stroke:#616860; stroke-width:1.8; background:#f0f1ed; } .ds-task-row:hover { border-color:#bfc8ea; background:#fafbff; } .ds-task-row:focus-visible { outline:2px solid #536dff; outline-offset:-2px; }"
+    },
+    {
+      "name": "Unconfirmed Task Capsule",
+      "kind": "custom",
+      "description": "新建时立即出现、但尚未写入 SQLite 的实时任务胶囊。",
+      "html": "<button class=\"ds-draft-row\" aria-pressed=\"true\"><i></i><span><strong>未命名任务</strong><small>截止 今天 17:00 · 60 分钟</small></span><em>未保存</em></button>",
+      "css": ".ds-draft-row { display:grid; grid-template-columns:4px minmax(0,1fr) auto; align-items:center; gap:12px; width:100%; min-height:94px; padding:13px 13px 13px 0; border:1px solid #c1cbed; border-radius:12px; color:#1e293f; background:#f6f7ff; text-align:left; } .ds-draft-row > i { width:4px; min-height:64px; align-self:stretch; background:#4056c8; } .ds-draft-row strong,.ds-draft-row small { display:block; } .ds-draft-row strong { font:750 14px 'Segoe UI Variable','Microsoft YaHei UI',sans-serif; } .ds-draft-row small { margin-top:8px; color:#55627a; font:700 11px 'Segoe UI Variable','Microsoft YaHei UI',sans-serif; } .ds-draft-row em { align-self:end; color:#4056c8; font:normal 800 11px 'Segoe UI Variable','Microsoft YaHei UI',sans-serif; } .ds-draft-row:focus-visible { outline:2px solid #536dff; outline-offset:-2px; }"
+    },
+    {
+      "name": "Unified Task Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "新建和编辑任务共用的中文标签输入控件。",
+      "html": "<label class=\"ds-field\"><span>预计工作量</span><span class=\"ds-input-wrap\"><input value=\"60\" aria-label=\"预计工作量\"><b>分钟</b></span><small>跨日任务，请确认预计工作量</small></label>",
+      "css": ".ds-field { display:grid; gap:6px; color:#555850; font:800 12px 'Segoe UI Variable','Microsoft YaHei UI',sans-serif; } .ds-input-wrap { position:relative; } .ds-input-wrap input { width:100%; height:40px; padding:0 50px 0 10px; border:1px solid #cfd0c9; border-radius:9px; color:#353731; background:#fcfcfa; font:400 13px 'Segoe UI Variable','Microsoft YaHei UI',sans-serif; outline:none; } .ds-input-wrap input:focus { border-color:#aebaff; box-shadow:0 0 0 3px rgb(83 109 255 / 9%); } .ds-input-wrap b { position:absolute; top:50%; right:11px; color:#686a63; font-size:12px; transform:translateY(-50%); } .ds-field small { min-height:20px; color:#686a63; font-weight:500; line-height:20px; }"
+    },
+    {
+      "name": "Task Time Range",
+      "kind": "custom",
+      "description": "以日期胶囊和时间胶囊呈现开始、结束边界的编辑器。",
+      "html": "<section class=\"ds-range\"><header><span><strong>时间范围</strong><small>限制可排程范围；跨日自动拆分。</small></span><button>清除时间</button></header><div><b>开始</b><button>2026年8月28日</button><button>16:00</button></div><div><b>结束</b><button>2026年8月29日</button><button>17:00</button></div></section>",
+      "css": ".ds-range { overflow:hidden; border:1px solid #deded8; border-radius:14px; color:#30322d; background:#fff; font-family:'Segoe UI Variable','Microsoft YaHei UI',sans-serif; } .ds-range header { display:flex; min-height:52px; align-items:center; justify-content:space-between; gap:14px; padding:8px 14px; } .ds-range header span { display:grid; gap:3px; } .ds-range header strong { font-size:13px; } .ds-range header small { color:#686a63; font-size:11px; } .ds-range header button { border:0; color:#5369d5; background:transparent; font-weight:800; } .ds-range > div { display:grid; grid-template-columns:52px 1fr 92px; align-items:center; gap:7px; min-height:50px; padding:8px 14px; border-top:1px solid #e7e7e1; } .ds-range > div b { font-size:12px; } .ds-range > div button { min-height:32px; border:1px solid transparent; border-radius:99px; color:#3f423c; background:#f0f0ec; font-weight:750; } .ds-range button:hover { border-color:#d4d5ce; background:#e9e9e4; } .ds-range button:focus-visible { outline:2px solid #536dff; outline-offset:2px; }"
+    },
+    {
+      "name": "Date Time Picker",
+      "kind": "custom",
+      "description": "左侧日期、右侧 24 小时时间轴和显式确认组成的桌面浮层。",
+      "html": "<section class=\"ds-picker\"><header><span><small>任务结束</small><strong>选择结束时间</strong></span><b>2026年8月28日 · 16:00</b></header><main><div class=\"ds-calendar\"><strong>2026年8月</strong><p>一　二　三　四　五　六　日</p><div><button>27</button><button class=\"today\">28</button><button>29</button></div></div><div class=\"ds-time\"><strong>24 小时</strong><button>15:55</button><button class=\"selected\">16:00</button><button>16:05</button></div></main><footer><button>取消</button><button class=\"confirm\">确认</button></footer></section>",
+      "css": ".ds-picker { width:720px; overflow:hidden; border:1px solid #d7d8d1; border-radius:18px; color:#20221f; background:#fdfdfb; box-shadow:0 26px 80px rgb(32 34 31 / 24%); font-family:'Segoe UI Variable','Microsoft YaHei UI',sans-serif; } .ds-picker > header { display:flex; min-height:72px; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid #deded8; background:#fff; } .ds-picker > header span { display:grid; gap:3px; } .ds-picker > header small { color:#777a72; font-size:10px; } .ds-picker > header strong { font-size:19px; } .ds-picker > header b { padding:10px 12px; border-radius:99px; background:#f0f0ec; font-size:12px; } .ds-picker main { display:grid; grid-template-columns:1fr 250px; min-height:250px; } .ds-calendar { padding:24px; border-right:1px solid #deded8; background:#fff; } .ds-calendar p { color:#85877f; font-size:10px; word-spacing:24px; } .ds-calendar div { display:flex; gap:18px; margin-top:24px; } .ds-calendar button { width:38px; height:38px; border:0; border-radius:50%; background:transparent; } .ds-calendar .today { color:#fff; background:#b25a54; } .ds-time { display:grid; align-content:start; gap:6px; padding:24px 16px; background:#f8f8f5; } .ds-time button { height:32px; border:0; border-radius:7px; color:#74776f; background:transparent; text-align:left; } .ds-time .selected { color:#4056c8; background:#ebeefc; } .ds-picker footer { display:flex; justify-content:flex-end; gap:8px; padding:12px 18px; border-top:1px solid #deded8; background:#fff; } .ds-picker footer button { width:92px; min-height:36px; border:1px solid #d1d2cb; border-radius:9px; background:#fff; font-weight:800; } .ds-picker footer .confirm { color:#fff; border-color:#20221f; background:#20221f; } .ds-picker button:focus-visible { outline:2px solid #536dff; outline-offset:2px; }"
+    },
+    {
+      "name": "Success Toast",
+      "kind": "card",
+      "description": "只在本地事务成功后出现的短暂完成反馈。",
+      "html": "<div class=\"ds-toast\" role=\"status\"><span><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m5 12 4.2 4.2L19 6.5\"/></svg></span>任务更改已保存到本机</div>",
+      "css": ".ds-toast { display:inline-flex; min-height:42px; align-items:center; gap:9px; padding:0 16px 0 10px; border:1px solid #d7e2d7; border-radius:12px; color:#35533b; background:#fbfdf9; box-shadow:0 12px 32px rgb(32 34 31 / 14%); font:750 12px 'Segoe UI Variable','Microsoft YaHei UI',sans-serif; } .ds-toast span { display:grid; width:25px; height:25px; place-items:center; border-radius:8px; color:#fff; background:#6f9174; } .ds-toast svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "清晰的任务队列",
+    "overview": "今序把任务处理为一条可快速扫读、再进入详情处理的任务队列：界面安静、克制，信息的可信度高于装饰感。浅暖灰的工作台承载连续使用，深色文字维持清楚层级，靛蓝只在选中、聚焦和确定状态中出现。\n\n密度服务于操作而不是展示。任务、状态和数据库反馈始终就近可见；视觉不会暗示尚未提交的成功，也不会用动画掩盖真实状态变化。",
+    "keyCharacteristics": [
+      "浅暖中性色上的清晰深色信息层级",
+      "稀少而明确的靛蓝交互信号",
+      "月历、日期详情与账本式双栏任务工作区",
+      "右下角常驻但不抢占页面结构的 AI 助手",
+      "中文优先、紧凑但可点击的桌面控件",
+      "成功、错误和危险操作均有耐久文字反馈"
+    ],
+    "rules": [
+      { "name": "The Rare Accent Rule", "body": "靛蓝只标识选中、焦点和确定状态；普通结构继续依靠中性色和间距建立层级。", "section": "colors" },
+      { "name": "The State Is Text Rule", "body": "状态颜色必须配合明确中文文字，不能只靠圆点颜色传达。", "section": "colors" },
+      { "name": "The Operational Text Rule", "body": "会影响下一步操作的文字必须达到正文或标签层级，禁止退化成装饰性小字。", "section": "typography" },
+      { "name": "The Flat Ledger Rule", "body": "任务列表、检查器和筛选依靠连续边界与色阶组织，禁止把每一行包装成悬浮卡片。", "section": "elevation" }
+    ],
+    "dos": [
+      "Do 让每次保存、状态变化和删除都显示持久的中文结果反馈。",
+      "Do 在任务元数据中始终写出状态文字，颜色仅作辅助。",
+      "Do 保持桌面账本双栏和移动端上下排列的一致心智模型。",
+      "Do 将状态操作限制为领域状态机允许的集合。"
+    ],
+    "donts": [
+      "Don't 用大面积品牌色、渐变文字或装饰性玻璃效果打断长时间使用。",
+      "Don't 用 9–10px 小字承载表单、状态或错误恢复信息。",
+      "Don't 用未提交的乐观状态假装数据库写入成功。",
+      "Don't 把任务行、检查器和提示层层包装成同尺寸卡片。"
+    ]
+  }
+}

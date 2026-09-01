@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>今序（JinXu）</title>
+    <style>
+      body { margin: 0; min-width: 720px; font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif; color: #182235; background: #f5f7fb; }
+      .startup { max-width: 720px; margin: 12vh auto; padding: 32px; border: 1px solid #e1e6ef; border-radius: 14px; background: #fff; box-shadow: 0 8px 24px rgb(18 35 59 / 6%); }
+      .startup h1 { margin: 0 0 8px; }.startup p { color: #5c6b7f; line-height: 1.65; }.startup code { padding: 2px 6px; border-radius: 4px; background: #edf2f8; }
+    </style>
+  </head>
+  <body>
+    <!--
+      THESIS: 任务页是一张可操作的本地任务账本，拒绝把状态与编辑动作拆成同质卡片。
+      OWN-WORLD: 米白工作台、石墨文字、单一靛蓝状态强调；细分隔线与紧凑行承担结构。
+      STORY: 用户读取真实任务，选择一行，在同屏检查器中编辑、流转或进入回收站，并只在 SQLite 提交后得到反馈。
+      FIRST VIEWPORT: 左侧状态账本、右侧常驻详情检查器；搜索和状态切换位于账本上方，保存动作贴近表单末端。
+      FORM: incumbent-workbench extension · seed JX-TASK-CLOSURE-01.
+      FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+    -->
+    <div id="root">
+      <main class="startup">
+        <h1>今序（JinXu）</h1>
+        <p>正在加载桌面应用界面…</p>
+        <p>此文件是 Vite/Tauri 的入口，不能通过双击 HTML 直接运行 TypeScript 与 Rust 后端。请在项目目录执行 <code>npm run tauri:dev</code>，或打开打包后的 Windows 安装包。</p>
+      </main>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

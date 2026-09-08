@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-28T15:11:06+08:00",
+  "generatedAt": "2026-09-03T15:47:28+08:00",
   "title": "Design System: 今序 JinXu",
   "extensions": {
     "colorMeta": {
@@ -16,8 +16,9 @@
       "danger": { "role": "tertiary", "displayName": "危险墨红", "canonical": "#884d4d", "tonalRamp": ["#351919", "#552929", "#733b3b", "#884d4d", "#ad7070", "#cf9d9d", "#e8caca", "#fff7f7"] },
       "danger-soft": { "role": "tertiary", "displayName": "危险浅底", "canonical": "#fff7f7", "tonalRamp": ["#441d1d", "#713636", "#995858", "#bd7e7e", "#dca9a9", "#efd0d0", "#f9e7e7", "#fff7f7"] },
       "success": { "role": "tertiary", "displayName": "完成绿", "canonical": "#6f9174", "tonalRamp": ["#19351f", "#2c5033", "#456c4d", "#5a805f", "#6f9174", "#9eb1a1", "#cad5ca", "#f3f7f2"] },
-      "timeline-now": { "role": "tertiary", "displayName": "当前时间红", "canonical": "#b25a54", "tonalRamp": ["#411816", "#652a26", "#873d38", "#a64e48", "#b25a54", "#d18b87", "#e8bfbc", "#faefee"] },
+      "timeline-now": { "role": "tertiary", "displayName": "Apple 今日红", "canonical": "#ff3b30", "tonalRamp": ["#4d0905", "#7a130d", "#a82119", "#d92d26", "#ff3b30", "#ff7a72", "#ffb6b1", "#fff0ef"] },
       "timeline-fixed": { "role": "tertiary", "displayName": "固定日程棕", "canonical": "#9b7b50", "tonalRamp": ["#332514", "#524024", "#705a36", "#897047", "#9b7b50", "#bda783", "#ddd0b8", "#f8f3e9"] },
+      "timeline-nonworking": { "role": "neutral", "displayName": "非工作时间纸面", "canonical": "#f2f2ee", "tonalRamp": ["#24251f", "#494a43", "#6f7068", "#95968e", "#bbbbb4", "#d9d9d3", "#e8e8e3", "#f2f2ee"] },
       "cancelled": { "role": "tertiary", "displayName": "取消棕", "canonical": "#a98258", "tonalRamp": ["#382613", "#594124", "#795c38", "#94734d", "#a98258", "#c9ac88", "#e4d2bb", "#faf4eb"] },
       "deleted": { "role": "tertiary", "displayName": "删除红", "canonical": "#9a6969", "tonalRamp": ["#381d1d", "#5c3333", "#7b4b4b", "#9a6969", "#b78b8b", "#d4b2b2", "#ead6d6", "#fcf5f5"] }
     },
@@ -97,7 +98,7 @@
       "name": "Task Time Range",
       "kind": "custom",
       "description": "以日期胶囊和时间胶囊呈现开始、结束边界的编辑器。",
-      "html": "<section class=\"ds-range\"><header><span><strong>时间范围</strong><small>限制可排程范围；跨日自动拆分。</small></span><button>清除时间</button></header><div><b>开始</b><button>2026年8月28日</button><button>16:00</button></div><div><b>结束</b><button>2026年8月29日</button><button>17:00</button></div></section>",
+      "html": "<section class=\"ds-range\"><header><span><strong>时间范围</strong><small>限定可安排日期；跨日按工作量分配。</small></span><button>清除时间</button></header><div><b>开始</b><button>2026年8月28日</button><button>16:00</button></div><div><b>结束</b><button>2026年8月29日</button><button>17:00</button></div></section>",
       "css": ".ds-range { overflow:hidden; border:1px solid #deded8; border-radius:14px; color:#30322d; background:#fff; font-family:'Segoe UI Variable','Microsoft YaHei UI',sans-serif; } .ds-range header { display:flex; min-height:52px; align-items:center; justify-content:space-between; gap:14px; padding:8px 14px; } .ds-range header span { display:grid; gap:3px; } .ds-range header strong { font-size:13px; } .ds-range header small { color:#686a63; font-size:11px; } .ds-range header button { border:0; color:#5369d5; background:transparent; font-weight:800; } .ds-range > div { display:grid; grid-template-columns:52px 1fr 92px; align-items:center; gap:7px; min-height:50px; padding:8px 14px; border-top:1px solid #e7e7e1; } .ds-range > div b { font-size:12px; } .ds-range > div button { min-height:32px; border:1px solid transparent; border-radius:99px; color:#3f423c; background:#f0f0ec; font-weight:750; } .ds-range button:hover { border-color:#d4d5ce; background:#e9e9e4; } .ds-range button:focus-visible { outline:2px solid #536dff; outline-offset:2px; }"
     },
     {
@@ -105,7 +106,21 @@
       "kind": "custom",
       "description": "左侧日期、右侧 24 小时时间轴和显式确认组成的桌面浮层。",
       "html": "<section class=\"ds-picker\"><header><span><small>任务结束</small><strong>选择结束时间</strong></span><b>2026年8月28日 · 16:00</b></header><main><div class=\"ds-calendar\"><strong>2026年8月</strong><p>一　二　三　四　五　六　日</p><div><button>27</button><button class=\"today\">28</button><button>29</button></div></div><div class=\"ds-time\"><strong>24 小时</strong><button>15:55</button><button class=\"selected\">16:00</button><button>16:05</button></div></main><footer><button>取消</button><button class=\"confirm\">确认</button></footer></section>",
-      "css": ".ds-picker { width:720px; overflow:hidden; border:1px solid #d7d8d1; border-radius:18px; color:#20221f; background:#fdfdfb; box-shadow:0 26px 80px rgb(32 34 31 / 24%); font-family:'Segoe UI Variable','Microsoft YaHei UI',sans-serif; } .ds-picker > header { display:flex; min-height:72px; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid #deded8; background:#fff; } .ds-picker > header span { display:grid; gap:3px; } .ds-picker > header small { color:#777a72; font-size:10px; } .ds-picker > header strong { font-size:19px; } .ds-picker > header b { padding:10px 12px; border-radius:99px; background:#f0f0ec; font-size:12px; } .ds-picker main { display:grid; grid-template-columns:1fr 250px; min-height:250px; } .ds-calendar { padding:24px; border-right:1px solid #deded8; background:#fff; } .ds-calendar p { color:#85877f; font-size:10px; word-spacing:24px; } .ds-calendar div { display:flex; gap:18px; margin-top:24px; } .ds-calendar button { width:38px; height:38px; border:0; border-radius:50%; background:transparent; } .ds-calendar .today { color:#fff; background:#b25a54; } .ds-time { display:grid; align-content:start; gap:6px; padding:24px 16px; background:#f8f8f5; } .ds-time button { height:32px; border:0; border-radius:7px; color:#74776f; background:transparent; text-align:left; } .ds-time .selected { color:#4056c8; background:#ebeefc; } .ds-picker footer { display:flex; justify-content:flex-end; gap:8px; padding:12px 18px; border-top:1px solid #deded8; background:#fff; } .ds-picker footer button { width:92px; min-height:36px; border:1px solid #d1d2cb; border-radius:9px; background:#fff; font-weight:800; } .ds-picker footer .confirm { color:#fff; border-color:#20221f; background:#20221f; } .ds-picker button:focus-visible { outline:2px solid #536dff; outline-offset:2px; }"
+      "css": ".ds-picker { width:720px; overflow:hidden; border:1px solid #d7d8d1; border-radius:18px; color:#20221f; background:#fdfdfb; box-shadow:0 26px 80px rgb(32 34 31 / 24%); font-family:'Segoe UI Variable','Microsoft YaHei UI',sans-serif; } .ds-picker > header { display:flex; min-height:72px; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid #deded8; background:#fff; } .ds-picker > header span { display:grid; gap:3px; } .ds-picker > header small { color:#777a72; font-size:10px; } .ds-picker > header strong { font-size:19px; } .ds-picker > header b { padding:10px 12px; border-radius:99px; background:#f0f0ec; font-size:12px; } .ds-picker main { display:grid; grid-template-columns:1fr 250px; min-height:250px; } .ds-calendar { padding:24px; border-right:1px solid #deded8; background:#fff; } .ds-calendar p { color:#85877f; font-size:10px; word-spacing:24px; } .ds-calendar div { display:flex; gap:18px; margin-top:24px; } .ds-calendar button { width:38px; height:38px; border:0; border-radius:50%; background:transparent; } .ds-calendar .today { color:#fff; background:#ff3b30; } .ds-time { display:grid; align-content:start; gap:6px; padding:24px 16px; background:#f8f8f5; } .ds-time button { height:32px; border:0; border-radius:7px; color:#74776f; background:transparent; text-align:left; } .ds-time .selected { color:#4056c8; background:#ebeefc; } .ds-picker footer { display:flex; justify-content:flex-end; gap:8px; padding:12px 18px; border-top:1px solid #deded8; background:#fff; } .ds-picker footer button { width:92px; min-height:36px; border:1px solid #d1d2cb; border-radius:9px; background:#fff; font-weight:800; } .ds-picker footer .confirm { color:#fff; border-color:#20221f; background:#20221f; } .ds-picker button:focus-visible { outline:2px solid #536dff; outline-offset:2px; }"
+    },
+    {
+      "name": "Ordinary Timeline Task Block",
+      "kind": "custom",
+      "description": "非独占时间线中的普通执行块；勾选固定在标题左上方、标题之前，且与内容区是独立操作。",
+      "html": "<article class=\"ds-timeline-task\"><i class=\"ds-timeline-accent\"></i><button class=\"ds-timeline-check\" aria-label=\"标记本次执行完成\"></button><button class=\"ds-timeline-copy\" aria-label=\"打开撰写周报的执行记录\"><strong>撰写周报</strong><small><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"8\"/><path d=\"M12 8v4l3 2\"/></svg>15:00 - 16:00</small></button></article>",
+      "css": ".ds-timeline-task { display:grid; grid-template-columns:4px 20px minmax(0,1fr); align-items:start; gap:6px; min-width:0; min-height:54px; padding:6px 9px 7px 3px; border:1px solid #c8d1fb; border-radius:8px; color:#354ebf; background:#eef1ff; font-family:'Segoe UI Variable','Microsoft YaHei UI',sans-serif; } .ds-timeline-accent { width:4px; min-height:40px; align-self:stretch; border-radius:4px; background:#536dff; } .ds-timeline-check { display:grid; width:18px; height:18px; margin:0; padding:0; place-items:center; border:1.5px solid #536dff; border-radius:50%; background:#fff; } .ds-timeline-check:hover { background:#ebeefc; } .ds-timeline-check:focus-visible { outline:2px solid #536dff; outline-offset:2px; } .ds-timeline-copy { display:grid; min-width:0; gap:3px; margin:0; padding:0; border:0; color:inherit; background:transparent; font:inherit; text-align:left; } .ds-timeline-copy:hover strong { text-decoration:underline; text-underline-offset:2px; } .ds-timeline-copy:focus-visible { outline:2px solid #536dff; outline-offset:2px; border-radius:3px; } .ds-timeline-copy strong { overflow:hidden; color:#354ebf; font-size:12px; font-weight:800; line-height:18px; text-overflow:ellipsis; white-space:nowrap; } .ds-timeline-copy small { display:flex; min-width:0; align-items:center; gap:3px; overflow:hidden; color:#5566ad; font-size:11px; font-weight:650; text-overflow:ellipsis; white-space:nowrap; } .ds-timeline-copy svg { flex:0 0 auto; width:11px; height:11px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }"
+    },
+    {
+      "name": "Recurring Timeline Item Block",
+      "kind": "custom",
+      "description": "与普通任务块协调的重复事项块；右上角显示重复标识，不出现普通任务勾选框。",
+      "html": "<article class=\"ds-recurring-block\" tabindex=\"0\" aria-label=\"重复事项：拉伸训练，15:00 - 16:00\"><i class=\"ds-recurring-accent\"></i><span class=\"ds-recurring-copy\"><strong>拉伸训练</strong><small><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"8\"/><path d=\"M12 8v4l3 2\"/></svg>15:00 - 16:00</small></span><svg class=\"ds-recurring-mark\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 7h10a4 4 0 0 1 4 4v1M19 7l-3-3m3 3-3 3M19 17H9a4 4 0 0 1-4-4v-1M5 17l3 3m-3-3 3-3\"/></svg></article>",
+      "css": ".ds-recurring-block { display:grid; grid-template-columns:4px minmax(0,1fr) 16px; align-items:start; gap:6px; min-width:0; min-height:54px; padding:6px 8px 7px 3px; border:1px solid #d7cce0; border-radius:8px; color:#70587c; background:#f5f0f8; font-family:'Segoe UI Variable','Microsoft YaHei UI',sans-serif; } .ds-recurring-accent { width:4px; min-height:40px; align-self:stretch; border-radius:4px; background:#80628e; } .ds-recurring-copy { display:grid; min-width:0; gap:3px; } .ds-recurring-copy strong { overflow:hidden; font-size:12px; font-weight:800; line-height:18px; text-overflow:ellipsis; white-space:nowrap; } .ds-recurring-copy small { display:flex; min-width:0; align-items:center; gap:3px; overflow:hidden; color:#756580; font-size:11px; font-weight:650; text-overflow:ellipsis; white-space:nowrap; } .ds-recurring-copy small svg,.ds-recurring-mark { width:11px; height:11px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; } .ds-recurring-mark { width:14px; height:14px; margin-top:1px; } .ds-recurring-block:focus-visible { outline:2px solid #536dff; outline-offset:2px; }"
     },
     {
       "name": "Success Toast",
@@ -124,25 +139,30 @@
       "月历、日期详情与账本式双栏任务工作区",
       "右下角常驻但不抢占页面结构的 AI 助手",
       "中文优先、紧凑但可点击的桌面控件",
-      "成功、错误和危险操作均有耐久文字反馈"
+      "成功、错误和危险操作均有耐久文字反馈",
+      "非独占日程时间线允许相同时间等分与相交时间耦合分列"
     ],
     "rules": [
       { "name": "The Rare Accent Rule", "body": "靛蓝只标识选中、焦点和确定状态；普通结构继续依靠中性色和间距建立层级。", "section": "colors" },
       { "name": "The State Is Text Rule", "body": "状态颜色必须配合明确中文文字，不能只靠圆点颜色传达。", "section": "colors" },
       { "name": "The Operational Text Rule", "body": "会影响下一步操作的文字必须达到正文或标签层级，禁止退化成装饰性小字。", "section": "typography" },
-      { "name": "The Flat Ledger Rule", "body": "任务列表、检查器和筛选依靠连续边界与色阶组织，禁止把每一行包装成悬浮卡片。", "section": "elevation" }
+      { "name": "The Flat Ledger Rule", "body": "任务列表、检查器和筛选依靠连续边界与色阶组织，禁止把每一行包装成悬浮卡片。", "section": "elevation" },
+      { "name": "The Coupled Timeline Rule", "body": "相同时间段横向等分，不同相交时间段形成稳定耦合组；任何事项都不独占钟表时段。", "section": "layout" },
+      { "name": "The Work Preference Rule", "body": "非工作时间只作为网格底层参照，不绘制成不可用事件卡片。", "section": "colors" }
     ],
     "dos": [
       "Do 让每次保存、状态变化和删除都显示持久的中文结果反馈。",
       "Do 在任务元数据中始终写出状态文字，颜色仅作辅助。",
       "Do 保持桌面账本双栏和移动端上下排列的一致心智模型。",
-      "Do 将状态操作限制为领域状态机允许的集合。"
+      "Do 将状态操作限制为领域状态机允许的集合。",
+      "Do 让相同时间段等分、不同相交时间段稳定分列，并始终保留普通任务勾选和重复事项图标。"
     ],
     "donts": [
       "Don't 用大面积品牌色、渐变文字或装饰性玻璃效果打断长时间使用。",
       "Don't 用 9–10px 小字承载表单、状态或错误恢复信息。",
       "Don't 用未提交的乐观状态假装数据库写入成功。",
-      "Don't 把任务行、检查器和提示层层包装成同尺寸卡片。"
+      "Don't 把任务行、检查器和提示层层包装成同尺寸卡片。",
+      "Don't 把非工作时间画成事件卡片，或用占用、阻塞、不阻塞暗示时间段只能容纳一个事项。"
     ]
   }
 }

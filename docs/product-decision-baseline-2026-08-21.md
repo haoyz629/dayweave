@@ -2,6 +2,8 @@
 
 > 状态：已冻结，作为后续产品、架构、界面和测试任务的共同基线。文档或现有代码与本文件冲突时，以本文件为目标方向；若后续改变本文件中的边界，应同步修改 `CONTEXT.md`、`PRODUCT.md`、`DESIGN.md`、`frontend-requirements.md`、`jinxu-product-overview.md`、`ai-todolist-implementation-spec.md`、`README.md` 及相关 ADR。
 
+> 2026-09-03 更新说明：本文件保留为历史冻结快照。涉及时间块独占、固定日程阻塞、可用空档、工作时间硬限制、午休、任务间缓冲、重叠冲突和“排程”用户文案的条款，已由 `adr/0003-adopt-non-exclusive-daily-timeline.md` 取代；其余边界继续有效。
+
 ## 1. 本次替代的旧方向
 
 - 放弃首页内“输入框下方直接展示 AI 草案”以及固定左右对话/草案工作台。

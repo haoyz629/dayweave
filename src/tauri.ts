@@ -31,6 +31,7 @@ export type RecurringItemInput = {
   starts_on: string;
   ends_on: string | null;
   display_time: string | null;
+  display_duration_minutes: number | null;
   tags: string[];
 };
 
@@ -39,6 +40,7 @@ export type RecurringItem = RecurringItemInput & {
   status: RecurringItemStatus;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
 };
 
 export type RecurringOccurrenceOutcome = "completed" | "partial" | "not_completed";
@@ -49,6 +51,7 @@ export type RecurringOccurrence = {
   notes: string | null;
   occurrence_date: string;
   display_time: string | null;
+  display_duration_minutes: number | null;
   tags: string[];
   outcome: RecurringOccurrenceOutcome | null;
   review_notes: string | null;
@@ -80,6 +83,7 @@ export type Task = {
   created_at: string;
   updated_at: string;
   reserved_minutes: number;
+  scheduled_dates: string[];
   tags: string[];
 };
 
@@ -144,7 +148,6 @@ export type CalendarEvent = {
   starts_at: string;
   ends_at: string;
   is_all_day: boolean;
-  blocks_scheduling: boolean;
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
@@ -155,17 +158,12 @@ export type ManualCalendarEventInput = {
   starts_at: string;
   ends_at: string;
   is_all_day: boolean;
-  blocks_scheduling: boolean;
 };
 
 export type AvailabilitySettings = {
-  weekdays: number[];
-  workday_start: string;
-  workday_end: string;
-  lunch_start: string | null;
-  lunch_end: string | null;
-  lunch_reason: string;
-  buffer_minutes: number;
+    weekdays: number[];
+    workday_start: string;
+    workday_end: string;
 };
 
 export type RulePlanBlock = {
@@ -304,6 +302,18 @@ export function createManualTask(title: string) {
   return invokeDesktop<string>("create_manual_task", { title });
 }
 
+export function debugTimelineFixturesAvailable() {
+  return invokeDesktop<boolean>("debug_timeline_fixtures_available");
+}
+
+export function seedDebugTimelineLayoutFixtures() {
+  return invokeDesktop<string>("seed_debug_timeline_layout_fixtures");
+}
+
+export function clearDebugTimelineLayoutFixtures() {
+  return invokeDesktop<void>("clear_debug_timeline_layout_fixtures");
+}
+
 export function createManualTaskDraft(input: TaskDraftInput) {
   return invokeDesktop<TaskDraft>("create_manual_task_draft", { input });
 }
@@ -338,8 +348,8 @@ export function createRecurringItem(input: RecurringItemInput) {
   return invokeDesktop<RecurringItem>("create_recurring_item", { input });
 }
 
-export function listRecurringItems(includeEnded = false) {
-  return invokeDesktop<RecurringItem[]>("list_recurring_items", { includeEnded });
+export function listRecurringItems(includeEnded = false, includeDeleted = false) {
+  return invokeDesktop<RecurringItem[]>("list_recurring_items", { includeEnded, includeDeleted });
 }
 
 export function updateRecurringItem(itemId: string, input: RecurringItemInput) {
@@ -348,6 +358,18 @@ export function updateRecurringItem(itemId: string, input: RecurringItemInput) {
 
 export function setRecurringItemStatus(itemId: string, status: RecurringItemStatus) {
   return invokeDesktop<RecurringItem>("set_recurring_item_status", { itemId, status });
+}
+
+export function softDeleteRecurringItem(itemId: string, confirmed: boolean) {
+  return invokeDesktop<void>("soft_delete_recurring_item", { itemId, confirmed });
+}
+
+export function restoreRecurringItem(itemId: string) {
+  return invokeDesktop<void>("restore_recurring_item", { itemId });
+}
+
+export function permanentlyDeleteRecurringItem(itemId: string, confirmed: boolean) {
+  return invokeDesktop<void>("permanently_delete_recurring_item", { itemId, confirmed });
 }
 
 export function listRecurringOccurrences(occurrenceDate: string) {
@@ -532,6 +554,10 @@ export function startConfirmedPlanAdjustment(planDate: string) {
   return invokeDesktop<RulePlanPreview>("start_confirmed_plan_adjustment", { planDate });
 }
 
+export function regenerateConfirmedPlanAdjustment(planDate: string) {
+  return invokeDesktop<RulePlanPreview>("regenerate_confirmed_plan_adjustment", { planDate });
+}
+
 export function updateRulePlanDraft(preview: RulePlanPreview) {
   return invokeDesktop<RulePlanPreview>("update_rule_plan_draft", {
     previewId: preview.preview_id,
@@ -555,6 +581,10 @@ export function getDaySchedule(planDate: string) {
 
 export function saveExecutionCapture(captureDate: string, input: ExecutionCaptureInput) {
   return invokeDesktop<void>("save_execution_capture", { captureDate, input });
+}
+
+export function clearExecutionCapture(captureDate: string, planBlockId: string) {
+  return invokeDesktop<void>("clear_execution_capture", { captureDate, planBlockId });
 }
 
 export function saveReviewEntry(reviewDate: string, input: ReviewEntryInput) {

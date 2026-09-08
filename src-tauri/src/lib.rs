@@ -48,6 +48,23 @@ fn create_manual_task(state: State<'_, AppState>, title: String) -> Result<Strin
 }
 
 #[tauri::command]
+fn debug_timeline_fixtures_available() -> bool {
+    cfg!(debug_assertions)
+}
+
+#[tauri::command]
+fn seed_debug_timeline_layout_fixtures(state: State<'_, AppState>) -> Result<String, String> {
+    if !cfg!(debug_assertions) { return Err("布局样例仅在 debug 包中可用".into()); }
+    with_database(&state, |database| database.seed_debug_timeline_layout_fixtures())
+}
+
+#[tauri::command]
+fn clear_debug_timeline_layout_fixtures(state: State<'_, AppState>) -> Result<(), String> {
+    if !cfg!(debug_assertions) { return Err("布局样例仅在 debug 包中可用".into()); }
+    with_database(&state, |database| database.clear_debug_timeline_layout_fixtures())
+}
+
+#[tauri::command]
 fn create_manual_task_draft(
     state: State<'_, AppState>,
     input: TaskDraftInput,
@@ -112,8 +129,9 @@ fn create_recurring_item(
 fn list_recurring_items(
     state: State<'_, AppState>,
     include_ended: bool,
+    include_deleted: bool,
 ) -> Result<Vec<RecurringItemDto>, String> {
-    with_database(&state, |database| database.list_recurring_items(include_ended))
+    with_database(&state, |database| database.list_recurring_items(include_ended, include_deleted))
 }
 
 #[tauri::command]
@@ -132,6 +150,29 @@ fn set_recurring_item_status(
     status: String,
 ) -> Result<RecurringItemDto, String> {
     with_database(&state, |database| database.set_recurring_item_status(&item_id, &status))
+}
+
+#[tauri::command]
+fn soft_delete_recurring_item(
+    state: State<'_, AppState>,
+    item_id: String,
+    confirmed: bool,
+) -> Result<(), String> {
+    with_database(&state, |database| database.soft_delete_recurring_item(&item_id, confirmed))
+}
+
+#[tauri::command]
+fn restore_recurring_item(state: State<'_, AppState>, item_id: String) -> Result<(), String> {
+    with_database(&state, |database| database.restore_recurring_item(&item_id))
+}
+
+#[tauri::command]
+fn permanently_delete_recurring_item(
+    state: State<'_, AppState>,
+    item_id: String,
+    confirmed: bool,
+) -> Result<(), String> {
+    with_database(&state, |database| database.permanently_delete_recurring_item(&item_id, confirmed))
 }
 
 #[tauri::command]
@@ -608,6 +649,14 @@ fn start_confirmed_plan_adjustment(
 }
 
 #[tauri::command]
+fn regenerate_confirmed_plan_adjustment(
+    state: State<'_, AppState>,
+    plan_date: String,
+) -> Result<RulePlanPreview, String> {
+    with_database(&state, |database| database.regenerate_confirmed_plan_adjustment(&plan_date))
+}
+
+#[tauri::command]
 fn update_rule_plan_draft(
     state: State<'_, AppState>,
     preview_id: String,
@@ -652,6 +701,15 @@ fn save_execution_capture(
     input: ExecutionCaptureInput,
 ) -> Result<(), String> {
     with_database(&state, |database| database.save_execution_capture(&capture_date, input))
+}
+
+#[tauri::command]
+fn clear_execution_capture(
+    state: State<'_, AppState>,
+    capture_date: String,
+    plan_block_id: String,
+) -> Result<(), String> {
+    with_database(&state, |database| database.clear_execution_capture(&capture_date, &plan_block_id))
 }
 
 #[tauri::command]
@@ -734,6 +792,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             create_manual_task,
+            debug_timeline_fixtures_available,
+            seed_debug_timeline_layout_fixtures,
+            clear_debug_timeline_layout_fixtures,
             create_manual_task_draft,
             save_task_draft,
             list_task_drafts,
@@ -744,6 +805,9 @@ pub fn run() {
             list_recurring_items,
             update_recurring_item,
             set_recurring_item_status,
+            soft_delete_recurring_item,
+            restore_recurring_item,
+            permanently_delete_recurring_item,
             list_recurring_occurrences,
             save_recurring_occurrence_review,
             get_task,
@@ -788,11 +852,13 @@ pub fn run() {
             preview_rule_based_plan,
             get_rule_plan_draft,
             start_confirmed_plan_adjustment,
+            regenerate_confirmed_plan_adjustment,
             update_rule_plan_draft,
             discard_rule_plan_draft,
             confirm_rule_based_plan,
             get_day_schedule,
             save_execution_capture,
+            clear_execution_capture,
             save_review_entry,
             complete_task_from_review,
             preview_ai_proposal,

@@ -74,7 +74,7 @@ pub fn call_task_assistant(
     task_candidates: &[AiTaskCandidateDto],
 ) -> AppResult<(AiGeneratedResult, String)> {
     let candidate_json = serde_json::to_string(task_candidates)?;
-    let system = format!("你是今序的任务整理助手。当前时区为 Asia/Shanghai（UTC+8）。创建或修改任务时只生成 drafts；安排日计划、完成任务或软删除任务时可以生成一个 proposal。不要声称已经创建、保存、排程、完成或删除正式数据。信息不足时回复澄清问题，drafts 为空且 proposal 为 null。修改任务时 draft_kind 必须是 update，并且 target_task_id 只能取自候选任务；创建时 draft_kind 是 create 且 target_task_id 为 null。完成和删除的 task_id 也只能取自候选任务。删除必须给出精确目标数量，后续仍由用户二次确认。日期必须为 YYYY-MM-DD，时刻必须是含 +08:00 的 RFC3339；任务草案中的时刻字段只用 HH:MM。一次最多返回 10 条草案，且 drafts 与 proposal 不要同时非空。候选任务（最多 20 项，仅含必要字段）：{candidate_json}");
+    let system = format!("你是今序的任务整理助手。当前时区为 Asia/Shanghai（UTC+8）。创建或修改任务时只生成 drafts；安排日计划、完成任务或软删除任务时可以生成一个 proposal。不要声称已经创建、保存、排程、完成或删除正式数据。信息不足时回复澄清问题，drafts 为空且 proposal 为 null。修改任务时 draft_kind 必须是 update，并且 target_task_id 只能取自候选任务；创建时 draft_kind 是 create 且 target_task_id 为 null。完成和删除的 task_id 也只能取自候选任务。删除必须给出精确目标数量，后续仍由用户二次确认。日期必须为 YYYY-MM-DD，时刻必须是含 +08:00 的 RFC3339；任务草稿中的时刻字段只用 HH:MM。一次最多返回 10 条草稿，且 drafts 与 proposal 不要同时非空。候选任务（最多 20 项，仅含必要字段）：{candidate_json}");
     let conversational_messages: Vec<Value> = std::iter::once(json!({ "role": "system", "content": system }))
         .chain(messages.iter().filter(|message| message.role != "system").map(|message| {
             json!({ "role": message.role, "content": message.content })
@@ -118,15 +118,15 @@ pub fn call_task_assistant(
     }
     let output = extract_structured_text(&response_json, &settings.api_type)?;
     let parsed: AiGeneratedResult = serde_json::from_str(&output)
-        .map_err(|error| AppError::Schema(format!("AI 结构化结果不符合今序草案格式：{error}")))?;
+        .map_err(|error| AppError::Schema(format!("AI 结构化结果不符合今序草稿格式：{error}")))?;
     if parsed.assistant_message.trim().is_empty() {
         return Err(AppError::Schema("AI 回复文字不能为空".into()));
     }
     if parsed.drafts.len() > 10 {
-        return Err(AppError::Schema("AI 一次返回的草案超过 10 条".into()));
+        return Err(AppError::Schema("AI 一次返回的草稿超过 10 条".into()));
     }
     if !parsed.drafts.is_empty() && parsed.proposal.is_some() {
-        return Err(AppError::Schema("AI 不能在一次回复中同时提交任务草案和操作提议".into()));
+        return Err(AppError::Schema("AI 不能在一次回复中同时提交任务草稿和操作提议".into()));
     }
     if let Some(proposal) = &parsed.proposal { proposal.validate_shape()?; }
     Ok((parsed, output))
@@ -138,7 +138,7 @@ pub fn test_connection(settings: &StoredAiConnectionSettings) -> AppResult<Strin
         conversation_id: "connection-test".into(),
         run_id: None,
         role: "user".into(),
-        content: "这是连接测试。请简短回复连接可用，不要生成任务草案。".into(),
+        content: "这是连接测试。请简短回复连接可用，不要生成任务草稿。".into(),
         stream_status: "complete".into(),
         created_at: String::new(),
         updated_at: String::new(),

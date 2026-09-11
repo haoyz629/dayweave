@@ -2310,7 +2310,15 @@ function ExecutionCaptureFields({ draft, disabled, onChange }: {
     {showNote ? <label className="floating-execution-note"><span>备注<small>可选</small></span><textarea ref={noteRef} rows={2} maxLength={500} placeholder={draft.result === "partial" ? "完成了哪些，接下来还要做什么？" : draft.result === "not_completed" ? "遇到了什么问题？" : "记下一句，复盘时回看"} value={draft.note} disabled={disabled} onChange={(event) => onChange({ note: event.target.value })} /></label> : draft.result === "completed" ? <button type="button" className="execution-add-note" disabled={disabled} aria-expanded={false} onClick={() => setNoteOpen(true)}><Icon name="plus" size={13} />添加备注</button> : null}
   </div>;
 }
-type PlanDraftTimeEdit = { blockIndex: number; sourceBlockId?: string; starts_at: string; ends_at: string; error: string };
+type PlanDraftTimeEdit = {
+  blockIndex: number;
+  sourceBlockId?: string;
+  starts_at: string;
+  ends_at: string;
+  original_starts_at: string;
+  original_ends_at: string;
+  error: string;
+};
 type TimelineTooltipContent = {
   kind: "任务安排" | "计划草案" | "固定日程" | "重复事项" | "待安排任务" | "非工作时间";
   title: string;
@@ -2569,11 +2577,16 @@ function TimeRangeRail({
     event.preventDefault();
     const startBounds = startHandle.getBoundingClientRect();
     const endBounds = endHandle.getBoundingClientRect();
-    const edge = closestTimeRangeEdge(
-      event.clientX,
-      startBounds.left + startBounds.width / 2,
-      endBounds.left + endBounds.width / 2
-    );
+    const clickedEndpoint = event.target instanceof Element ? event.target.closest<HTMLElement>(".time-rail-endpoint-card") : null;
+    const edge = clickedEndpoint?.classList.contains("start")
+      ? "start"
+      : clickedEndpoint?.classList.contains("end")
+        ? "end"
+        : closestTimeRangeEdge(
+          event.clientX,
+          startBounds.left + startBounds.width / 2,
+          endBounds.left + endBounds.width / 2
+        );
     const handleBounds = edge === "start" ? startBounds : endBounds;
     const handleCenter = handleBounds.left + handleBounds.width / 2;
     const trackBounds = track.getBoundingClientRect();
@@ -2648,8 +2661,9 @@ function BlockEditorTimeRangeRail({
   describedBy?: string;
 }) {
   const railStep = 5;
-  const collapsedSideWidth = 31;
-  const collapsedEndOffset = 100 - collapsedSideWidth;
+  const collapsedStartWidth = 31;
+  const collapsedEndWidth = 31;
+  const collapsedEndOffset = 100 - collapsedEndWidth;
   const trackRef = useRef<HTMLDivElement>(null);
   const startHandleRef = useRef<HTMLSpanElement>(null);
   const endHandleRef = useRef<HTMLSpanElement>(null);
@@ -2657,6 +2671,7 @@ function BlockEditorTimeRangeRail({
   const dragRef = useRef<{ pointerId: number; edge: TimeRangeEdge; grabOffset: number; separated: boolean } | null>(null);
   const presentationRef = useRef<ReturnType<typeof focusedTimeRangePresentation> | null>(null);
   const [draggingHandle, setDraggingHandle] = useState<TimeRangeEdge | null>(null);
+  const [activeEdge, setActiveEdge] = useState<TimeRangeEdge | null>(null);
   const startMinute = clockMinutes(start);
   const endMinute = clockMinutes(end);
   const safeStartMinute = Math.max(minMinute, Math.min(startMinute, maxMinute - minimumDuration, endMinute - minimumDuration));
@@ -2687,7 +2702,7 @@ function BlockEditorTimeRangeRail({
       { start: safeStartMinute, end: safeEndMinute },
       minMinute,
       maxMinute,
-      4 * 60,
+      6 * 60,
       railStep
     );
   }
@@ -2702,7 +2717,7 @@ function BlockEditorTimeRangeRail({
     : [visibleWindow!];
   const visibleSegments = segments.filter((segment) => visibleWindows.some((window) => segment.end > window.start && segment.start < window.end));
   const continuousSpan = visibleWindow ? Math.max(minimumDuration, visibleWindow.end - visibleWindow.start) : 0;
-  const handlesAreTight = Boolean(visibleWindow && (safeEndMinute - safeStartMinute) / continuousSpan <= 0.08);
+  const handlesAreTight = Boolean(visibleWindow && (safeEndMinute - safeStartMinute) / continuousSpan <= 0.12);
   const handlesAreSeparated = draggingHandle ? Boolean(dragRef.current?.separated) : handlesAreTight;
   const startSliderMax = Math.min(startRailBounds.end, safeEndMinute - minimumDuration);
   const endSliderMin = Math.max(endRailBounds.start, safeStartMinute + minimumDuration);
@@ -2719,12 +2734,12 @@ function BlockEditorTimeRangeRail({
       minute,
       edge === "start" ? collapsedPresentation.startWindow : collapsedPresentation.endWindow,
       edge === "start" ? 0 : collapsedEndOffset,
-      collapsedSideWidth
+      edge === "start" ? collapsedStartWidth : collapsedEndWidth
     );
   }
 
   function refreshPresentation(next: { start: number; end: number }) {
-    presentationRef.current = focusedTimeRangePresentation(next, minMinute, maxMinute, 4 * 60, railStep);
+    presentationRef.current = focusedTimeRangePresentation(next, minMinute, maxMinute, 6 * 60, railStep);
   }
 
   function emitRange(next: { start: number; end: number }, recenter = false) {
@@ -2804,8 +2819,8 @@ function BlockEditorTimeRangeRail({
     if (!collapsedPresentation) return visibleWindow!.start + ratio * continuousSpan;
     const window = edge === "start" ? collapsedPresentation.startWindow : collapsedPresentation.endWindow;
     const localRatio = edge === "start"
-      ? Math.max(0, Math.min(1, ratio / (collapsedSideWidth / 100)))
-      : Math.max(0, Math.min(1, (ratio - collapsedEndOffset / 100) / (collapsedSideWidth / 100)));
+      ? Math.max(0, Math.min(1, ratio / (collapsedStartWidth / 100)))
+      : Math.max(0, Math.min(1, (ratio - collapsedEndOffset / 100) / (collapsedEndWidth / 100)));
     return window.start + localRatio * (window.end - window.start);
   }
 
@@ -2818,20 +2833,25 @@ function BlockEditorTimeRangeRail({
     const trackBounds = track.getBoundingClientRect();
     if (trackBounds.width <= 0) return;
     const pointerRatio = (event.clientX - trackBounds.left) / trackBounds.width;
-    if (collapsedPresentation && pointerRatio > collapsedSideWidth / 100 && pointerRatio < collapsedEndOffset / 100) return;
+    if (collapsedPresentation && pointerRatio > collapsedStartWidth / 100 && pointerRatio < collapsedEndOffset / 100) return;
     event.preventDefault();
     const startBounds = startHandle.getBoundingClientRect();
     const endBounds = endHandle.getBoundingClientRect();
-    const edge = closestTimeRangeEdge(
-      event.clientX,
-      startBounds.left + startBounds.width / 2,
-      endBounds.left + endBounds.width / 2
-    );
+    const clickedEndpoint = event.target instanceof Element ? event.target.closest<HTMLElement>(".time-rail-endpoint-card") : null;
+    const edge = clickedEndpoint?.classList.contains("start")
+      ? "start"
+      : clickedEndpoint?.classList.contains("end")
+        ? "end"
+        : closestTimeRangeEdge(
+          event.clientX,
+          startBounds.left + startBounds.width / 2,
+          endBounds.left + endBounds.width / 2
+        );
     const handleBounds = edge === "start" ? startBounds : endBounds;
     const handleCenter = handleBounds.left + handleBounds.width / 2;
     const logicalMinute = edge === "start" ? safeStartMinute : safeEndMinute;
     const logicalCenter = trackBounds.left + edgePosition(edge, logicalMinute) / 100 * trackBounds.width;
-    const grabOffset = Math.abs(event.clientX - handleCenter) <= 14 ? event.clientX - logicalCenter : 0;
+    const grabOffset = clickedEndpoint || Math.abs(event.clientX - handleCenter) <= 14 ? event.clientX - logicalCenter : 0;
     dragRef.current = { pointerId: event.pointerId, edge, grabOffset, separated: handlesAreTight };
     setDraggingHandle(edge);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -2874,35 +2894,61 @@ function BlockEditorTimeRangeRail({
     </Fragment>;
   }
 
-  const omittedLabel = collapsedPresentation
-    ? `折叠 ${Math.floor(collapsedPresentation.omittedMinutes / 60)}h${collapsedPresentation.omittedMinutes % 60 === 0 ? "" : ` ${collapsedPresentation.omittedMinutes % 60}m`}`
-    : "";
+  const durationMinutes = safeEndMinute - safeStartMinute;
+  const durationHours = Math.floor(durationMinutes / 60);
+  const durationText = `${durationHours > 0 ? `${durationHours}h` : ""}${durationMinutes % 60 > 0 ? `${durationMinutes % 60}m` : ""}`;
+  const highlightedEdge = draggingHandle ?? activeEdge;
+  const continuousScaleMarks = (() => {
+    if (!visibleWindow) return [];
+    const position = (minute: number) => windowPosition(minute, visibleWindow);
+    if (durationMinutes <= 30) {
+      return [
+        { key: "window-start", minute: visibleWindow.start, label: minutesClock(visibleWindow.start), tone: "boundary" },
+        { key: "range", minute: Math.round((safeStartMinute + safeEndMinute) / 2), label: `${minutesClock(safeStartMinute)}–${minutesClock(safeEndMinute)}`, tone: "range" },
+        { key: "window-end", minute: visibleWindow.end, label: minutesClock(visibleWindow.end), tone: "boundary" }
+      ].map((mark) => ({ ...mark, position: position(mark.minute) }));
+    }
+    const marks = new Map<number, { key: string; minute: number; label: string; tone: string }>();
+    const add = (key: string, minute: number, label: string, tone: string) => marks.set(minute, { key, minute, label, tone });
+    add("window-start", visibleWindow.start, minutesClock(visibleWindow.start), "boundary");
+    add("window-end", visibleWindow.end, minutesClock(visibleWindow.end), "boundary");
+    add("range-start", safeStartMinute, minutesClock(safeStartMinute), "range-start");
+    add("range-end", safeEndMinute, minutesClock(safeEndMinute), "range-end");
+    if (durationMinutes >= 120) {
+      const afterStart = Math.ceil((safeStartMinute + 30) / 60) * 60;
+      const beforeEnd = Math.floor((safeEndMinute - 30) / 60) * 60;
+      if (afterStart < safeEndMinute) add("after-start", afterStart, minutesClock(afterStart), "context");
+      if (beforeEnd > safeStartMinute) add("before-end", beforeEnd, minutesClock(beforeEnd), "context");
+    }
+    const ordered = [...marks.values()].sort((first, second) => first.minute - second.minute);
+    if (durationMinutes >= 180) {
+      ordered.push({ key: "range-gap", minute: Math.round((safeStartMinute + safeEndMinute) / 2), label: "···", tone: "gap" });
+      ordered.sort((first, second) => first.minute - second.minute);
+    }
+    return ordered.map((mark) => ({ ...mark, position: position(mark.minute) }));
+  })();
 
   return <div className="time-range-rail block-editor">
     <div className="time-range-values block-editor-values" aria-label="选择开始和结束时间">
-      <label><span><i className="time-range-marker start" aria-hidden="true" />开始</span><input type="text" inputMode="numeric" autoComplete="off" spellCheck={false} disabled={disabled} value={inputValues.start} aria-label="输入开始时间" aria-describedby={describedBy} onFocus={(event) => { editingInputRef.current = "start"; event.currentTarget.select(); }} onChange={(event) => setInputValues((current) => ({ ...current, start: event.target.value }))} onKeyDown={(event) => handleInputKeyDown(event, "start")} onBlur={() => { commitInput("start"); editingInputRef.current = null; }} /></label>
+      <label className={highlightedEdge === "start" ? "is-active" : ""}><span><i className="time-range-marker start" aria-hidden="true" />开始</span><input type="text" inputMode="numeric" autoComplete="off" spellCheck={false} disabled={disabled} value={inputValues.start} aria-label="输入开始时间" aria-describedby={describedBy} onFocus={(event) => { editingInputRef.current = "start"; setActiveEdge("start"); event.currentTarget.select(); }} onChange={(event) => setInputValues((current) => ({ ...current, start: event.target.value }))} onKeyDown={(event) => handleInputKeyDown(event, "start")} onBlur={() => { commitInput("start"); editingInputRef.current = null; setActiveEdge(null); }} /></label>
       <span className="time-range-connector" aria-hidden="true"><Icon name="chevron-right" size={14} /></span>
-      <label><span><i className="time-range-marker end" aria-hidden="true" />结束</span><input type="text" inputMode="numeric" autoComplete="off" spellCheck={false} disabled={disabled} value={inputValues.end} aria-label="输入结束时间" aria-describedby={describedBy} onFocus={(event) => { editingInputRef.current = "end"; event.currentTarget.select(); }} onChange={(event) => setInputValues((current) => ({ ...current, end: event.target.value }))} onKeyDown={(event) => handleInputKeyDown(event, "end")} onBlur={() => { commitInput("end"); editingInputRef.current = null; }} /></label>
+      <label className={highlightedEdge === "end" ? "is-active" : ""}><span><i className="time-range-marker end" aria-hidden="true" />结束</span><input type="text" inputMode="numeric" autoComplete="off" spellCheck={false} disabled={disabled} value={inputValues.end} aria-label="输入结束时间" aria-describedby={describedBy} onFocus={(event) => { editingInputRef.current = "end"; setActiveEdge("end"); event.currentTarget.select(); }} onChange={(event) => setInputValues((current) => ({ ...current, end: event.target.value }))} onKeyDown={(event) => handleInputKeyDown(event, "end")} onBlur={() => { commitInput("end"); editingInputRef.current = null; setActiveEdge(null); }} /></label>
     </div>
     {describedBy && <small id={describedBy} className="plan-draft-sync-note">手写 1 分钟 · 时间轴与方向键 5 分钟 · 最短 15 分钟</small>}
     <div className="time-rail-surface">
       {collapsedPresentation ? <div className="time-rail-scale collapsed" aria-hidden="true">
-        <i>{minutesClock(collapsedPresentation.startWindow.start)}</i>
-        <strong>{minutesClock(safeStartMinute)}</strong>
-        <i>{minutesClock(collapsedPresentation.startWindow.end)}</i>
-        <em>折叠</em>
-        <i>{minutesClock(collapsedPresentation.endWindow.start)}</i>
-        <strong className="end">{minutesClock(safeEndMinute)}</strong>
-        <i>{minutesClock(collapsedPresentation.endWindow.end)}</i>
-      </div> : <div className="time-rail-scale" aria-hidden="true"><span>{minutesClock(visibleWindow!.start)}</span><span>{minutesClock(Math.round((visibleWindow!.start + continuousSpan / 2) / railStep) * railStep)}</span><span>{minutesClock(visibleWindow!.end)}</span></div>}
-      <div className={`time-rail-track-wrap${collapsedPresentation ? " is-collapsed" : ""}${handlesAreSeparated ? " handles-are-tight" : ""}${draggingHandle ? ` dragging-${draggingHandle}` : ""}${disabled ? " is-disabled" : ""}`} onPointerDown={startPointerDrag} onPointerMove={movePointerDrag} onPointerUp={finishPointerDrag} onPointerCancel={finishPointerDrag} onLostPointerCapture={finishPointerDrag}>
+        <span className="time-rail-scale-zone start"><i>{minutesClock(collapsedPresentation.startWindow.start)}</i><strong>{minutesClock(safeStartMinute)}</strong><i>{minutesClock(collapsedPresentation.startWindow.end)}</i></span>
+        <em>···</em>
+        <span className="time-rail-scale-zone end"><i>{minutesClock(collapsedPresentation.endWindow.start)}</i><strong>{minutesClock(safeEndMinute)}</strong><i>{minutesClock(collapsedPresentation.endWindow.end)}</i></span>
+      </div> : <div className="time-rail-scale continuous" aria-hidden="true">{continuousScaleMarks.map((mark) => <span key={mark.key} className={`${mark.tone}${mark.position <= 1 ? " at-start" : mark.position >= 99 ? " at-end" : ""}`} style={{ left: `${mark.position}%` }}>{mark.label}</span>)}</div>}
+      <div className={`time-rail-track-wrap${collapsedPresentation ? " is-collapsed" : " is-continuous"}${handlesAreSeparated ? " handles-are-tight" : ""}${highlightedEdge ? ` active-${highlightedEdge}` : ""}${draggingHandle ? ` dragging-${draggingHandle}` : ""}${disabled ? " is-disabled" : ""}`} onPointerDown={startPointerDrag} onPointerMove={movePointerDrag} onPointerUp={finishPointerDrag} onPointerCancel={finishPointerDrag} onLostPointerCapture={finishPointerDrag}>
         <div ref={trackRef} className="time-rail-track" aria-hidden="true">
           {collapsedPresentation ? <>
-            <span className="time-rail-break" aria-hidden="true"><span>{omittedLabel}</span></span>
-          </> : renderTrackWindow(visibleWindow!, 0, 100, { start: safeStartMinute, end: safeEndMinute })}
+            <span className="time-rail-break" aria-hidden="true"><span>{durationText}</span></span>
+          </> : <>{renderTrackWindow(visibleWindow!, 0, 100, { start: safeStartMinute, end: safeEndMinute })}<span className="time-rail-duration-badge" style={{ left: `${windowPosition((safeStartMinute + safeEndMinute) / 2, visibleWindow!)}%` }}>{durationText}</span></>}
         </div>
-        <input className="time-rail-range start" type="range" min={startRailBounds.start} max={startSliderMax} step={railStep} value={safeStartMinute} disabled={disabled} aria-label={`调整开始时间，${railStep} 分钟步进，最短 ${minimumDuration} 分钟`} aria-valuetext={minutesClock(safeStartMinute)} aria-describedby={describedBy} onChange={(event) => updateEdge("start", Number(event.target.value))} />
-        <input className="time-rail-range end" type="range" min={endSliderMin} max={endRailBounds.end} step={railStep} value={safeEndMinute} disabled={disabled} aria-label={`调整结束时间，${railStep} 分钟步进，最短 ${minimumDuration} 分钟`} aria-valuetext={minutesClock(safeEndMinute)} aria-describedby={describedBy} onChange={(event) => updateEdge("end", Number(event.target.value))} />
+        <input className="time-rail-range start" type="range" min={startRailBounds.start} max={startSliderMax} step={railStep} value={safeStartMinute} disabled={disabled} aria-label={`调整开始时间，${railStep} 分钟步进，最短 ${minimumDuration} 分钟`} aria-valuetext={minutesClock(safeStartMinute)} aria-describedby={describedBy} onFocus={() => setActiveEdge("start")} onBlur={() => setActiveEdge(null)} onChange={(event) => updateEdge("start", Number(event.target.value))} />
+        <input className="time-rail-range end" type="range" min={endSliderMin} max={endRailBounds.end} step={railStep} value={safeEndMinute} disabled={disabled} aria-label={`调整结束时间，${railStep} 分钟步进，最短 ${minimumDuration} 分钟`} aria-valuetext={minutesClock(safeEndMinute)} aria-describedby={describedBy} onFocus={() => setActiveEdge("end")} onBlur={() => setActiveEdge(null)} onChange={(event) => updateEdge("end", Number(event.target.value))} />
         {collapsedPresentation ? <div className="time-rail-endpoint-cards" aria-hidden="true">
           <span ref={startHandleRef} className="time-rail-endpoint-card start"><span><i className="time-range-marker start" />{minutesClock(safeStartMinute)}</span><i className="time-rail-grip"><b /><b /></i></span>
           <span ref={endHandleRef} className="time-rail-endpoint-card end"><i className="time-rail-grip"><b /><b /></i><span>{minutesClock(safeEndMinute)}<i className="time-range-marker end" /></span></span>
@@ -3517,10 +3563,14 @@ function TodayPage({
     timelineSelectionAnchorRef.current = trigger;
     setTimelineTooltip(null);
     setSelection({ kind: "draft", id: String(blockIndex) });
+    const startsAt = timeInputValue(block.starts_at);
+    const endsAt = timeInputValue(block.ends_at);
     setPlanDraftTimeEdit({
       blockIndex,
-      starts_at: timeInputValue(block.starts_at),
-      ends_at: timeInputValue(block.ends_at),
+      starts_at: startsAt,
+      ends_at: endsAt,
+      original_starts_at: startsAt,
+      original_ends_at: endsAt,
       error: ""
     });
   }
@@ -3528,11 +3578,25 @@ function TodayPage({
   function adjustSelectedBlockTime() {
     if (!selectedBlock || selectedBlock.execution_status !== "planned" || selectedBlock.review || isPastDate || busy || !["open", "scheduled"].includes(selectedBlock.task_status)) return;
     setExecutionDraft(null);
+    const startsAt = timeInputValue(selectedBlock.starts_at);
+    const endsAt = timeInputValue(selectedBlock.ends_at);
     setPlanDraftTimeEdit({
       blockIndex: -1,
       sourceBlockId: selectedBlock.id,
-      starts_at: timeInputValue(selectedBlock.starts_at),
-      ends_at: timeInputValue(selectedBlock.ends_at),
+      starts_at: startsAt,
+      ends_at: endsAt,
+      original_starts_at: startsAt,
+      original_ends_at: endsAt,
+      error: ""
+    });
+  }
+
+  function resetPlanDraftTime() {
+    if (!planDraftTimeEdit || busy) return;
+    setPlanDraftTimeEdit({
+      ...planDraftTimeEdit,
+      starts_at: planDraftTimeEdit.original_starts_at,
+      ends_at: planDraftTimeEdit.original_ends_at,
       error: ""
     });
   }
@@ -3674,11 +3738,15 @@ function TodayPage({
   function removeSelectedBlockFromToday() {
     if (!selectedBlock || selectedBlock.execution_status !== "planned" || selectedBlock.review || isPastDate || busy || !["open", "scheduled"].includes(selectedBlock.task_status)) return;
     setExecutionDraft(null);
+    const startsAt = timeInputValue(selectedBlock.starts_at);
+    const endsAt = timeInputValue(selectedBlock.ends_at);
     void removePlanDraftBlock({
       blockIndex: -1,
       sourceBlockId: selectedBlock.id,
-      starts_at: timeInputValue(selectedBlock.starts_at),
-      ends_at: timeInputValue(selectedBlock.ends_at),
+      starts_at: startsAt,
+      ends_at: endsAt,
+      original_starts_at: startsAt,
+      original_ends_at: endsAt,
       error: ""
     });
   }
@@ -3730,10 +3798,14 @@ function TodayPage({
         if (trigger) timelineSelectionTriggerRef.current = trigger;
         timelineSelectionAnchorRef.current = null;
         setSelection({ kind: "draft", id: String(blockIndex) });
+        const startsAt = timeInputValue(saved.blocks[blockIndex].starts_at);
+        const endsAt = timeInputValue(saved.blocks[blockIndex].ends_at);
         setPlanDraftTimeEdit({
           blockIndex,
-          starts_at: timeInputValue(saved.blocks[blockIndex].starts_at),
-          ends_at: timeInputValue(saved.blocks[blockIndex].ends_at),
+          starts_at: startsAt,
+          ends_at: endsAt,
+          original_starts_at: startsAt,
+          original_ends_at: endsAt,
           error: ""
         });
         revealDraftBlock(blockIndex);
@@ -3996,17 +4068,17 @@ function TodayPage({
             </div>
             <div ref={timelineScrollRef} className="timeline-scroll" tabIndex={0} aria-label="24 小时时间线" onScroll={handleTimelineScroll} onWheel={pauseTimelineFollowing} onTouchMove={pauseTimelineFollowing} onPointerDown={(event) => { if (event.currentTarget === event.target) pauseTimelineFollowing(); }} onKeyDown={handleTimelineScrollKey}>
               {selectedDate === today && showReturnToNow && <div className="return-to-now-layer"><button type="button" onClick={resumeTimelineFollowing}><Icon name="clock" size={14} />回到现在</button></div>}
-              {selection && <div className={`timeline-floating-layer${planDraftTimeEdit ? " is-time-editor" : ""}`}><section id="timeline-context-panel" ref={timelineFloatingPanelRef} className={`timeline-floating-panel${planDraftTimeEdit ? " plan-draft-editor" : ""}`} role="dialog" aria-modal={planDraftTimeEdit ? true : undefined} aria-label={planDraftTimeEdit && (selectedDraftBlock || selectedBlock) ? `${selectedDraftBlock?.task_title ?? selectedBlock?.task_title}时间调整` : selectedBlock ? `${selectedBlock.task_title}本次执行记录` : selectedEvent ? `${selectedEvent.title}日程详情` : "时间线详情"} aria-live="polite" tabIndex={-1} onKeyDown={(event) => { if (event.key === "Escape") closeTimelinePanel(); }}>
+              {selection && <div className={`timeline-floating-layer${planDraftTimeEdit ? " is-time-editor" : selectedBlock ? " is-block-editor" : ""}`}><section id="timeline-context-panel" ref={timelineFloatingPanelRef} className={`timeline-floating-panel${planDraftTimeEdit ? " plan-draft-editor" : selectedBlock ? " task-block-editor" : ""}`} role="dialog" aria-modal={planDraftTimeEdit || selectedBlock ? true : undefined} aria-label={planDraftTimeEdit && (selectedDraftBlock || selectedBlock) ? `${selectedDraftBlock?.task_title ?? selectedBlock?.task_title}时间调整` : selectedBlock ? `${selectedBlock.task_title}本次执行记录` : selectedEvent ? `${selectedEvent.title}日程详情` : "时间线详情"} aria-live="polite" tabIndex={-1} onKeyDown={(event) => { if (event.key === "Escape") closeTimelinePanel(); }}>
                 {planDraftTimeEdit && (selectedDraftBlock || selectedBlock) ? <>
-                  <header><div className="timeline-panel-heading">{planDraftTimeEdit.sourceBlockId && <button type="button" className="timeline-panel-back" aria-label="返回任务块详情" title="返回任务块详情" disabled={busy} onClick={returnToSelectedBlockDetails}><Icon name="chevron-left" size={16} /></button>}<div className="timeline-panel-heading-copy"><strong>调整时间</strong><small>{selectedDraftBlock?.task_title ?? selectedBlock?.task_title}</small></div></div><button type="button" aria-label="关闭时间调整面板" onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></header>
+                  <header><div className="timeline-panel-heading">{planDraftTimeEdit.sourceBlockId && <button type="button" className="timeline-panel-back" aria-label="返回任务块详情" title="返回任务块详情" disabled={busy} onClick={returnToSelectedBlockDetails}><Icon name="chevron-left" size={16} /></button>}<div className="timeline-panel-heading-copy"><strong>调整时间</strong><small>{selectedDraftBlock?.task_title ?? selectedBlock?.task_title}</small></div></div>{(planDraftTimeEdit.starts_at !== planDraftTimeEdit.original_starts_at || planDraftTimeEdit.ends_at !== planDraftTimeEdit.original_ends_at) && <button type="button" className="timeline-time-reset" aria-label="重置为调整前的时间" title="重置为调整前的时间" disabled={busy} onClick={resetPlanDraftTime}><Icon name="restore" size={14} />重置时间</button>}<button type="button" aria-label="关闭时间调整面板" onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></header>
                   <form className="plan-draft-time-form" noValidate onSubmit={(event) => void savePlanDraftTime(event)}>
                     <div className="plan-draft-time-fields"><BlockEditorTimeRangeRail start={planDraftTimeEdit.starts_at} end={planDraftTimeEdit.ends_at} segments={nonWorkingTimeSegments} disabled={busy} describedBy="plan-draft-sync-note" minimumDuration={MIN_TASK_BLOCK_MINUTES} onChange={(next) => setPlanDraftTimeEdit({ ...planDraftTimeEdit, starts_at: next.start, ends_at: next.end, error: "" })} /></div>
                     {planDraftTimeEdit.error && <span className="plan-draft-edit-error" role="alert">{planDraftTimeEdit.error}</span>}
                     <footer><button type="button" className="execution-remove-today" disabled={busy} onClick={() => void removePlanDraftBlock()}><Icon name="trash" size={14} />从今日计划移除</button><div><button type="button" className="quiet-button" disabled={busy} onClick={closeTimelinePanel}>取消</button><button type="submit" className="primary-action" disabled={busy}>{busy ? "正在保存…" : "保存调整"}</button></div></footer>
                   </form>
-                </> : selectedBlock ? <><header><div><strong>{selectedBlock.task_title}</strong><small>{selectedBlock.review ? "复盘已确认" : selectedBlock.execution_status === "planned" ? "本次执行" : "本次执行已记录"}</small></div><button type="button" aria-label="关闭执行面板" disabled={savingExecution} onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></header>
+                </> : selectedBlock ? <><header><div><strong>{selectedBlock.review || selectedBlock.execution_status !== "planned" ? "本次执行详情" : "记录本次执行"}</strong><small>{selectedBlock.task_title}</small></div><button type="button" aria-label="关闭执行面板" disabled={savingExecution} onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></header>
                   <div className="execution-plan-time"><div className="execution-plan-fact"><span>计划时间</span><strong>{timeRangeLabel(selectedBlock.starts_at, selectedBlock.ends_at)}</strong></div><div className="execution-plan-actions"><button type="button" className="execution-open-task" disabled={savingExecution} onClick={() => openTimelineTask(selectedBlock.task_id, selectedBlock.id)}>查看任务</button>{selectedBlock.execution_status === "planned" && !selectedBlock.review && !isPastDate && ["open", "scheduled"].includes(selectedBlock.task_status) && <button type="button" className="execution-adjust-time" disabled={busy || savingExecution} onClick={adjustSelectedBlockTime}>调整时间</button>}</div></div>
-                  {selectedBlock.review ? <><div className={`floating-facts execution-${selectedBlock.review.outcome}`}><div><span>本次结果</span><strong>{reviewOutcomeCopy[selectedBlock.review.outcome]}</strong></div><div><span>实际耗时</span><strong>{selectedBlock.review.actual_minutes} 分钟</strong></div><div><span>剩余工作量</span><strong>{selectedBlock.review.remaining_workload_minutes === null ? "未重估" : `${selectedBlock.review.remaining_workload_minutes} 分钟`}</strong></div>{selectedBlock.review.notes && <div className="wide"><span>备注</span><strong>{selectedBlock.review.notes}</strong></div>}{selectedBlock.review.defer_reason && <div className="wide"><span>延期原因</span><strong>{selectedBlock.review.defer_reason}</strong></div>}</div><footer><span role="status">这次复盘已经确认。</span><strong className="context-readonly-state">只读</strong></footer></> : selectedDate !== today ? selectedBlock.execution_status !== "planned" ? <><div className={`floating-capture-fact execution-${selectedBlock.execution_status}`}><span>本次结果</span><strong>{reviewOutcomeCopy[selectedBlock.execution_status]}</strong>{selectedBlock.execution_note && <p>{selectedBlock.execution_note}</p>}</div><div className="floating-readonly"><strong>当日已记录，尚未复盘</strong><span>历史记录保持原样，实际耗时和剩余工作量不会在事后补填。</span></div></> : <div className="floating-readonly"><strong>{isPastDate ? "历史日期只读" : "未来安排暂不可记录"}</strong><span>{isPastDate ? "这项安排当时没有保存执行记录。" : "到执行日期后再记录本次结果。"}</span></div> : executionDraft ? <><ExecutionCaptureFields key={selectedBlock.id} draft={executionDraft} disabled={savingExecution} onChange={updateExecutionDraft} /><footer className="execution-capture-footer"><span role="status" className={executionMessage ? "error" : ""}>{executionMessage || "本次记录会带入每日复盘"}</span>{selectedBlock.execution_status === "planned" && <button type="button" className="execution-remove-today" disabled={busy || savingExecution} onClick={removeSelectedBlockFromToday}><Icon name="trash" size={14} />从今日计划移除</button>}<div><button type="button" className="quiet-button" disabled={savingExecution} onClick={closeTimelinePanel}>暂不记录</button><button type="button" className="primary-action" disabled={savingExecution || !executionDraft.outcome} onClick={() => void saveSelectedBlockExecution()}>{savingExecution ? "正在保存…" : "保存记录"}</button></div></footer></> : null}
+                  {selectedBlock.review ? <><div className={`floating-facts execution-${selectedBlock.review.outcome}`}><div><span>本次结果</span><strong>{reviewOutcomeCopy[selectedBlock.review.outcome]}</strong></div><div><span>实际耗时</span><strong>{selectedBlock.review.actual_minutes} 分钟</strong></div><div><span>剩余工作量</span><strong>{selectedBlock.review.remaining_workload_minutes === null ? "未重估" : `${selectedBlock.review.remaining_workload_minutes} 分钟`}</strong></div>{selectedBlock.review.notes && <div className="wide"><span>备注</span><strong>{selectedBlock.review.notes}</strong></div>}{selectedBlock.review.defer_reason && <div className="wide"><span>延期原因</span><strong>{selectedBlock.review.defer_reason}</strong></div>}</div><footer><span role="status">这次复盘已经确认。</span><strong className="context-readonly-state">只读</strong></footer></> : selectedDate !== today ? selectedBlock.execution_status !== "planned" ? <><div className={`floating-capture-fact execution-${selectedBlock.execution_status}`}><span>本次结果</span><strong>{reviewOutcomeCopy[selectedBlock.execution_status]}</strong>{selectedBlock.execution_note && <p>{selectedBlock.execution_note}</p>}</div><div className="floating-readonly"><strong>当日已记录，尚未复盘</strong><span>历史记录保持原样，实际耗时和剩余工作量不会在事后补填。</span></div></> : <div className="floating-readonly"><strong>{isPastDate ? "历史日期只读" : "未来安排暂不可记录"}</strong><span>{isPastDate ? "这项安排当时没有保存执行记录。" : "到执行日期后再记录本次结果。"}</span></div> : executionDraft ? <><ExecutionCaptureFields key={selectedBlock.id} draft={executionDraft} disabled={savingExecution} onChange={updateExecutionDraft} /><span role="status" className={`execution-capture-note${executionMessage ? " error" : ""}`}>{executionMessage || "本次记录会带入每日复盘"}</span><footer className="execution-capture-footer">{selectedBlock.execution_status === "planned" && <button type="button" className="execution-remove-today" disabled={busy || savingExecution} onClick={removeSelectedBlockFromToday}><Icon name="trash" size={14} />从今日计划移除</button>}<div><button type="button" className="quiet-button" disabled={savingExecution} onClick={closeTimelinePanel}>暂不记录</button><button type="button" className="primary-action" disabled={savingExecution || !executionDraft.outcome} onClick={() => void saveSelectedBlockExecution()}>{savingExecution ? "正在保存…" : "保存记录"}</button></div></footer></> : null}
                 </> : selectedEvent ? <><header><div><strong>{selectedEvent.title}</strong><small>{selectedEvent.is_all_day ? "全天固定日程" : `${timeRangeLabel(selectedEvent.starts_at, selectedEvent.ends_at)} · 固定日程`}</small></div><button type="button" aria-label="关闭日程详情" onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></header><div className="floating-readonly"><strong>固定日程</strong><span>固定日程不提供完成按钮，也不会限制同一时段安排其他事项。</span></div></> : null}
               </section></div>}
               <div className="hourly-timeline" style={{ "--timeline-height": `${timelineHeight}px` } as CSSProperties}><div className="timeline-hours" aria-hidden="true">{timelineHours.map((hour, index) => <div key={hour} className={`timeline-hour${showNowLine && Math.abs(nowMinute - index * 60) / 60 * pixelsPerHour <= nowLabelOverlapDistance ? " current-time-covered" : ""}`} style={{ top: `${index * pixelsPerHour}px` }}><time>{String(hour).padStart(2, "0")}:00</time><span /></div>)}</div><div className="timeline-events" style={{ height: `${timelineHeight}px` }}>

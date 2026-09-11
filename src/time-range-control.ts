@@ -128,7 +128,7 @@ export function focusedTimeRangePresentation(
   current: MinuteRange,
   minimumMinute = 0,
   maximumMinute = 23 * 60 + 45,
-  collapseThreshold = 4 * 60,
+  collapseThreshold = 6 * 60,
   step = 5
 ): FocusedTimeRangePresentation {
   const safeStep = Math.max(1, step);

@@ -62,7 +62,17 @@ test("plan draft time editor stays compact and supports focused manual adjustmen
   assert.match(appSource, /type="text" inputMode="numeric"/);
   assert.match(appSource, /className="time-rail-endpoint-cards"/);
   assert.match(appSource, /timeline-floating-layer\$\{planDraftTimeEdit \? " is-time-editor"/);
-  assert.match(stylesSource, /\.timeline-floating-layer\.is-time-editor \{ position: fixed;/);
+  assert.match(stylesSource, /\.timeline-floating-layer\.is-time-editor, \.timeline-floating-layer\.is-block-editor \{ position: fixed;/);
+  assert.match(stylesSource, /\.time-rail-endpoint-cards \{[^}]*grid-template-columns: 31fr 38fr 31fr/);
+  assert.match(appSource, /highlightedEdge === "start" \? "is-active"/);
+  assert.match(appSource, /className="time-rail-duration-badge"/);
+  assert.match(appSource, /className="time-rail-break"[^>]*><span>\{durationText\}<\/span>/);
+  assert.doesNotMatch(appSource, /durationMinutes >= 45/);
+  assert.match(appSource, /original_starts_at: startsAt/);
+  assert.match(appSource, /className="timeline-time-reset"/);
+  assert.match(appSource, /onClick=\{resetPlanDraftTime\}/);
+  assert.match(stylesSource, /\.time-rail-scale\.continuous/);
+  assert.match(stylesSource, /\.time-rail-track-wrap\.active-start \.time-rail-endpoint-card\.start/);
   assert.match(appSource, /\{ minutes: 120, label: "2 小时" \}/);
   assert.match(appSource, /busy \? "正在保存…" : "保存调整"/);
   assert.doesNotMatch(appSource, /plan-draft-time-summary/);
@@ -152,8 +162,8 @@ test("newly included tasks are revealed on the timeline", () => {
 });
 
 test("time range handles use a hollow start and solid end", () => {
-  assert.doesNotMatch(stylesSource, /\.time-rail-handle\.start \{ background: #536dff; \}/);
-  assert.match(stylesSource, /\.time-rail-handle\.end \{ background: #536dff; \}/);
+  assert.match(stylesSource, /\.time-rail-handle \{[^}]*background: #fff;/);
+  assert.match(stylesSource, /\.time-rail-handle\.end \{[^}]*background: #315cea;/);
 });
 
 test("task workload copy follows same-day and cross-day scheduling semantics", () => {
@@ -193,12 +203,15 @@ test("calendar and daily plan behave as one two-level workspace", () => {
   assert.match(stylesSource, /button\.today\.selected \.timeline-week-date \{ color: #fff; background: var\(--today-red\);/);
 });
 
-test("timeline task blocks open a contextual panel without changing checkbox behavior", () => {
+test("timeline task blocks use the centered editor without changing checkbox behavior", () => {
   assert.match(appSource, /data-timeline-kind="block"/);
   assert.match(appSource, /target\.closest\("\.timeline-event-check"\)/);
   assert.match(appSource, /event\.stopPropagation\(\); void \(blockCompleted/);
   assert.match(appSource, /openTimelineTask\(selectedBlock\.task_id, selectedBlock\.id\)/);
   assert.match(appSource, /panel\.dataset\.placement = placement/);
+  assert.match(appSource, /selectedBlock \? " is-block-editor"/);
+  assert.match(appSource, /selectedBlock \? " task-block-editor"/);
+  assert.match(stylesSource, /\.timeline-floating-layer\.is-block-editor \.timeline-floating-panel\.task-block-editor/);
   assert.match(stylesSource, /\.timeline-floating-panel \{ position: fixed;/);
-  assert.match(stylesSource, /\.timeline-floating-panel, \.timeline-floating-panel\.plan-draft-editor \{ top: auto; right: 14px; bottom: 14px;/);
+  assert.match(stylesSource, /\.timeline-floating-panel, \.timeline-floating-panel\.plan-draft-editor, \.timeline-floating-panel\.task-block-editor \{ top: auto; right: 14px; bottom: 14px;/);
 });

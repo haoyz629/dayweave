@@ -67,6 +67,10 @@ test("task block rail keeps ordinary ranges continuous", () => {
     kind: "continuous",
     window: { start: 13 * 60, end: 16 * 60 }
   });
+  assert.deepEqual(focusedTimeRangePresentation({ start: 60, end: 6 * 60 + 10 }), {
+    kind: "continuous",
+    window: { start: 0, end: 7 * 60 + 10 }
+  });
 });
 
 test("task block rail collapses the middle of a long range", () => {

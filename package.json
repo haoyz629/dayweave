@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "test:recycle-retention": "node --experimental-strip-types --test src/recycle-retention.test.mjs",
+    "test:task-workload": "node --test src/task-workload.test.mjs",
+    "test:ui-copy": "node --test src/ui-copy.test.mjs",
     "test:rust": "set \"PATH=%USERPROFILE%\\.cargo\\bin;%PATH%\" && cd src-tauri && cargo test",
     "tauri": "tauri",
     "tauri:dev": "set \"PATH=%USERPROFILE%\\.cargo\\bin;%PATH%\" && tauri dev",

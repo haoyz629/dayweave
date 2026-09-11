@@ -1,9 +1,11 @@
 import {
   CSSProperties,
   FormEvent,
+  Fragment,
   KeyboardEvent,
   PointerEvent as ReactPointerEvent,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState
@@ -22,12 +24,10 @@ import {
   applyConfirmedAiProposal,
   applyUndo,
   CalendarEvent,
-  clearDebugTimelineLayoutFixtures,
   completeTaskFromReview,
   confirmTaskDraft,
   confirmRuleBasedPlan,
   createRecurringItem,
-  debugTimelineFixturesAvailable,
   createAiConversation,
   createManualTaskDraft,
   DaySchedule,
@@ -88,7 +88,6 @@ import {
   testAiConnection,
   renameAiConversation,
   setAiConversationArchived,
-  setTaskTags,
   setRecurringItemStatus,
   Task,
   TaskDraft,
@@ -99,31 +98,55 @@ import {
   updateManualTask,
   updateRecurringTask,
   updateRecurringItem,
-  setUiSetting,
-  seedDebugTimelineLayoutFixtures
+  setUiSetting
 } from "./tauri";
 import { calendarDayInfo, lunarDayLabel, officialHolidayCoverageFor, OFFICIAL_HOLIDAY_COVERAGE } from "./calendar-data";
 import { recurringItemAppearsOnDate, taskAppearsOnDate } from "./calendar-task-placement";
 import { timelineDurationHeight, timelineLaneLayout as calculateTimelineLanes, TimelineLane } from "./timeline-lane-layout";
+import {
+  closestTimeRangeEdge,
+  constrainTimeRange,
+  focusedTimeRangePresentation,
+  focusedTimeRangeWindow,
+  normalizeClockInput,
+  shiftTimeRangeFromStart,
+  TimeRangeEdge
+} from "./time-range-control";
+import { recycleRetentionMessage } from "./recycle-retention";
+import {
+  formatWorkloadMinutes,
+  inferredDailyWorkloadMinutes,
+  isCrossDayTask,
+  MAX_TASK_WORKLOAD_MINUTES,
+  MIN_TASK_WORKLOAD_MINUTES,
+  normalizeTaskWorkloadAfterScheduleChange,
+  preferredDailyAllocationMinutes,
+  taskDateSpanDays,
+  taskRangeDurationMinutes,
+  taskRangeIsValid,
+  taskScheduleIsComplete,
+  taskWorkloadIsValid
+} from "./task-workload";
 
 type IconName =
-  | "today" | "tasks" | "inbox" | "calendar" | "review" | "settings"
+  | "today" | "tasks" | "calendar" | "review" | "settings"
   | "plus" | "sparkle" | "more" | "check" | "send" | "search"
   | "trash" | "restore" | "close" | "clock" | "filter" | "user" | "chevron-left" | "chevron-right";
 
 const navigation: { label: string; icon: IconName; asset: string; description: string }[] = [
   { label: "今日", icon: "today", asset: navTodayIcon, description: "月历与日计划" },
-  { label: "任务", icon: "tasks", asset: navTasksIcon, description: "草稿与任务账本" },
+  { label: "任务", icon: "tasks", asset: navTasksIcon, description: "草稿与任务管理" },
   { label: "复盘", icon: "review", asset: navReviewIcon, description: "记录实际执行" },
   { label: "设置", icon: "settings", asset: navSettingsIcon, description: "工作方式与连接" }
 ];
 
 const slots = ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"];
-type TaskView = "draft" | "recurring" | "inbox" | "open" | "scheduled" | "done" | "cancelled" | "deleted";
+type TaskView = "draft" | "recurring" | "open" | "scheduled" | "done" | "deleted";
 type CreateItemType = "task" | "recurring";
 type LedgerResizeSession = { pointerId: number; startX: number; startWidth: number };
 type ShellResizeSession = { pointerId: number; startX: number; startWidth: number; latestWidth: number };
-type NavigationIntent = { active: string; taskView?: TaskView; createTask?: boolean; taskId?: string };
+type TimelineReturnContext = { date: string; blockId: string };
+type NavigationIntent = { active: string; taskView?: TaskView; createTask?: boolean; taskId?: string; timelineReturnContext?: TimelineReturnContext };
 type PlanLeaveIntent = { kind: "navigation"; intent: NavigationIntent } | { kind: "date"; date: string };
 type TaskViewRequest = { view?: TaskView; createTask?: boolean; taskId?: string };
 type PendingTaskChange =
@@ -169,9 +192,11 @@ const SHELL_SIDEBAR_MIN_WIDTH = 188;
 const SHELL_SIDEBAR_MAX_WIDTH = 320;
 const SHELL_SIDEBAR_DEFAULT_WIDTH = 224;
 const SHELL_SIDEBAR_COLLAPSED_WIDTH = 52;
+const MIN_TASK_BLOCK_MINUTES = 15;
+const COMPACT_TASK_BLOCK_THRESHOLD_MINUTES = 30;
 
 const statusCopy: Record<TaskStatus, string> = {
-  inbox: "待整理", open: "待办", scheduled: "已安排", done: "已完成", cancelled: "已取消", deleted: "回收站"
+  open: "待处理", scheduled: "已安排", done: "已完成", deleted: "回收站"
 };
 const priorityCopy = { low: "低优先级", medium: "中优先级", high: "高优先级" } as const;
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
@@ -179,7 +204,6 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
     today: <><rect x="3" y="4" width="18" height="17" rx="3" /><path d="M8 2v4M16 2v4M3 10h18M8 14h3" /></>,
     tasks: <><path d="m5 12 4 4L19 6" /><path d="M5 5h7M5 19h7" /></>,
-    inbox: <><path d="M4 4h16v12l-3 4H7l-3-4z" /><path d="M4 15h5l1.5 2h3L15 15h5" /></>,
     calendar: <><rect x="3" y="4" width="18" height="17" rx="3" /><path d="M8 2v4M16 2v4M3 10h18" /></>,
     review: <><path d="M4 19.5V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14.5" /><path d="M8 8h8M8 12h8M8 16h5" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.14 2.14-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.55V20.3h-3v-.08A1.7 1.7 0 0 0 10.65 18.7a1.7 1.7 0 0 0-1.88.34l-.06.06-2.14-2.14.06-.06A1.7 1.7 0 0 0 6.97 15a1.7 1.7 0 0 0-1.55-1.03h-.08v-3h.08A1.7 1.7 0 0 0 6.97 9.94a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.14-2.14.06.06a1.7 1.7 0 0 0 1.88.34 1.7 1.7 0 0 0 1.03-1.55v-.08h3v.08a1.7 1.7 0 0 0 1.03 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06L19.8 8l-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.55 1.03h.08v3h-.08A1.7 1.7 0 0 0 19.4 15Z" /></>,
@@ -199,6 +223,40 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     "chevron-right": <path d="m9 18 6-6-6-6" />
   };
   return <svg {...common}>{paths[name]}</svg>;
+}
+
+function PlanRegenerateButton({ confirmed, busy, onClick }: { confirmed: boolean; busy: boolean; onClick: () => void }) {
+  const label = confirmed ? "重新安排未执行任务" : "重新生成日计划草案";
+  const tooltipId = confirmed ? "confirmed-plan-regenerate-tooltip" : "draft-plan-regenerate-tooltip";
+  const description = confirmed
+    ? "保留执行和复盘记录，替换当前未保存修改。"
+    : "替换当前草案的手动修改，并重新生成安排。";
+  return <span className="plan-regenerate-control">
+    <button
+      type="button"
+      className={`plan-regenerate-button${busy ? " is-busy" : ""}`}
+      aria-label={busy ? `${label}，正在处理` : label}
+      aria-describedby={tooltipId}
+      disabled={busy}
+      onClick={onClick}
+    ><Icon name="restore" size={16} /></button>
+    <span id={tooltipId} className="plan-action-tooltip" role="tooltip"><strong>{label}</strong><small>{description}</small></span>
+  </span>;
+}
+
+function CalendarOverviewButton({ onClick }: { onClick: () => void }) {
+  const tooltipId = "calendar-overview-tooltip";
+  return <span className="calendar-overview-control">
+    <button
+      type="button"
+      className="calendar-overview-button"
+      aria-label="返回月历"
+      aria-describedby={tooltipId}
+      aria-keyshortcuts="Escape"
+      onClick={onClick}
+    ><Icon name="calendar" size={17} /></button>
+    <span id={tooltipId} className="plan-action-tooltip calendar-overview-tooltip" role="tooltip"><strong>返回月历</strong><small>收起日计划，查看本月日期总览。</small></span>
+  </span>;
 }
 
 function toInputTimestamp(value: string | null) {
@@ -234,7 +292,10 @@ function newTaskDefaultForm(now = new Date()): NewTaskForm {
     title: "",
     notes: "",
     priority: null,
-    estimated_minutes: 60,
+    estimated_minutes: Math.round((
+      new Date(`${end.date}T${end.time}:00+08:00`).getTime()
+      - new Date(`${start.date}T${start.time}:00+08:00`).getTime()
+    ) / 60000),
     earliest_start_date: start.date,
     earliest_start_time: start.time,
     due_date: end.date,
@@ -312,22 +373,57 @@ function recurringItemPreviewDates(form: RecurringItemForm) {
   return dates;
 }
 
-function taskRangeIsValid(form: NewTaskForm) {
-  if (!form.earliest_start_date || !form.earliest_start_time || !form.due_date || !form.due_time) return true;
-  return new Date(`${form.due_date}T${form.due_time}:00+08:00`).getTime()
-    > new Date(`${form.earliest_start_date}T${form.earliest_start_time}:00+08:00`).getTime();
-}
-
-function sameDayTaskRangeMinutes(form: NewTaskForm) {
-  if (!form.earliest_start_date || !form.earliest_start_time || !form.due_date || !form.due_time) return null;
-  if (form.earliest_start_date !== form.due_date || !taskRangeIsValid(form)) return null;
-  const startsAt = new Date(`${form.earliest_start_date}T${form.earliest_start_time}:00+08:00`).getTime();
-  const endsAt = new Date(`${form.due_date}T${form.due_time}:00+08:00`).getTime();
-  return Math.round((endsAt - startsAt) / 60000);
-}
-
 function newTaskFormMatches(first: NewTaskForm, second: NewTaskForm) {
   return JSON.stringify(first) === JSON.stringify(second);
+}
+
+function uiErrorMessage(reason: unknown) {
+  const raw = String(reason).trim().replace(/^Error:\s*/i, "");
+  if (!raw) return "暂时无法完成，请稍后重试。";
+  if (/^(数据库错误|序列化错误)：/.test(raw)) return "本地数据暂时无法处理，请稍后重试。";
+  if (raw.startsWith("找不到指定对象：")) return "相关内容已经不存在，请刷新后重试。";
+  if (raw === "操作确认无效或已过期") return "这次确认已失效，请重新操作。";
+  const message = raw
+    .replace(/^结构化操作无效：\s*/, "")
+    .replace(/^领域规则不允许此操作：\s*/, "");
+  if (/^(无法初始化 AI 网络连接|AI 连接失败)/.test(message)) {
+    return "无法连接 AI 服务，请检查连接地址和网络后重试。";
+  }
+  if (/^AI 服务返回了无法解析的响应/.test(message)) {
+    return "AI 服务返回的内容无法识别，请检查接口类型后重试。";
+  }
+  const aiStatus = message.match(/^AI 服务返回 (\d{3})/);
+  if (aiStatus) {
+    const status = Number(aiStatus[1]);
+    if (status === 401 || status === 403) return "AI 连接未通过验证，请检查访问密钥。";
+    if (status === 404) return "没有找到对应的 AI 服务，请检查连接地址和模型名称。";
+    if (status === 429) return "AI 服务请求过于频繁，请稍后重试。";
+    if (status >= 500) return "AI 服务暂时不可用，请稍后重试。";
+    return "AI 服务没有完成请求，请检查连接设置后重试。";
+  }
+  if (message.startsWith("AI 结构化结果不符合今序草稿格式")) {
+    return "AI 返回的内容无法整理成草稿，请换一种说法再试。";
+  }
+  if (message.includes("YYYY-MM-DD")) return "日期格式不正确，请重新选择日期。";
+  if (message.includes("HH:MM") || message.includes("RFC3339")) return "时间格式不正确，请重新选择时间。";
+  if (/proposal_id|task_ids|草稿版本|修改范围必须为 this 或 future|必须为 active、paused 或 ended|v1 仅接受|状态转移|撤销快照|AI 运行|不允许查询该表|未知.+(?:类型|状态|操作)/.test(message)) {
+    return "内容已经变化或暂时无法处理，请刷新后重试。";
+  }
+  if (message.includes("结构化文本")) return "AI 返回的内容无法识别，请换一种说法再试。";
+  const readableMessage = message
+    .replace(/执行事实/g, "执行记录")
+    .replace(/复盘事实/g, "复盘记录")
+    .replace(/历史发生记录/g, "过去的记录")
+    .replace(/发生记录/g, "记录")
+    .replace(/重复任务实例/g, "重复任务")
+    .replace(/未来实例/g, "以后的重复任务")
+    .replace(/当前实例/g, "当前任务")
+    .replace(/重新读取/g, "重新打开")
+    .replace(/迟到结果不会写入草稿/g, "本次未完成的结果不会保留");
+  if (/\[object Object\]|[{}]|\b(?:[a-z][a-z0-9]*_)+[a-z0-9]+\b|\b(?:SQLite|SQL|JSON|RFC3339|rusqlite|serde|SELECT|INSERT|UPDATE|DELETE|FOREIGN KEY|invoke|command|plugin)\b|\b(?:TypeError|ReferenceError|RangeError|NetworkError)\b|\b(?:invalid|unknown|missing|expected|failed)\b|\b[0-9a-f]{8}-[0-9a-f-]{27,}\b|line \d+ column \d+/i.test(readableMessage)) {
+    return "暂时无法完成，请稍后重试。";
+  }
+  return readableMessage;
 }
 
 function pickerDateLabel(value: string) {
@@ -370,13 +466,25 @@ function timeRangeLabel(startsAt: string, endsAt: string) {
   return `${timeLabel(startsAt)} - ${timeLabel(endsAt)}`;
 }
 
+function timeRangeDurationMinutes(startsAt: string, endsAt: string) {
+  return Math.round((new Date(endsAt).getTime() - new Date(startsAt).getTime()) / 60000);
+}
+
 function durationLabel(startsAt: string, endsAt: string) {
-  const minutes = Math.round((new Date(endsAt).getTime() - new Date(startsAt).getTime()) / 60000);
-  return `${minutes} 分钟`;
+  return `${timeRangeDurationMinutes(startsAt, endsAt)} 分钟`;
+}
+
+function shortTaskBlockClass(startsAt: string, endsAt: string) {
+  const durationMs = new Date(endsAt).getTime() - new Date(startsAt).getTime();
+  return durationMs < COMPACT_TASK_BLOCK_THRESHOLD_MINUTES * 60000 ? " is-short" : "";
 }
 
 function taskMatchesView(task: Task, view: TaskView) {
   return view !== "draft" && view !== "recurring" && task.status === view;
+}
+
+function taskIsEditable(task: Task | null) {
+  return Boolean(task && ["open", "scheduled"].includes(task.status));
 }
 
 function viewForStatus(status: TaskStatus): TaskView {
@@ -386,11 +494,9 @@ function viewForStatus(status: TaskStatus): TaskView {
 const taskViewCopy: Record<TaskView, string> = {
   draft: "草稿",
   recurring: "重复事项",
-  inbox: "Inbox",
   open: "待处理",
   scheduled: "安排",
   done: "完成",
-  cancelled: "取消",
   deleted: "回收"
 };
 
@@ -446,28 +552,24 @@ function ExecutionOutcomePicker({
 const taskViewIcon: Record<TaskView, IconName> = {
   draft: "sparkle",
   recurring: "restore",
-  inbox: "inbox",
   open: "tasks",
   scheduled: "calendar",
   done: "check",
-  cancelled: "close",
   deleted: "trash"
 };
 
 const taskViewGroups: { label: string; items: TaskView[] }[] = [
-  { label: "常用", items: ["open", "inbox", "scheduled"] },
+  { label: "常用", items: ["open", "scheduled"] },
   { label: "管理", items: ["recurring", "draft"] },
-  { label: "历史", items: ["done", "cancelled", "deleted"] }
+  { label: "历史", items: ["done", "deleted"] }
 ];
 
 const taskEmptyCopy: Record<TaskView, { title: string; description: string }> = {
   draft: { title: "还没有待确认草稿", description: "手动创建和 AI 整理的内容会先保存在这里。" },
   recurring: { title: "还没有重复事项", description: "用“记一件事”创建不会挤进待处理队列的重复内容。" },
-  inbox: { title: "Inbox 已经整理完", description: "没有日期的已确认任务会出现在这里。" },
-  open: { title: "还没有待办任务", description: "新建一项任务，或先把 Inbox 中的想法整理为待办。" },
+  open: { title: "还没有待处理任务", description: "补全草稿的开始和结束时间并确认后，任务会出现在这里。" },
   scheduled: { title: "还没有已安排任务", description: "任务进入日计划并确认后，会在这里显示。" },
   done: { title: "还没有已完成任务", description: "完成记录会保留在这里，方便以后回看。" },
-  cancelled: { title: "还没有已取消任务", description: "取消不会删除任务，历史仍会保留。" },
   deleted: { title: "回收站是空的", description: "移入回收站的普通任务和重复事项默认保留 30 天。" }
 };
 
@@ -523,6 +625,7 @@ function emptyNewTaskForm(): NewTaskForm {
 }
 
 function taskDraftInputForForm(form: NewTaskForm): TaskDraftInput {
+  const estimatedMinutes = taskRangeDurationMinutes(form) ?? form.estimated_minutes;
   return {
     title: form.title.trim(),
     notes: form.notes.trim() || null,
@@ -531,8 +634,8 @@ function taskDraftInputForForm(form: NewTaskForm): TaskDraftInput {
     earliest_start_time: form.earliest_start_date && form.earliest_start_time ? form.earliest_start_time : null,
     due_date: form.due_date || null,
     due_time: form.due_date && form.due_time ? form.due_time : null,
-    total_workload_minutes: form.estimated_minutes,
-    remaining_workload_minutes: form.estimated_minutes,
+    total_workload_minutes: estimatedMinutes,
+    remaining_workload_minutes: estimatedMinutes,
     field_states_json: "{}",
     tags: form.tags,
     recurrence: null
@@ -574,7 +677,7 @@ function manualUpdateForTaskForm(form: NewTaskForm): ManualTaskUpdate {
     title: form.title,
     notes: form.notes || null,
     priority: form.priority,
-    estimated_minutes: form.estimated_minutes,
+    estimated_minutes: taskRangeDurationMinutes(form) ?? form.estimated_minutes,
     earliest_start_at: form.earliest_start_date && form.earliest_start_time
       ? `${form.earliest_start_date}T${form.earliest_start_time}`
       : null,
@@ -695,12 +798,12 @@ function TaskScheduleEditor({ form, disabled, onChange }: {
 
   return <>
   <div className="apple-schedule-editor" role="group" aria-label="任务时间范围">
-    <header><div><strong>时间范围</strong><span>限定可安排日期；跨日按工作量分配。</span></div>{form.earliest_start_date || form.due_date ? <button type="button" disabled={disabled} onClick={() => { onChange({ ...form, earliest_start_date: "", earliest_start_time: "", due_date: "", due_time: "" }); setOpenPicker(null); }}>清除时间</button> : <button type="button" disabled={disabled} onClick={() => { const defaults = newTaskDefaultForm(); onChange({ ...form, earliest_start_date: defaults.earliest_start_date, earliest_start_time: defaults.earliest_start_time, due_date: defaults.due_date, due_time: defaults.due_time }); }}>恢复推荐</button>}</header>
+      <header><div><strong>时间范围</strong><span>开始和结束时间均为必填；未补完整时只保存草稿。</span></div>{form.earliest_start_date || form.due_date ? <button type="button" disabled={disabled} onClick={() => { onChange({ ...form, earliest_start_date: "", earliest_start_time: "", due_date: "", due_time: "" }); setOpenPicker(null); }}>清除时间</button> : <button type="button" disabled={disabled} onClick={() => { const defaults = newTaskDefaultForm(); onChange({ ...form, earliest_start_date: defaults.earliest_start_date, earliest_start_time: defaults.earliest_start_time, due_date: defaults.due_date, due_time: defaults.due_time }); }}>恢复推荐</button>}</header>
     <div className="apple-schedule-rows">{rows.map((row) => <div className="apple-schedule-row" key={row.field}>
       <span className="apple-schedule-label">{row.label}</span>
       <div className="apple-schedule-values"><button type="button" className={openPicker?.field === row.field ? "is-active" : ""} disabled={disabled} aria-haspopup="dialog" aria-expanded={openPicker?.field === row.field} onClick={() => openSchedulePicker(row.field)}><Icon name="calendar" size={14} />{pickerDateLabel(row.date)}</button><button type="button" className={openPicker?.field === row.field ? "is-active" : ""} disabled={disabled} aria-haspopup="dialog" aria-expanded={openPicker?.field === row.field} onClick={() => openSchedulePicker(row.field)}><Icon name="clock" size={14} />{row.time || "选择时间"}</button></div>
     </div>)}</div>
-    {!taskRangeIsValid(form) && <p className="apple-schedule-error" role="alert">结束时间必须晚于开始时间，请重新选择。</p>}
+    {!taskRangeIsValid(form) && <p className="apple-schedule-error" role="alert">结束时间必须比开始时间至少晚 {MIN_TASK_WORKLOAD_MINUTES} 分钟，请重新选择。</p>}
   </div>
   {openPicker && createPortal(
     <div className="schedule-picker-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSchedulePicker(); }}>
@@ -734,8 +837,6 @@ function TaskEditorRegions({
   disabled,
   idPrefix,
   autoFocusTitle = false,
-  estimateHint,
-  estimateAction,
   onChange,
   onScheduleChange
 }: {
@@ -743,8 +844,6 @@ function TaskEditorRegions({
   disabled: boolean;
   idPrefix: string;
   autoFocusTitle?: boolean;
-  estimateHint?: string | null;
-  estimateAction?: { label: string; onClick: () => void } | null;
   onChange: (form: NewTaskForm) => void;
   onScheduleChange: (form: NewTaskForm) => void;
 }) {
@@ -754,25 +853,52 @@ function TaskEditorRegions({
   const notesId = `${idPrefix}-notes`;
   const priorityId = `${idPrefix}-priority`;
   const estimateId = `${idPrefix}-estimate`;
-  const tagsId = `${idPrefix}-tags`;
+  const rangeMinutes = taskRangeDurationMinutes(form);
+  const dayCount = taskDateSpanDays(form);
+  const crossDay = isCrossDayTask(form) && dayCount !== null && dayCount > 1;
+  const dailyMinutes = crossDay ? inferredDailyWorkloadMinutes(form.estimated_minutes, form) : null;
+  const maximumDailyMinutes = dayCount ? Math.min(24 * 60, Math.floor(MAX_TASK_WORKLOAD_MINUTES / dayCount)) : 24 * 60;
+  const dailyWorkloadInvalid = dailyMinutes !== null
+    && (dailyMinutes < MIN_TASK_WORKLOAD_MINUTES || dailyMinutes > maximumDailyMinutes);
+
+  function updateDailyWorkload(rawValue: string) {
+    if (!rawValue) {
+      onChange({ ...form, estimated_minutes: null });
+      return;
+    }
+    const daily = Number(rawValue);
+    onChange({ ...form, estimated_minutes: dayCount ? daily * dayCount : null });
+  }
 
   return <>
     <section className="task-form-region task-content-region" aria-labelledby={contentTitleId}>
       <header><div><strong id={contentTitleId}>任务内容</strong><span>先记下要完成的事，细节可随后补充。</span></div></header>
       <div className="task-content-fields">
-        <div className="task-title-tags-row">
-          <label htmlFor={titleId}>标题<input id={titleId} autoFocus={autoFocusTitle} value={form.title} maxLength={300} required placeholder="例如：整理项目周报" onChange={(event) => onChange({ ...form, title: event.target.value })} /></label>
-          <label className="task-tags-field" htmlFor={tagsId}>标签<input id={tagsId} value={form.tags.join("，")} maxLength={620} placeholder="例如：今序，健康" disabled={disabled} onChange={(event) => onChange({ ...form, tags: event.target.value.split(/[，,]/).map((item) => item.trim()).filter(Boolean).slice(0, 20) })} /><small>逗号分隔，最多 20 个</small></label>
-        </div>
+        <label htmlFor={titleId}>标题<input id={titleId} autoFocus={autoFocusTitle} value={form.title} maxLength={300} required placeholder="例如：整理项目周报" onChange={(event) => onChange({ ...form, title: event.target.value })} /></label>
         <label htmlFor={notesId}>备注<textarea id={notesId} value={form.notes} rows={3} placeholder="补充说明（可选）" onChange={(event) => onChange({ ...form, notes: event.target.value })} /></label>
       </div>
     </section>
     <section className="task-form-region task-planning-section" aria-labelledby={attributesTitleId}>
-      <header><div><strong id={attributesTitleId}>安排与属性</strong><span>设置可安排日期、处理顺序与预计工作量。</span></div></header>
+      <header><div><strong id={attributesTitleId}>安排信息</strong><span>设置可安排日期、优先级和投入时间。</span></div></header>
       <TaskScheduleEditor form={form} disabled={disabled} onChange={onScheduleChange} />
       <div className="task-attribute-grid">
         <div className="task-attribute-field"><div className="task-field-heading"><label htmlFor={priorityId}>优先级</label></div><select id={priorityId} value={form.priority ?? ""} onChange={(event) => onChange({ ...form, priority: (event.target.value || null) as NewTaskForm["priority"] })}><option value="">未设置</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></div>
-        <div className="task-attribute-field estimate-field"><div className="task-field-heading"><label htmlFor={estimateId}>预计工作量</label></div><div className="estimate-input"><input id={estimateId} type="number" min={1} max={525600} value={form.estimated_minutes ?? ""} placeholder="分钟" onChange={(event) => onChange({ ...form, estimated_minutes: event.target.value ? Number(event.target.value) : null })} /><span>分钟</span></div><div className="estimate-field-footer"><small title={estimateHint ?? undefined}>{estimateHint ?? ""}</small>{estimateAction && <button type="button" disabled={disabled} onClick={estimateAction.onClick}>{estimateAction.label}</button>}</div></div>
+        {rangeMinutes !== null ? <div className="task-attribute-field workload-auto-field" aria-labelledby={`${estimateId}-label`}>
+          <div className="task-field-heading"><span id={`${estimateId}-label`}>预计投入</span><small>随时间自动调整</small></div>
+          <output><strong>{formatWorkloadMinutes(rangeMinutes)}</strong><span>{form.earliest_start_time} 至 {form.due_time}</span></output>
+        </div> : crossDay ? <div className="task-attribute-field estimate-field daily-workload-field">
+          <div className="task-field-heading"><label htmlFor={estimateId}>平均每日投入</label><small>用于日计划的首选时长</small></div>
+          <div className="estimate-input"><input id={estimateId} type="number" min={MIN_TASK_WORKLOAD_MINUTES} max={maximumDailyMinutes} step={5} value={dailyMinutes ?? ""} placeholder="分钟" onChange={(event) => updateDailyWorkload(event.target.value)} /><span>分钟 / 天</span></div>
+          <div className="workload-calculation" role="status">{dailyMinutes !== null && form.estimated_minutes !== null
+            ? <><span>共 {dayCount} 天</span><strong>总投入 {formatWorkloadMinutes(form.estimated_minutes)}</strong></>
+            : form.estimated_minutes !== null
+              ? <><span>原总投入已保留</span><strong>{formatWorkloadMinutes(form.estimated_minutes)}</strong></>
+              : <span>填写后自动计算总投入</span>}</div>
+          {dailyWorkloadInvalid && <p className="workload-field-error" role="alert">平均每天至少投入 {MIN_TASK_WORKLOAD_MINUTES} 分钟。</p>}
+        </div> : <div className="task-attribute-field estimate-field">
+          <div className="task-field-heading"><label htmlFor={estimateId}>预计总投入</label><small>设置时间范围后可自动计算</small></div>
+          <div className="estimate-input"><input id={estimateId} type="number" min={1} max={MAX_TASK_WORKLOAD_MINUTES} value={form.estimated_minutes ?? ""} placeholder="分钟" onChange={(event) => onChange({ ...form, estimated_minutes: event.target.value ? Number(event.target.value) : null })} /><span>分钟</span></div>
+        </div>}
       </div>
     </section>
   </>;
@@ -787,85 +913,85 @@ function RecurringItemEditor({ form, disabled, idPrefix, autoFocusTitle = false,
 }) {
   const previewDates = recurringItemPreviewDates(form);
   const weekdayLabels = ["一", "二", "三", "四", "五", "六", "日"];
-  return <>
-    <section className="task-form-region task-content-region" aria-labelledby={`${idPrefix}-content-title`}>
-      <header><div><strong id={`${idPrefix}-content-title`}>事项内容</strong><span>先记下要持续做的事，细节可随后补充。</span></div></header>
-      <div className="task-content-fields">
-        <label htmlFor={`${idPrefix}-title`}>标题<input id={`${idPrefix}-title`} autoFocus={autoFocusTitle} required maxLength={300} value={form.title} placeholder="例如：晨间拉伸" onChange={(event) => onChange({ ...form, title: event.target.value })} /></label>
-        <label htmlFor={`${idPrefix}-notes`}>备注<textarea id={`${idPrefix}-notes`} rows={3} maxLength={2000} value={form.notes} placeholder="补充说明（可选）" onChange={(event) => onChange({ ...form, notes: event.target.value })} /></label>
+  const intervalUnit = form.frequency === "daily" ? "天" : form.frequency === "monthly" ? "个月" : "周";
+  const displayHelp = form.display_time && form.display_duration_minutes
+    ? `${form.display_time} 开始，在时间线上显示 ${form.display_duration_minutes} 分钟。`
+    : form.display_time
+      ? "再填写时长，即可显示在时间线上。"
+      : form.display_duration_minutes
+        ? "再选择时间，即可显示在时间线上。"
+        : "留空时，到期事项显示在今日页顶部。";
+  return <div className="recurring-editor">
+    <section className="recurring-editor-section recurring-content-section" aria-labelledby={`${idPrefix}-content-title`}>
+      <header><h3 id={`${idPrefix}-content-title`}>内容</h3></header>
+      <div className="recurring-editor-fields">
+        <label htmlFor={`${idPrefix}-title`}>标题<input id={`${idPrefix}-title`} autoFocus={autoFocusTitle} required maxLength={300} disabled={disabled} value={form.title} placeholder="例如：晨间拉伸" onChange={(event) => onChange({ ...form, title: event.target.value })} /></label>
+        <label htmlFor={`${idPrefix}-notes`}>备注<textarea id={`${idPrefix}-notes`} rows={3} maxLength={2000} disabled={disabled} value={form.notes} placeholder="可选" onChange={(event) => onChange({ ...form, notes: event.target.value })} /></label>
       </div>
     </section>
-    <section className="task-form-region recurring-rule-section" aria-labelledby={`${idPrefix}-rule-title`}>
-      <header><strong id={`${idPrefix}-rule-title`}>重复规则</strong><span>只保存一条规则，不会批量生成任务。</span></header>
-      <div className="task-recurrence-grid">
+    <section className="recurring-editor-section recurring-rule-section" aria-labelledby={`${idPrefix}-rule-title`}>
+      <header><div><h3 id={`${idPrefix}-rule-title`}>重复安排</h3><span>设置出现频率和有效日期</span></div></header>
+      <div className="recurring-rule-grid">
         <label>频率<select disabled={disabled} value={form.frequency} onChange={(event) => onChange({ ...form, frequency: event.target.value as RecurrenceInput["frequency"] })}><option value="daily">每天</option><option value="weekdays">工作日</option><option value="weekly">每周</option><option value="monthly">每月</option></select></label>
-        <label>间隔<span className="recurrence-inline"><input type="number" min={1} max={365} disabled={disabled} value={form.interval_value} onChange={(event) => onChange({ ...form, interval_value: Math.max(1, Number(event.target.value) || 1) })} />个周期</span></label>
-        <label>开始日期<input type="date" disabled={disabled} value={form.starts_on} onChange={(event) => onChange({ ...form, starts_on: event.target.value })} /></label>
-        <label>结束日期<input type="date" disabled={disabled} min={form.starts_on} value={form.ends_on} onChange={(event) => onChange({ ...form, ends_on: event.target.value })} /></label>
+        <label>重复间隔<span className="recurrence-inline"><input type="number" min={1} max={365} disabled={disabled} value={form.interval_value} onChange={(event) => onChange({ ...form, interval_value: Math.max(1, Number(event.target.value) || 1) })} /><span>{intervalUnit}</span></span></label>
         {form.frequency === "weekly" && <fieldset className="recurrence-weekdays"><legend>星期</legend><div>{weekdayLabels.map((label, index) => { const day = index + 1; const selected = form.weekdays.includes(day); return <button key={day} type="button" aria-pressed={selected} disabled={disabled} onClick={() => onChange({ ...form, weekdays: selected ? form.weekdays.filter((item) => item !== day) : [...form.weekdays, day].sort() })}>周{label}</button>; })}</div></fieldset>}
-        {form.frequency === "monthly" && <label>每月日期<input type="number" min={1} max={31} disabled={disabled} value={form.month_day ?? 1} onChange={(event) => onChange({ ...form, month_day: Math.min(31, Math.max(1, Number(event.target.value) || 1)) })} /></label>}
+        {form.frequency === "monthly" && <label className="recurrence-month-day">每月日期<span className="recurrence-inline"><input type="number" min={1} max={31} disabled={disabled} value={form.month_day ?? 1} onChange={(event) => onChange({ ...form, month_day: Math.min(31, Math.max(1, Number(event.target.value) || 1)) })} /><span>日</span></span></label>}
+        <fieldset className="recurrence-validity"><legend>有效日期</legend><div><label>开始<input type="date" disabled={disabled} value={form.starts_on} onChange={(event) => onChange({ ...form, starts_on: event.target.value })} /></label><label>结束（可选）<input type="date" disabled={disabled} min={form.starts_on} value={form.ends_on} onChange={(event) => onChange({ ...form, ends_on: event.target.value })} /></label></div></fieldset>
       </div>
-      <div className="recurring-preview" role="status"><span>接下来</span>{previewDates.length ? previewDates.map((date) => <time key={date}>{pickerDateLabel(date)}</time>) : <strong>当前规则没有可发生日期</strong>}</div>
+      <div className="recurring-preview" role="status" aria-live="polite"><span>最近发生</span>{previewDates.length ? previewDates.map((date) => <time key={date}>{pickerDateLabel(date)}</time>) : <strong>当前设置没有可发生日期</strong>}</div>
     </section>
-    <section className="task-form-region recurring-display-section" aria-labelledby={`${idPrefix}-display-title`}>
-      <header><strong id={`${idPrefix}-display-title`}>今日页展示</strong><span>设置展示时间与预计时长后，以非阻塞时间块显示。</span></header>
-      <div className="recurring-display-grid"><label>展示时间<input type="time" step={300} disabled={disabled} value={form.display_time} onChange={(event) => onChange({ ...form, display_time: event.target.value })} /></label><label>预计时长<div className="estimate-input"><input type="number" min={1} max={1440} disabled={disabled} value={form.display_duration_minutes ?? ""} placeholder="分钟" onChange={(event) => onChange({ ...form, display_duration_minutes: event.target.value ? Number(event.target.value) : null })} /><span>分钟</span></div></label><label>标签<input value={form.tags.join("，")} maxLength={620} disabled={disabled} placeholder="例如：健康，习惯" onChange={(event) => onChange({ ...form, tags: event.target.value.split(/[，,]/).map((item) => item.trim()).filter(Boolean).slice(0, 20) })} /></label></div>
-      <p className="recurring-display-help">{form.display_time && form.display_duration_minutes ? `${form.display_time} 起显示 ${form.display_duration_minutes} 分钟的重复事项块；可与其他事项重叠。` : form.display_time ? "还需填写预计时长，才能在时间线显示为事项块。" : "未设置时间时，到期事项显示在今日页顶部的重复事项区域。"}</p>
+    <section className="recurring-editor-section recurring-display-section" aria-labelledby={`${idPrefix}-display-title`}>
+      <header><div><h3 id={`${idPrefix}-display-title`}>今日页显示</h3><span>可选</span></div>{(form.display_time || form.display_duration_minutes) && <button type="button" className="recurring-clear-display" disabled={disabled} onClick={() => onChange({ ...form, display_time: "", display_duration_minutes: null })}>清除</button>}</header>
+      <div className="recurring-display-grid"><label>时间<input type="time" step={300} disabled={disabled} value={form.display_time} onChange={(event) => onChange({ ...form, display_time: event.target.value })} /></label><label>时长<div className="estimate-input"><input type="number" min={1} max={1440} disabled={disabled} value={form.display_duration_minutes ?? ""} placeholder="分钟" onChange={(event) => onChange({ ...form, display_duration_minutes: event.target.value ? Number(event.target.value) : null })} /><span>分钟</span></div></label></div>
+      <p className="recurring-display-help">{displayHelp}</p>
     </section>
-  </>;
-}
-
-function TaskTagChips({ tags }: { tags: string[] }) {
-  if (!tags.length) return null;
-  const visibleTags = tags.slice(0, 2);
-  const hiddenTagCount = tags.length - visibleTags.length;
-
-  return <span className="task-tag-list" role="group" aria-label={`标签：${tags.join("、")}`}>
-    {visibleTags.map((tag) => <span className="task-tag-chip" aria-hidden="true" key={tag}>{tag}</span>)}
-    {hiddenTagCount > 0 && <span className="task-tag-chip task-tag-count" aria-hidden="true">+{hiddenTagCount}</span>}
-  </span>;
+  </div>;
 }
 
 function TaskCapsuleContent({
   title,
   notes,
   priority,
-  tags = [],
   timing,
   minutes,
+  facts = [],
   status,
   sourceType,
   typeLabel,
+  variant = "task",
+  statusTone,
   compact = false
 }: {
   title: string;
   notes?: string | null;
   priority?: Task["priority"];
-  tags?: string[];
   timing?: string | null;
   minutes?: number | null;
+  facts?: { icon: IconName; label: string }[];
   status: string;
   sourceType?: Task["source_type"];
   typeLabel?: string;
+  variant?: "task" | "recurring";
+  statusTone?: "active" | "paused" | "ended" | "deleted";
   compact?: boolean;
 }) {
-  return <span className={`task-capsule-content${compact ? " compact" : ""}`}>
+  return <span className={`task-capsule-content${variant === "recurring" ? " recurring" : ""}${compact ? " compact" : ""}`}>
     <span className="task-capsule-heading">
       <strong title={title}>{title}</strong>
       <span className="task-capsule-heading-meta">
-        {typeLabel && <span className="task-type-badge">{typeLabel}</span>}
+        {typeLabel && <span className={`task-type-badge${variant === "recurring" ? " recurring" : ""}`}>{typeLabel}</span>}
         {priority && <span className={`priority-badge priority-${priority}`}>{priorityCopy[priority]}</span>}
         {sourceType && <span className={`task-source-icon source-${sourceType}`} role="img" aria-label={sourceType === "ai_assistant" ? "AI 创建" : "手动创建"} title={sourceType === "ai_assistant" ? "AI 创建" : "手动创建"}><Icon name={sourceType === "ai_assistant" ? "sparkle" : "user"} size={13} /></span>}
       </span>
     </span>
     {notes && <span className="task-capsule-notes" title={notes}>{notes}</span>}
-    {tags.length > 0 && <span className="task-capsule-tags"><TaskTagChips tags={tags} /></span>}
     <span className="task-capsule-footer">
       <span className="task-capsule-facts">
+        {facts.map((fact, index) => <span key={`${fact.icon}-${fact.label}-${index}`}><Icon name={fact.icon} size={13} />{fact.label}</span>)}
         {timing && <span><Icon name="calendar" size={13} />{timing}</span>}
         {minutes !== null && minutes !== undefined && <span><Icon name="clock" size={13} />{minutes} 分钟</span>}
       </span>
-      <span className="task-capsule-status">{status}</span>
+      <span className={`task-capsule-status${statusTone ? ` status-${statusTone}` : ""}`}>{status}</span>
     </span>
   </span>;
 }
@@ -878,21 +1004,94 @@ function recurringItemStatusLabel(item: RecurringItem) {
 }
 
 function RecurringItemCapsuleContent({ item }: { item: RecurringItem }) {
-  return <span className="recurring-capsule-content">
-    <span className="recurring-capsule-heading">
-      <strong title={item.title}>{item.title}</strong>
-      <span className="recurring-capsule-meta">
-        <span className="task-type-badge recurring">重复事项</span>
-        <span className={`recurring-status status-${item.deleted_at ? "deleted" : item.status}`}>{recurringItemStatusLabel(item)}</span>
-      </span>
-    </span>
-    {item.notes && <span className="ledger-note" title={item.notes}>{item.notes}</span>}
-    <span className="ledger-facts">
-      <span className="ledger-fact"><Icon name="restore" size={13} />{item.frequency === "daily" ? "每天" : item.frequency === "weekdays" ? "工作日" : item.frequency === "weekly" ? "每周" : "每月"}</span>
-      {item.display_time && <span className="ledger-fact"><Icon name="clock" size={13} />{item.display_time} 展示</span>}
-      <TaskTagChips tags={item.tags} />
-    </span>
-  </span>;
+  const statusTone = item.deleted_at ? "deleted" : item.status;
+  return <TaskCapsuleContent
+    title={item.title}
+    notes={item.notes}
+    facts={[
+      { icon: "restore", label: item.frequency === "daily" ? "每天" : item.frequency === "weekdays" ? "工作日" : item.frequency === "weekly" ? "每周" : "每月" },
+      ...(item.display_time ? [{ icon: "clock" as const, label: `${item.display_time} 展示` }] : [])
+    ]}
+    status={recurringItemStatusLabel(item)}
+    typeLabel="重复事项"
+    variant="recurring"
+    statusTone={statusTone}
+  />;
+}
+
+function RecycleBinBanner({ deletedAt, nowMs, itemLabel, busy, onRestore, onPermanentDelete }: {
+  deletedAt: string | null;
+  nowMs: number;
+  itemLabel: string;
+  busy: boolean;
+  onRestore: () => void;
+  onPermanentDelete: () => void;
+}) {
+  return <section className="recycle-bin-banner" aria-label={`${itemLabel}回收站状态`}>
+    <p><Icon name="trash" size={14} /><span>{recycleRetentionMessage(deletedAt, nowMs)}</span></p>
+    <div>
+      <button type="button" disabled={busy} onClick={onRestore}><Icon name="restore" size={14} />恢复{itemLabel}</button>
+      <button type="button" className="permanent" disabled={busy} onClick={onPermanentDelete}><Icon name="trash" size={14} />永久删除</button>
+    </div>
+  </section>;
+}
+
+function DeletedTaskDetails({ task }: { task: Task }) {
+  const boundary = (date: string | null, time: string | null) => date ? `${date}${time ? ` ${time}` : ""}` : "未设置";
+  return <section className="terminal-task-detail recycled-task-detail" aria-label="回收站任务详情">
+    <header><h2>{task.title}</h2><span className="terminal-task-status deleted"><Icon name="trash" size={14} />回收站</span></header>
+    <p className="terminal-task-help">该任务已停止后续安排，内容仍可查看；恢复后才能修改。</p>
+    {task.notes && <p className="terminal-task-notes">{task.notes}</p>}
+    <dl className="terminal-task-facts">
+      <div><dt>最早开始</dt><dd>{boundary(task.earliest_start_date, task.earliest_start_time)}</dd></div>
+      <div><dt>截止时间</dt><dd>{boundary(task.due_date, task.due_time)}</dd></div>
+      <div><dt>预计总投入</dt><dd>{task.estimated_minutes === null ? "未设置" : formatWorkloadMinutes(task.estimated_minutes)}</dd></div>
+      <div><dt>剩余投入</dt><dd>{task.remaining_workload_minutes === null ? "未设置" : formatWorkloadMinutes(task.remaining_workload_minutes)}</dd></div>
+      <div><dt>优先级</dt><dd>{task.priority ? priorityCopy[task.priority] : "未设置"}</dd></div>
+      <div><dt>任务来源</dt><dd>{task.source_type === "ai_assistant" ? "AI 创建" : "手动创建"}</dd></div>
+    </dl>
+  </section>;
+}
+
+function recurringScheduleLabel(item: RecurringItem) {
+  if (item.frequency === "daily") return item.interval_value === 1 ? "每天" : `每 ${item.interval_value} 天`;
+  if (item.frequency === "weekdays") return item.interval_value === 1 ? "每个工作日" : `每 ${item.interval_value} 周的工作日`;
+  if (item.frequency === "monthly") return `${item.interval_value === 1 ? "每月" : `每 ${item.interval_value} 个月`} ${item.month_day ?? 1} 日`;
+  const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
+  const selectedDays = item.weekdays.map((day) => `周${weekdays[day - 1]}`).join("、") || "未选择星期";
+  return `${item.interval_value === 1 ? "每周" : `每 ${item.interval_value} 周`} · ${selectedDays}`;
+}
+
+function DeletedRecurringItemDetails({ item }: { item: RecurringItem }) {
+  return <section className="terminal-task-detail recycled-task-detail" aria-label="回收站重复事项详情">
+    <header><h2>{item.title}</h2><span className="terminal-task-status deleted"><Icon name="trash" size={14} />回收站</span></header>
+    <p className="terminal-task-help">该重复事项已结束并移入回收站，过去的记录仍会保留。</p>
+    {item.notes && <p className="terminal-task-notes">{item.notes}</p>}
+    <dl className="terminal-task-facts">
+      <div><dt>重复规则</dt><dd>{recurringScheduleLabel(item)}</dd></div>
+      <div><dt>有效日期</dt><dd>{item.starts_on} 至 {item.ends_on ?? "长期"}</dd></div>
+      <div><dt>今日页显示</dt><dd>{item.display_time ?? "不指定时间"}</dd></div>
+      <div><dt>显示时长</dt><dd>{item.display_duration_minutes ? `${item.display_duration_minutes} 分钟` : "未设置"}</dd></div>
+    </dl>
+  </section>;
+}
+
+function CompletedTaskDetails({ task, busy, onReopen, onTrash }: {
+  task: Task; busy: boolean; onReopen: () => void; onTrash: () => void;
+}) {
+  const boundary = (date: string | null, time: string | null) => date ? `${date}${time ? ` ${time}` : ""}` : "未设置";
+  return <section className="terminal-task-detail" aria-label="任务只读详情">
+    <header><h2>{task.title}</h2><span className="terminal-task-status completed"><Icon name="check" size={14} />已完成</span></header>
+    <p className="terminal-task-help">如需修改，请先取消完成。</p>
+    {task.notes && <p className="terminal-task-notes">{task.notes}</p>}
+    <dl className="terminal-task-facts">
+      <div><dt>最早开始</dt><dd>{boundary(task.earliest_start_date, task.earliest_start_time)}</dd></div>
+      <div><dt>截止时间</dt><dd>{boundary(task.due_date, task.due_time)}</dd></div>
+      <div><dt>预计工作量</dt><dd>{task.estimated_minutes === null ? "未设置" : `${task.estimated_minutes} 分钟`}</dd></div>
+      <div><dt>优先级</dt><dd>{task.priority ? priorityCopy[task.priority] : "未设置"}</dd></div>
+    </dl>
+    <footer><button type="button" className="secondary-action" disabled={busy} onClick={onReopen}><Icon name="restore" size={15} />取消完成</button><button type="button" className="terminal-task-trash" disabled={busy} onClick={onTrash}><Icon name="trash" size={14} />移入回收站</button></footer>
+  </section>;
 }
 
 function TaskWorkspace({
@@ -907,7 +1106,9 @@ function TaskWorkspace({
   onDirtyChange,
   externalNavigationRequest,
   onExternalNavigationResolved,
-  requestedView
+  requestedView,
+  timelineReturnContext,
+  onReturnToTimeline
 }: {
   tasks: Task[];
   recurringItems: RecurringItem[];
@@ -921,10 +1122,11 @@ function TaskWorkspace({
   externalNavigationRequest: NavigationIntent | null;
   onExternalNavigationResolved: (proceed: boolean) => void;
   requestedView: TaskViewRequest | null;
+  timelineReturnContext: TimelineReturnContext | null;
+  onReturnToTimeline: (context: TimelineReturnContext) => void;
 }) {
   const [view, setView] = useState<TaskView>("open");
   const [search, setSearch] = useState("");
-  const [tagFilter, setTagFilter] = useState("");
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ManualTaskUpdate | null>(null);
@@ -935,7 +1137,6 @@ function TaskWorkspace({
   const [selectedRecurringId, setSelectedRecurringId] = useState<string | null>(null);
   const initialNewTaskForm = useRef<NewTaskForm>(newTaskDefaultForm());
   const [newTaskForm, setNewTaskForm] = useState<NewTaskForm>(initialNewTaskForm.current);
-  const [newTaskEstimateMode, setNewTaskEstimateMode] = useState<"auto" | "manual">("auto");
   const [newTaskAutosaveArmed, setNewTaskAutosaveArmed] = useState(false);
   const [persistedNewTaskDraft, setPersistedNewTaskDraft] = useState<TaskDraft | null>(null);
   const [taskDrafts, setTaskDrafts] = useState<TaskDraft[]>([]);
@@ -968,6 +1169,7 @@ function TaskWorkspace({
   const handledRequestedView = useRef<TaskViewRequest | null>(null);
   const taskViewInitialized = useRef(false);
   const [taskViewReady, setTaskViewReady] = useState(false);
+  const [recycleNow, setRecycleNow] = useState(() => Date.now());
 
   useEffect(() => {
     if (!requestedView || handledRequestedView.current === requestedView) return;
@@ -992,7 +1194,6 @@ function TaskWorkspace({
       setNewTaskForm(defaults);
       initialRecurringForm.current = recurringDefaults;
       setRecurringForm(recurringDefaults);
-      setNewTaskEstimateMode("auto");
       setNewTaskAutosaveArmed(false);
       setPersistedNewTaskDraft(null);
       setNewTaskError(null);
@@ -1030,16 +1231,11 @@ function TaskWorkspace({
     };
   }, [filterMenuOpen]);
 
-  const availableTags = useMemo(() => [...new Set([
-    ...tasks.flatMap((task) => task.tags),
-    ...recurringItems.filter((item) => !item.deleted_at).flatMap((item) => item.tags)
-  ])].sort((left, right) => left.localeCompare(right, "zh-CN")), [tasks, recurringItems]);
   const visibleTasks = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("zh-CN");
     return tasks.filter((task) => taskMatchesView(task, view)
-      && (!tagFilter || task.tags.includes(tagFilter))
-      && (!query || task.title.toLocaleLowerCase("zh-CN").includes(query) || task.notes?.toLocaleLowerCase("zh-CN").includes(query) || task.tags.some((tag) => tag.toLocaleLowerCase("zh-CN").includes(query))));
-  }, [tasks, view, search, tagFilter]);
+      && (!query || task.title.toLocaleLowerCase("zh-CN").includes(query) || task.notes?.toLocaleLowerCase("zh-CN").includes(query)));
+  }, [tasks, view, search]);
   const visibleTaskDrafts = useMemo(() => {
     if (view !== "draft") return [];
     const query = search.trim().toLocaleLowerCase("zh-CN");
@@ -1051,18 +1247,19 @@ function TaskWorkspace({
     if (view !== "recurring" && view !== "deleted") return [];
     const query = search.trim().toLocaleLowerCase("zh-CN");
     return recurringItems.filter((item) => (view === "deleted" ? Boolean(item.deleted_at) : !item.deleted_at)
-      && (!tagFilter || item.tags.includes(tagFilter))
       && (!query
         || item.title.toLocaleLowerCase("zh-CN").includes(query)
-        || item.notes?.toLocaleLowerCase("zh-CN").includes(query)
-        || item.tags.some((tag) => tag.toLocaleLowerCase("zh-CN").includes(query))));
-  }, [recurringItems, view, search, tagFilter]);
+        || item.notes?.toLocaleLowerCase("zh-CN").includes(query)));
+  }, [recurringItems, view, search]);
   const selectedTask = tasks.find((task) => task.id === selectedId) ?? null;
   const selectedRecurringItem = recurringItems.find((item) => item.id === selectedRecurringId) ?? null;
+  const selectedRecycleTimestamp = selectedTask?.status === "deleted"
+    ? selectedTask.deleted_at
+    : selectedRecurringItem?.deleted_at ?? null;
   const metadataDirty = Boolean(taskMetadata && initialTaskMetadata.current
     && JSON.stringify({ tags: taskMetadata.tags, recurrence: taskMetadata.recurrence })
       !== JSON.stringify({ tags: initialTaskMetadata.current.tags, recurrence: initialTaskMetadata.current.recurrence }));
-  const isDirty = !draftMatchesTask(draft, selectedTask) || metadataDirty;
+  const isDirty = taskIsEditable(selectedTask) && (!draftMatchesTask(draft, selectedTask) || metadataDirty);
   const recurringFormIsDirty = creating && JSON.stringify(recurringForm) !== JSON.stringify(initialRecurringForm.current);
   const newTaskIsDirty = creating && (createItemType === "task"
     ? !newTaskFormMatches(newTaskForm, initialNewTaskForm.current)
@@ -1071,28 +1268,20 @@ function TaskWorkspace({
     ? JSON.stringify(recurringForm) !== JSON.stringify(recurringItemFormForItem(selectedRecurringItem))
     : false;
   const hasUnsavedChanges = isDirty || newTaskIsDirty || recurringEditingDirty;
-  const newTaskHasDate = Boolean(newTaskForm.earliest_start_date || newTaskForm.due_date);
+  const newTaskHasCompleteSchedule = taskScheduleIsComplete(newTaskForm);
   const newTaskHasValidRange = taskRangeIsValid(newTaskForm);
-  const newTaskRangeMinutes = sameDayTaskRangeMinutes(newTaskForm);
-  const newTaskEstimateHint = newTaskForm.earliest_start_date && newTaskForm.due_date
-    && newTaskForm.earliest_start_date !== newTaskForm.due_date
-    ? "跨日任务，请确认预计工作量"
-    : newTaskEstimateMode === "manual"
-      ? "使用手动值，不会被时间调整覆盖"
-      : null;
+  const newTaskHasValidWorkload = taskWorkloadIsValid(newTaskForm);
   const selectedMetadata = taskMetadata?.task_id === selectedTask?.id ? taskMetadata : null;
   const editingTaskForm = draft ? {
     ...taskFormForManualUpdate(draft),
     tags: selectedMetadata?.tags ?? selectedTask?.tags ?? [],
     recurrence: selectedMetadata?.recurrence ?? null
   } : null;
-  const editingTaskEstimateHint = editingTaskForm?.earliest_start_date && editingTaskForm.due_date
-    && editingTaskForm.earliest_start_date !== editingTaskForm.due_date
-    ? "跨日任务，请确认预计工作量"
-    : null;
+  const editingTaskHasValidRange = editingTaskForm ? taskRangeIsValid(editingTaskForm) : true;
+  const editingTaskHasCompleteSchedule = editingTaskForm ? taskScheduleIsComplete(editingTaskForm) : true;
+  const editingTaskHasValidWorkload = editingTaskForm ? taskWorkloadIsValid(editingTaskForm) : true;
 
   function updateNewTaskFields(next: NewTaskForm) {
-    if (next.estimated_minutes !== newTaskForm.estimated_minutes) setNewTaskEstimateMode("manual");
     setNewTaskAutosaveArmed(true);
     setNewTaskForm(next);
   }
@@ -1105,7 +1294,7 @@ function TaskWorkspace({
         await discardTaskDraft(outgoingDraft);
         setTaskDrafts((current) => current.filter((item) => item.id !== outgoingDraft.id));
       } catch (reason) {
-        setNewTaskError(`无法切换类型：当前草稿未能放弃：${String(reason)}`);
+        setNewTaskError(`无法切换类型：当前草稿未能放弃：${uiErrorMessage(reason)}`);
         return;
       } finally {
         setDraftSaving(false);
@@ -1144,21 +1333,14 @@ function TaskWorkspace({
     if (selectedTask) setTaskMetadata({ task_id: selectedTask.id, tags: next.tags, recurrence: next.recurrence });
   }
 
-  function updateNewTaskSchedule(next: NewTaskForm) {
-    setNewTaskAutosaveArmed(true);
-    if (newTaskEstimateMode === "auto") {
-      const estimate = sameDayTaskRangeMinutes(next);
-      setNewTaskForm(estimate === null ? next : { ...next, estimated_minutes: estimate });
-      return;
-    }
-    setNewTaskForm(next);
+  function updateEditingTaskSchedule(next: NewTaskForm) {
+    if (!editingTaskForm) return;
+    updateEditingTaskForm(normalizeTaskWorkloadAfterScheduleChange(editingTaskForm, next));
   }
 
-  function recalculateNewTaskEstimate() {
-    if (newTaskRangeMinutes === null) return;
+  function updateNewTaskSchedule(next: NewTaskForm) {
     setNewTaskAutosaveArmed(true);
-    setNewTaskEstimateMode("auto");
-    setNewTaskForm({ ...newTaskForm, estimated_minutes: newTaskRangeMinutes });
+    setNewTaskForm(normalizeTaskWorkloadAfterScheduleChange(newTaskForm, next));
   }
 
   useEffect(() => { onDirtyChange(hasUnsavedChanges); }, [hasUnsavedChanges, onDirtyChange]);
@@ -1169,7 +1351,7 @@ function TaskWorkspace({
     try {
       setTaskDrafts(await listTaskDrafts(false));
     } catch (reason) {
-      setFeedback(`草稿没有读出来：${String(reason)}`);
+      setFeedback(`草稿暂时无法打开：${uiErrorMessage(reason)}`);
     } finally {
       setTaskDraftsLoading(false);
     }
@@ -1188,10 +1370,10 @@ function TaskWorkspace({
       setPersistedNewTaskDraft(saved);
       setTaskDrafts((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
       initialNewTaskForm.current = taskFormForPersistedDraft(saved);
-      if (showFeedback) setFeedback("草稿已保存到本机，尚未创建正式任务。");
+      if (showFeedback) setFeedback("草稿已保存，任务尚未创建。");
       return saved;
     } catch (reason) {
-      setNewTaskError(`草稿未保存：${String(reason)}`);
+      setNewTaskError(`草稿未保存：${uiErrorMessage(reason)}`);
       return null;
     } finally {
       setDraftSaving(false);
@@ -1222,10 +1404,10 @@ function TaskWorkspace({
       await onReload(false);
       setSelectedId(null);
       setDraft(null);
-      setFeedback("已通过新的 SQLite 事务撤销上一项操作。");
+      setFeedback("已撤销上一项操作。");
     } catch (reason) {
       setSuccessToast(null);
-      setFeedback(`无法撤销：${String(reason)}`);
+      setFeedback(`无法撤销：${uiErrorMessage(reason)}`);
     }
   }
 
@@ -1274,6 +1456,13 @@ function TaskWorkspace({
   }, [selectedTask?.id, selectedTask?.updated_at]);
 
   useEffect(() => {
+    if (!selectedRecycleTimestamp) return;
+    setRecycleNow(Date.now());
+    const interval = window.setInterval(() => setRecycleNow(Date.now()), 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [selectedRecycleTimestamp]);
+
+  useEffect(() => {
     if (!selectedTask || selectedTask.status === "deleted") {
       setTaskMetadata(null);
       initialTaskMetadata.current = null;
@@ -1284,7 +1473,7 @@ function TaskWorkspace({
       if (!active) return;
       setTaskMetadata(metadata);
       initialTaskMetadata.current = metadata;
-    }).catch((reason) => { if (active) setFeedback(`任务标签与重复规则没有读出来：${String(reason)}`); });
+    }).catch((reason) => { if (active) setFeedback(`任务详情暂时无法打开：${uiErrorMessage(reason)}`); });
     return () => { active = false; };
   }, [selectedTask?.id, selectedTask?.updated_at]);
 
@@ -1315,18 +1504,16 @@ function TaskWorkspace({
   const counts = useMemo(() => ({
     draft: taskDrafts.length,
     recurring: recurringItems.filter((item) => !item.deleted_at).length,
-    inbox: tasks.filter((task) => task.status === "inbox").length,
     open: tasks.filter((task) => task.status === "open").length,
     scheduled: tasks.filter((task) => task.status === "scheduled").length,
     done: tasks.filter((task) => task.status === "done").length,
-    cancelled: tasks.filter((task) => task.status === "cancelled").length,
     deleted: tasks.filter((task) => task.status === "deleted").length + recurringItems.filter((item) => item.deleted_at).length
   }), [tasks, taskDrafts, recurringItems]);
 
   useEffect(() => {
     if (loading || taskViewInitialized.current || requestedView) return;
     taskViewInitialized.current = true;
-    const operationalViews: TaskView[] = ["open", "inbox", "scheduled"];
+    const operationalViews: TaskView[] = ["open", "scheduled"];
     void getUiSetting(TASK_QUEUE_VIEW_SETTING).then((stored) => {
       const preferred = operationalViews.includes(stored as TaskView) ? stored as TaskView : null;
       const next = preferred && counts[preferred] > 0
@@ -1341,14 +1528,27 @@ function TaskWorkspace({
   }, [loading, requestedView, counts]);
 
   useEffect(() => {
-    if (!taskViewReady || !["open", "inbox", "scheduled"].includes(view)) return;
+    if (!taskViewReady || !["open", "scheduled"].includes(view)) return;
     void setUiSetting(TASK_QUEUE_VIEW_SETTING, view).catch(() => undefined);
   }, [view, taskViewReady]);
 
   async function commitDraft(scope?: "this" | "future") {
+    if (!taskIsEditable(selectedTask)) return false;
     if (!selectedTask || !draft || busy || !isDirty) return !isDirty;
     const form = editingTaskForm;
     if (!form) return false;
+    if (!taskScheduleIsComplete(form)) {
+      setFeedback("请先填写完整的任务开始和结束时间。");
+      return false;
+    }
+    if (!taskRangeIsValid(form)) {
+      setFeedback(`任务时间至少需要 ${MIN_TASK_WORKLOAD_MINUTES} 分钟。`);
+      return false;
+    }
+    if (!taskWorkloadIsValid(form)) {
+      setFeedback(`平均每天至少投入 ${MIN_TASK_WORKLOAD_MINUTES} 分钟。`);
+      return false;
+    }
     let input = taskDraftInputForForm(form);
     if (scope === "future" && input.recurrence && selectedTask.earliest_start_date) {
       input = { ...input, recurrence: { ...input.recurrence, starts_on: selectedTask.earliest_start_date } };
@@ -1369,7 +1569,6 @@ function TaskWorkspace({
             earliest_start_at: toShanghaiTimestamp(draft.earliest_start_at ?? ""),
             due_at: toShanghaiTimestamp(draft.due_at ?? "")
           });
-      if (!scope) await setTaskTags(selectedTask.id, form.tags);
       const metadata = await getTaskMetadata(selectedTask.id);
       setTaskMetadata(metadata);
       initialTaskMetadata.current = metadata;
@@ -1377,10 +1576,10 @@ function TaskWorkspace({
       setDraft(draftForTask(committed));
       setPendingRecurringSave(null);
       setFeedback(null);
-      await showCommittedToast("任务更改已保存到本机");
+      await showCommittedToast("任务更改已保存");
       return true;
     } catch (reason) {
-      setFeedback(`未保存：${String(reason)}`);
+      setFeedback(`未保存：${uiErrorMessage(reason)}`);
       return false;
     } finally { setBusy(false); }
   }
@@ -1402,7 +1601,6 @@ function TaskWorkspace({
     const empty = emptyNewTaskForm();
     initialNewTaskForm.current = empty;
     setNewTaskForm(empty);
-    setNewTaskEstimateMode("auto");
     setNewTaskAutosaveArmed(false);
     setPersistedNewTaskDraft(null);
     setNewTaskError(null);
@@ -1427,17 +1625,22 @@ function TaskWorkspace({
         setView("recurring");
         setSelectedRecurringId(item.id);
         clearNewTaskForm();
-        setFeedback("重复事项已保存；不会进入 Inbox、待处理或已安排任务队列。");
+        setFeedback("重复事项已保存；不会进入普通任务队列。");
         setSuccessToast({ id: Date.now(), message: "重复事项已创建" });
         return true;
       } catch (reason) {
-        setNewTaskError(`重复事项未创建：${String(reason)}`);
+        setNewTaskError(`重复事项未创建：${uiErrorMessage(reason)}`);
         return false;
       } finally {
         setBusy(false);
       }
     }
-    if (busy || !newTaskForm.title.trim() || !newTaskHasValidRange) return false;
+    if (busy || !newTaskForm.title.trim()) return false;
+    if (!newTaskHasCompleteSchedule) {
+      setNewTaskError("请填写完整的任务开始和结束时间；当前内容仍可保存为草稿。");
+      return false;
+    }
+    if (!newTaskHasValidRange) return false;
     setBusy(true);
     setSuccessToast(null);
     setNewTaskError(null);
@@ -1457,13 +1660,13 @@ function TaskWorkspace({
       await onReload(false);
       setSelectedId(committed.id);
       setFeedback(null);
-      await showCommittedToast(persisted.draft_kind === "update" ? "AI 修改草稿已确认并保存到本机" : committed.status === "inbox" ? "任务已创建并放入 Inbox" : "任务已创建并保存到本机");
+      await showCommittedToast(persisted.draft_kind === "update" ? "AI 整理的修改已确认并保存" : "任务已创建并保存");
       return true;
     } catch (reason) {
       if (persisted) setPersistedNewTaskDraft(persisted);
       setNewTaskError(persisted
-        ? `草稿已保存在本机，但任务尚未创建：${String(reason)}`
-        : `任务未创建：${String(reason)}`);
+        ? `草稿已保存，但任务尚未创建：${uiErrorMessage(reason)}`
+        : `任务未创建：${uiErrorMessage(reason)}`);
       return false;
     } finally {
       setBusy(false);
@@ -1483,7 +1686,7 @@ function TaskWorkspace({
       try {
         await discardTaskDraft(persistedNewTaskDraft);
       } catch (reason) {
-        setNewTaskError(`草稿未能放弃：${String(reason)}`);
+        setNewTaskError(`草稿未能放弃：${uiErrorMessage(reason)}`);
         setBusy(false);
         return false;
       }
@@ -1504,7 +1707,7 @@ function TaskWorkspace({
       setPendingDiscardTaskDraft(null);
       setFeedback("草稿已放弃，正式任务没有变化。");
     } catch (reason) {
-      setFeedback(`草稿未能放弃：${String(reason)}`);
+      setFeedback(`草稿未能放弃：${uiErrorMessage(reason)}`);
     } finally {
       setBusy(false);
     }
@@ -1527,7 +1730,6 @@ function TaskWorkspace({
     setPersistedNewTaskDraft(item);
     initialNewTaskForm.current = form;
     setNewTaskForm(form);
-    setNewTaskEstimateMode("manual");
     setNewTaskAutosaveArmed(true);
     setNewTaskError(null);
     setFeedback(null);
@@ -1563,7 +1765,7 @@ function TaskWorkspace({
       await onReload(false);
       setSelectedId(selectedTask.id);
       setFeedback(`任务已更新为“${statusCopy[committed.status]}”。`);
-    } catch (reason) { preferredSelection.current = null; setFeedback(`状态未改变：${String(reason)}`); }
+    } catch (reason) { preferredSelection.current = null; setFeedback(`状态未改变：${uiErrorMessage(reason)}`); }
     finally { setBusy(false); }
   }
 
@@ -1579,8 +1781,8 @@ function TaskWorkspace({
       setSelectedId(selectedTask.id);
       setFeedback(committed.status === "scheduled"
         ? `“${selectedTask.title}”已取消完成，并恢复到今日计划。`
-        : `“${selectedTask.title}”已取消完成，当前为待办。`);
-    } catch (reason) { preferredSelection.current = null; setFeedback(`状态未改变：${String(reason)}`); }
+        : `“${selectedTask.title}”已取消完成，当前为待处理。`);
+    } catch (reason) { preferredSelection.current = null; setFeedback(`状态未改变：${uiErrorMessage(reason)}`); }
     finally { setBusy(false); }
   }
 
@@ -1602,22 +1804,22 @@ function TaskWorkspace({
       setPendingTrashTask(null);
       setFeedback(null);
       setSuccessToast({ id: Date.now(), message: `“${target.title}”已移入回收站，可在回收站恢复` });
-    } catch (reason) { preferredSelection.current = null; setFeedback(`未移入回收站：${String(reason)}`); }
+    } catch (reason) { preferredSelection.current = null; setFeedback(`未移入回收站：${uiErrorMessage(reason)}`); }
     finally { setBusy(false); }
   }
 
-  async function restore() {
-    if (!selectedTask || busy) return;
+  async function restore(target: Task | null = selectedTask) {
+    if (!target || busy) return;
     setBusy(true);
     try {
-      preferredSelection.current = selectedTask.id;
-      await restoreManualTask(selectedTask.id);
+      preferredSelection.current = target.id;
+      await restoreManualTask(target.id);
       setView("open");
       await onReload(false);
       setSelectedRecurringId(null);
-      setSelectedId(selectedTask.id);
-      setFeedback(`“${selectedTask.title}”已恢复。`);
-    } catch (reason) { preferredSelection.current = null; setFeedback(`未恢复：${String(reason)}`); }
+      setSelectedId(target.id);
+      setFeedback(`“${target.title}”已恢复。`);
+    } catch (reason) { preferredSelection.current = null; setFeedback(`未恢复：${uiErrorMessage(reason)}`); }
     finally { setBusy(false); }
   }
 
@@ -1630,7 +1832,7 @@ function TaskWorkspace({
       setSelectedId(null);
       await onReload(false);
       setFeedback(`“${selectedTask.title}”已永久删除。`);
-    } catch (reason) { setFeedback(`未永久删除：${String(reason)}`); }
+    } catch (reason) { setFeedback(`未永久删除：${uiErrorMessage(reason)}`); }
     finally { setBusy(false); }
   }
 
@@ -1643,9 +1845,9 @@ function TaskWorkspace({
       const saved = await updateRecurringItem(selectedRecurringItem.id, recurringItemInputForForm(recurringForm));
       await onRecurringChanged();
       setRecurringForm(recurringItemFormForItem(saved));
-      setFeedback("重复事项已保存；历史发生记录没有被覆盖。");
+      setFeedback("重复事项已保存；过去的记录没有改变。");
     } catch (reason) {
-      setFeedback(`重复事项未保存：${String(reason)}`);
+      setFeedback(`重复事项未保存：${uiErrorMessage(reason)}`);
     } finally {
       setBusy(false);
     }
@@ -1658,9 +1860,9 @@ function TaskWorkspace({
       const saved = await setRecurringItemStatus(selectedRecurringItem.id, status);
       await onRecurringChanged();
       setRecurringForm(recurringItemFormForItem(saved));
-      setFeedback(status === "active" ? "重复事项已恢复。" : status === "paused" ? "重复事项已暂停；历史记录继续保留。" : "重复事项已结束；历史记录继续保留。");
+      setFeedback(status === "active" ? "重复事项已恢复。" : status === "paused" ? "重复事项已暂停；过去的记录会继续保留。" : "重复事项已结束；过去的记录会继续保留。");
     } catch (reason) {
-      setFeedback(`状态未改变：${String(reason)}`);
+      setFeedback(`状态未改变：${uiErrorMessage(reason)}`);
     } finally {
       setBusy(false);
     }
@@ -1673,9 +1875,9 @@ function TaskWorkspace({
       await setRecurringItemStatus(item.id, "ended");
       await onRecurringChanged();
       setPendingEndRecurringItem(null);
-      setFeedback(`“${item.title}”已结束；历史记录继续保留。`);
+      setFeedback(`“${item.title}”已结束；过去的记录会继续保留。`);
     } catch (reason) {
-      setFeedback(`重复事项未能结束：${String(reason)}`);
+      setFeedback(`重复事项未能结束：${uiErrorMessage(reason)}`);
     } finally {
       setBusy(false);
     }
@@ -1692,17 +1894,17 @@ function TaskWorkspace({
       setSelectedId(null);
       setSelectedRecurringId(item.id);
       setPendingTrashRecurringItem(null);
-      setFeedback(`“${item.title}”已移入回收站；历史发生与复盘记录仍保留。`);
+      setFeedback(`“${item.title}”已移入回收站；过去的记录仍会保留。`);
     } catch (reason) {
-      setFeedback(`重复事项未移入回收站：${String(reason)}`);
+      setFeedback(`重复事项未移入回收站：${uiErrorMessage(reason)}`);
     } finally {
       setBusy(false);
     }
   }
 
-  async function restoreSelectedRecurringItem() {
-    if (!selectedRecurringItem || busy) return;
-    const item = selectedRecurringItem;
+  async function restoreSelectedRecurringItem(target: RecurringItem | null = selectedRecurringItem) {
+    if (!target || busy) return;
+    const item = target;
     setBusy(true);
     try {
       await restoreRecurringItem(item.id);
@@ -1712,7 +1914,7 @@ function TaskWorkspace({
       setSelectedRecurringId(item.id);
       setFeedback(`“${item.title}”已恢复为已结束重复事项。`);
     } catch (reason) {
-      setFeedback(`重复事项未恢复：${String(reason)}`);
+      setFeedback(`重复事项未恢复：${uiErrorMessage(reason)}`);
     } finally {
       setBusy(false);
     }
@@ -1729,7 +1931,7 @@ function TaskWorkspace({
       await onRecurringChanged();
       setFeedback(`“${item.title}”及其本地历史已永久删除。`);
     } catch (reason) {
-      setFeedback(`重复事项未永久删除：${String(reason)}`);
+      setFeedback(`重复事项未永久删除：${uiErrorMessage(reason)}`);
     } finally {
       setBusy(false);
     }
@@ -1839,7 +2041,7 @@ function TaskWorkspace({
 
   function persistLedgerWidth(width: number) {
     void setUiSetting(TASK_LEDGER_WIDTH_SETTING, String(Math.round(width)))
-      .catch((reason) => setFeedback(`分栏宽度未保存：${String(reason)}`));
+      .catch((reason) => setFeedback(`分栏宽度未保存：${uiErrorMessage(reason)}`));
   }
 
   function startLedgerResize(event: ReactPointerEvent<HTMLDivElement>) {
@@ -1886,11 +2088,11 @@ function TaskWorkspace({
         <div className="task-ledger-list" aria-busy={loading}>
           <header className="task-queue-header">
             <div className="task-queue-heading">
-              <div><h1>{taskViewCopy[view]}</h1><span>{view === "recurring" ? "独立规则" : view === "deleted" ? "普通任务与重复事项" : "任务队列"}{counts[view] + (creating && !persistedNewTaskDraft ? 1 : 0) > 0 ? ` · ${counts[view] + (creating && !persistedNewTaskDraft ? 1 : 0)} 项` : ""}</span></div>
+              <div><h1>{taskViewCopy[view]}</h1><span>{view === "recurring" ? "单独管理" : view === "deleted" ? "普通任务与重复事项" : "任务队列"}{counts[view] + (creating && !persistedNewTaskDraft ? 1 : 0) > 0 ? ` · ${counts[view] + (creating && !persistedNewTaskDraft ? 1 : 0)} 项` : ""}</span></div>
               <div className="task-filter-control" ref={filterMenuRef}>
-                <button className={`queue-filter-button${filterMenuOpen ? " is-open" : ""}${view !== "open" || search || tagFilter ? " is-filtered" : ""}`} type="button" aria-label={`筛选任务，当前为${taskViewCopy[view]}`} aria-haspopup="dialog" aria-expanded={filterMenuOpen} onClick={() => setFilterMenuOpen((open) => !open)}><Icon name="filter" size={19} /><span className="filter-button-state" aria-hidden="true" /></button>
+                <button className={`queue-filter-button${filterMenuOpen ? " is-open" : ""}${view !== "open" || search ? " is-filtered" : ""}`} type="button" aria-label={`筛选任务，当前为${taskViewCopy[view]}`} aria-haspopup="dialog" aria-expanded={filterMenuOpen} onClick={() => setFilterMenuOpen((open) => !open)}><Icon name="filter" size={19} /><span className="filter-button-state" aria-hidden="true" /></button>
                 {filterMenuOpen && <section className="task-filter-menu" role="dialog" aria-label="筛选任务">
-                  <header className="filter-menu-heading"><strong>筛选</strong>{(view !== "open" || search || tagFilter) && <button type="button" onClick={() => { requestTaskChange({ kind: "view", view: "open" }); setSearch(""); setTagFilter(""); }} aria-label="恢复默认筛选">重置</button>}</header>
+                  <header className="filter-menu-heading"><strong>筛选</strong>{(view !== "open" || search) && <button type="button" onClick={() => { requestTaskChange({ kind: "view", view: "open" }); setSearch(""); }} aria-label="恢复默认筛选">重置</button>}</header>
                   <label className="task-search"><Icon name="search" size={16} /><span className="sr-only">搜索任务</span><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索任务" />{search && <button type="button" aria-label="清除搜索" onClick={() => setSearch("")}><Icon name="close" size={14} /></button>}</label>
                   <div className="filter-menu-options" role="radiogroup" aria-label="任务类型">
                     {taskViewGroups.map((group) => <div className="filter-menu-group" role="group" aria-label={group.label} key={group.label}>
@@ -1904,26 +2106,36 @@ function TaskWorkspace({
                       ))}
                     </div>)}
                   </div>
-                  {availableTags.length > 0 && <div className="task-tag-filter" aria-label="按标签筛选"><span>标签</span><div><button type="button" aria-pressed={!tagFilter} onClick={() => setTagFilter("")}>全部</button>{availableTags.map((tag) => <button type="button" key={tag} aria-pressed={tagFilter === tag} onClick={() => setTagFilter(tagFilter === tag ? "" : tag)}>#{tag}</button>)}</div></div>}
                 </section>}
               </div>
             </div>
-            {(search || tagFilter) && <div className="active-filter-row">{search && <button className="active-search-filter" type="button" onClick={() => setSearch("")} title="清除搜索"><Icon name="search" size={13} /><span>“{search}”</span><Icon name="close" size={12} /></button>}{tagFilter && <button className="active-search-filter" type="button" onClick={() => setTagFilter("")} title="清除标签筛选"><span>#{tagFilter}</span><Icon name="close" size={12} /></button>}</div>}
+            {search && <div className="active-filter-row"><button className="active-search-filter" type="button" onClick={() => setSearch("")} title="清除搜索"><Icon name="search" size={13} /><span>“{search}”</span><Icon name="close" size={12} /></button></div>}
           </header>
           <p className="workspace-feedback" role="status" aria-live="polite">{feedback ?? ""}</p>
-          {creating && view === "draft" && !persistedNewTaskDraft && <button type="button" aria-pressed="true" aria-label={`${createItemType === "task" ? newTaskForm.title.trim() || "未命名任务" : recurringForm.title.trim() || "未命名重复事项"}，${createItemType === "task" && draftSaving ? "正在保存草稿" : "未保存"}`} className={`ledger-row selected creating-ledger-row capsule-type-${createItemType}${createItemType === "task" ? " task-capsule-row" : ""}`} onClick={() => document.getElementById(createItemType === "task" ? "new-task-title" : "new-recurring-title")?.focus()}>
+          {creating && view === "draft" && !persistedNewTaskDraft && <button type="button" aria-pressed="true" aria-label={`${createItemType === "task" ? newTaskForm.title.trim() || "未命名任务" : recurringForm.title.trim() || "未命名重复事项"}，${createItemType === "task" && draftSaving ? "正在保存草稿" : "未保存"}`} className={`ledger-row selected creating-ledger-row task-capsule-row capsule-type-${createItemType}`} onClick={() => document.getElementById(createItemType === "task" ? "new-task-title" : "new-recurring-title")?.focus()}>
             <span className="ledger-accent" aria-hidden="true" />
-            {createItemType === "task" ? <TaskCapsuleContent title={newTaskForm.title.trim() || "未命名任务"} notes={newTaskForm.notes.trim()} priority={newTaskForm.priority} tags={newTaskForm.tags} timing={taskFormTimingFact(newTaskForm, today)} minutes={newTaskForm.estimated_minutes} status={draftSaving ? "保存中" : persistedNewTaskDraft ? "草稿已保存" : "未保存"} sourceType="manual" /> : <><span className="ledger-main"><span className="recurring-capsule-heading"><strong>{recurringForm.title.trim() || "未命名重复事项"}</strong><span className="recurring-capsule-meta"><span className="task-type-badge recurring">重复事项</span><span className="recurring-status">未保存</span></span></span>{recurringForm.notes.trim() && <span className="ledger-note">{recurringForm.notes}</span>}<span className="ledger-facts"><span className="ledger-fact"><Icon name="restore" size={13} />{recurringForm.frequency === "daily" ? "每天" : recurringForm.frequency === "weekdays" ? "工作日" : recurringForm.frequency === "weekly" ? "每周" : "每月"}</span>{recurringForm.display_time && <span className="ledger-fact"><Icon name="clock" size={13} />{recurringForm.display_time} 展示</span>}</span></span></>}
+            {createItemType === "task" ? <TaskCapsuleContent title={newTaskForm.title.trim() || "未命名任务"} notes={newTaskForm.notes.trim()} priority={newTaskForm.priority} timing={taskFormTimingFact(newTaskForm, today)} minutes={newTaskForm.estimated_minutes} status={draftSaving ? "保存中" : persistedNewTaskDraft ? "草稿已保存" : "未保存"} sourceType="manual" /> : <TaskCapsuleContent title={recurringForm.title.trim() || "未命名重复事项"} notes={recurringForm.notes.trim()} facts={[{ icon: "restore", label: recurringForm.frequency === "daily" ? "每天" : recurringForm.frequency === "weekdays" ? "工作日" : recurringForm.frequency === "weekly" ? "每周" : "每月" }, ...(recurringForm.display_time ? [{ icon: "clock" as const, label: `${recurringForm.display_time} 展示` }] : [])]} status="未保存" typeLabel="重复事项" variant="recurring" />}
           </button>}
-          {error && <div className="inline-error"><strong>任务读取失败</strong><span>{error}</span><button onClick={() => void onReload()}>重试</button></div>}
-          {!error && (loading || (view === "draft" && taskDraftsLoading)) && <div className="task-list-skeleton" role="status" aria-label="正在读取本地任务">{[0, 1, 2].map((item) => <span key={item} className="task-skeleton-card"><i /><b /><em /></span>)}</div>}
+          {error && <div className="inline-error"><strong>任务暂时无法打开</strong><span>{error}</span><button onClick={() => void onReload()}>重试</button></div>}
+          {!error && (loading || (view === "draft" && taskDraftsLoading)) && <div className="task-list-skeleton" role="status" aria-label="正在载入任务">{[0, 1, 2].map((item) => <span key={item} className="task-skeleton-card"><i /><b /><em /></span>)}</div>}
           {!error && !loading && !taskDraftsLoading && !creating && visibleTasks.length === 0 && visibleTaskDrafts.length === 0 && visibleRecurringItems.length === 0 && <div className="ledger-empty"><Icon name={view === "deleted" ? "trash" : view === "draft" ? "sparkle" : view === "recurring" ? "restore" : "tasks"} size={22} /><strong>{search ? "没有匹配内容" : taskEmptyCopy[view].title}</strong><span>{search ? `“${search.trim()}”在当前筛选中没有结果。` : taskEmptyCopy[view].description}</span>{search && <button type="button" onClick={() => setSearch("")}>清除搜索</button>}</div>}
-          {(view === "recurring" || view === "deleted") && visibleRecurringItems.map((item) => <div key={item.id} className={`${selectedRecurringId === item.id ? "ledger-row selected" : "ledger-row"} task-ledger-row recurring-ledger-row capsule-type-recurring${item.deleted_at ? " status-row-deleted" : ""}`}><button type="button" className="ledger-row-select" aria-pressed={selectedRecurringId === item.id} onClick={() => { setSelectedId(null); setSelectedRecurringId(item.id); setRecurringForm(recurringItemFormForItem(item)); }}><span className="ledger-accent" aria-hidden="true" /><RecurringItemCapsuleContent item={item} /></button><div className="ledger-row-actions" aria-label={`${item.title}的快捷操作`}>{view === "recurring" && item.status !== "ended" && selectedRecurringId !== item.id && <button type="button" className="ledger-quick-action" onClick={() => { setSelectedId(null); setSelectedRecurringId(item.id); setRecurringForm(recurringItemFormForItem(item)); }}>编辑</button>}{view === "recurring" && item.status !== "ended" && <button type="button" className="ledger-quick-action danger" aria-label={`结束${item.title}`} onClick={() => setPendingEndRecurringItem(item)}><Icon name="close" size={14} /><span>结束</span></button>}{view === "recurring" && item.status === "ended" && <button type="button" className="ledger-quick-action danger" aria-label={`将${item.title}移入回收站`} onClick={() => setPendingTrashRecurringItem(item)}><Icon name="trash" size={14} /><span>回收站</span></button>}</div></div>)}
+          {(view === "recurring" || view === "deleted") && visibleRecurringItems.map((item) => (
+            <div key={item.id} className={`${selectedRecurringId === item.id ? "ledger-row selected" : "ledger-row"} task-ledger-row task-capsule-row recurring-ledger-row capsule-type-recurring status-row-${item.deleted_at ? "deleted" : item.status}`}>
+              <button type="button" className="ledger-row-select task-capsule-select" aria-pressed={selectedRecurringId === item.id} onClick={() => { setSelectedId(null); setSelectedRecurringId(item.id); setRecurringForm(recurringItemFormForItem(item)); }}><span className="ledger-accent" aria-hidden="true" /><RecurringItemCapsuleContent item={item} /></button>
+              <div className="ledger-row-actions" aria-label={`${item.title}的快捷操作`}>
+                {view === "deleted" && item.deleted_at && <button type="button" className="ledger-quick-action icon-only" data-tooltip="恢复" aria-label={`恢复${item.title}`} disabled={busy} onClick={() => void restoreSelectedRecurringItem(item)}><Icon name="restore" size={15} /></button>}
+                {view === "deleted" && item.deleted_at && <button type="button" className="ledger-quick-action icon-only danger" data-tooltip="永久删除" aria-label={`永久删除${item.title}`} disabled={busy} onClick={() => { setSelectedId(null); setSelectedRecurringId(item.id); setPendingPermanentRecurringItem(true); }}><Icon name="trash" size={15} /></button>}
+                {view === "recurring" && item.status !== "ended" && selectedRecurringId !== item.id && <button type="button" className="ledger-quick-action" onClick={() => { setSelectedId(null); setSelectedRecurringId(item.id); setRecurringForm(recurringItemFormForItem(item)); }}>编辑</button>}
+                {view === "recurring" && item.status !== "ended" && <button type="button" className="ledger-quick-action danger" aria-label={`结束${item.title}`} onClick={() => setPendingEndRecurringItem(item)}><Icon name="close" size={14} /><span>结束</span></button>}
+                {view === "recurring" && item.status === "ended" && <button type="button" className="ledger-quick-action danger" aria-label={`将${item.title}移入回收站`} onClick={() => setPendingTrashRecurringItem(item)}><Icon name="trash" size={14} /><span>回收站</span></button>}
+              </div>
+            </div>
+          ))}
           {!taskDraftsLoading && view === "draft" && visibleTaskDrafts.map((item) => (
             <div key={item.id} className={`${persistedNewTaskDraft?.id === item.id ? "ledger-row selected" : "ledger-row"} task-ledger-row task-capsule-row capsule-type-task`}>
             <button type="button" className="ledger-row-select task-capsule-select" aria-pressed={persistedNewTaskDraft?.id === item.id} onClick={() => void selectPersistedTaskDraft(item)}>
               <span className="ledger-accent" aria-hidden="true" />
-              <TaskCapsuleContent title={item.title.trim() || "未命名草稿"} notes={item.notes} priority={item.priority} tags={item.tags} timing={item.due_date ? `截止 ${item.due_date}` : null} minutes={item.total_workload_minutes} status="待确认" sourceType={item.source_type} />
+              <TaskCapsuleContent title={item.title.trim() || "未命名草稿"} notes={item.notes} priority={item.priority} timing={item.due_date ? `截止 ${item.due_date}` : null} minutes={item.total_workload_minutes} status="待确认" sourceType={item.source_type} />
             </button>
             <div className="ledger-row-actions" aria-label={`${item.title || "未命名草稿"}的快捷操作`}>{persistedNewTaskDraft?.id !== item.id && <button type="button" className="ledger-quick-action" onClick={() => void selectPersistedTaskDraft(item)}>编辑</button>}<button type="button" className="ledger-quick-action danger" aria-label={`放弃${item.title || "未命名草稿"}`} onClick={() => setPendingDiscardTaskDraft(item)}><Icon name="trash" size={14} /><span>放弃</span></button></div>
             </div>
@@ -1932,10 +2144,12 @@ function TaskWorkspace({
             <div key={task.id} className={`${selectedId === task.id ? "ledger-row selected" : "ledger-row"} task-ledger-row task-capsule-row capsule-type-task status-row-${task.status}`}>
               <button type="button" className="ledger-row-select task-capsule-select" aria-pressed={selectedId === task.id} onClick={() => requestTaskChange({ kind: "select", taskId: task.id })}>
               <span className="ledger-accent" aria-hidden="true" />
-              <TaskCapsuleContent title={task.title} notes={task.notes} priority={task.priority} tags={task.tags} timing={taskTimingFact(task, today)} minutes={task.estimated_minutes} status={statusCopy[task.status]} sourceType={task.source_type} typeLabel={task.status === "deleted" ? "普通任务" : undefined} />
+              <TaskCapsuleContent title={task.title} notes={task.notes} priority={task.priority} timing={taskTimingFact(task, today)} minutes={task.estimated_minutes} status={statusCopy[task.status]} sourceType={task.source_type} typeLabel={task.status === "deleted" ? "普通任务" : undefined} />
               </button>
               <div className="ledger-row-actions" aria-label={`${task.title}的快捷操作`}>
-                {selectedId !== task.id && task.status !== "deleted" && <button type="button" className="ledger-quick-action" onClick={() => requestTaskChange({ kind: "select", taskId: task.id })}>编辑</button>}
+                {selectedId !== task.id && taskIsEditable(task) && <button type="button" className="ledger-quick-action" onClick={() => requestTaskChange({ kind: "select", taskId: task.id })}>编辑</button>}
+                {task.status === "deleted" && <button type="button" className="ledger-quick-action icon-only" data-tooltip="恢复" aria-label={`恢复${task.title}`} disabled={busy} onClick={() => void restore(task)}><Icon name="restore" size={15} /></button>}
+                {task.status === "deleted" && <button type="button" className="ledger-quick-action icon-only danger" data-tooltip="永久删除" aria-label={`永久删除${task.title}`} disabled={busy} onClick={() => { setSelectedRecurringId(null); setSelectedId(task.id); setPendingPermanentTask(true); }}><Icon name="trash" size={15} /></button>}
                 {task.status !== "deleted" && <button type="button" className="ledger-quick-action danger" title="移入回收站" aria-label={`将${task.title}移入回收站`} onClick={() => requestTaskChange({ kind: "trash", task: { id: task.id, title: task.title } })}><Icon name="trash" size={14} /><span>回收站</span></button>}
               </div>
             </div>
@@ -1944,52 +2158,56 @@ function TaskWorkspace({
         <div className="ledger-resize-handle" role="separator" aria-label="调整任务列表与详情宽度；双击恢复默认宽度" aria-orientation="vertical" aria-valuemin={TASK_LEDGER_LIST_MIN_WIDTH} aria-valuemax={Math.round(ledgerMaximumWidth)} aria-valuenow={Math.round(currentLedgerListWidth())} tabIndex={0} onDoubleClick={resetLedgerWidth} onPointerDown={startLedgerResize} onPointerMove={moveLedgerResize} onPointerUp={endLedgerResize} onPointerCancel={endLedgerResize} onKeyDown={resizeLedgerWithKeyboard} />
         <aside className="task-inspector" aria-label="任务详情">
           <div className="inspector-scroll">
+          {view === "deleted" && selectedRecurringItem?.deleted_at ? (
+            <RecycleBinBanner deletedAt={selectedRecurringItem.deleted_at} nowMs={recycleNow} itemLabel="重复事项" busy={busy} onRestore={() => void restoreSelectedRecurringItem(selectedRecurringItem)} onPermanentDelete={() => setPendingPermanentRecurringItem(true)} />
+          ) : view === "deleted" && selectedTask?.status === "deleted" ? (
+            <RecycleBinBanner deletedAt={selectedTask.deleted_at} nowMs={recycleNow} itemLabel="任务" busy={busy} onRestore={() => void restore(selectedTask)} onPermanentDelete={() => setPendingPermanentTask(true)} />
+          ) : null}
+          {timelineReturnContext && selectedTask && <div className="task-context-return"><button type="button" aria-label="返回今日计划中的任务块" title="返回今日计划中的任务块" onClick={() => onReturnToTimeline(timelineReturnContext)}><Icon name="chevron-left" size={16} /><span>返回任务块</span></button></div>}
           {creating ? (
             <form id="new-task-form" className="task-form create-task-form" onSubmit={submitNewTask}>
               <div className="inspector-heading create-task-heading">
-                <div className="inspector-title"><h2>{persistedNewTaskDraft?.draft_kind === "update" ? "确认任务修改" : "记一件事"}</h2><p>{persistedNewTaskDraft?.draft_kind === "update" ? "这是 AI 整理的修改草稿；确认前不会覆盖正式任务。" : createItemType === "task" ? "创建一项需要安排和推进的普通任务。" : "创建一条独立规则；到期当天显示，复盘时处理。"}</p></div>
+                <div className="inspector-title"><h2>{persistedNewTaskDraft?.draft_kind === "update" ? "确认任务修改" : "记一件事"}</h2><p>{persistedNewTaskDraft?.draft_kind === "update" ? "这是 AI 整理的修改草稿；确认前不会改变原任务。" : createItemType === "task" ? "创建一项需要安排和推进的普通任务。" : "创建一项单独管理的重复事项；到期当天显示，复盘时处理。"}</p></div>
                 <button type="button" className="inspector-close-action" aria-label="关闭创建页" title="关闭创建页" disabled={busy || draftSaving} onClick={() => createItemType === "task" ? newTaskIsDirty || persistedNewTaskDraft ? void keepCurrentDraft() : clearNewTaskForm() : void cancelNewTask()}><Icon name="close" size={16} /></button>
               </div>
-              {!persistedNewTaskDraft?.target_task_id && <div className="create-type-switch" role="radiogroup" aria-label="创建类型"><button type="button" role="radio" disabled={busy || draftSaving} aria-checked={createItemType === "task"} onClick={() => requestCreateItemType("task")}><Icon name="tasks" size={16} /><span><strong>普通任务</strong><small>进入 Inbox、待处理或已安排</small></span></button><button type="button" role="radio" disabled={busy || draftSaving} aria-checked={createItemType === "recurring"} onClick={() => requestCreateItemType("recurring")}><Icon name="restore" size={16} /><span><strong>重复事项</strong><small>到期展示，复盘时处理</small></span></button></div>}
+              {!persistedNewTaskDraft?.target_task_id && <div className="create-type-switch" role="radiogroup" aria-label="创建类型"><button type="button" role="radio" disabled={busy || draftSaving} aria-checked={createItemType === "task"} onClick={() => requestCreateItemType("task")}><Icon name="tasks" size={16} /><span><strong>普通任务</strong><small>时间完整后进入待处理</small></span></button><button type="button" role="radio" disabled={busy || draftSaving} aria-checked={createItemType === "recurring"} onClick={() => requestCreateItemType("recurring")}><Icon name="restore" size={16} /><span><strong>重复事项</strong><small>到期展示，复盘时处理</small></span></button></div>}
               {newTaskError && <div className="inline-error compact" role="alert"><strong>{createItemType === "task" ? "任务尚未创建" : "重复事项尚未创建"}</strong><span>{newTaskError}</span></div>}
-              {createItemType === "task" ? <TaskEditorRegions form={newTaskForm} disabled={busy} idPrefix="new-task" autoFocusTitle estimateHint={newTaskEstimateHint} estimateAction={newTaskEstimateMode === "manual" && newTaskRangeMinutes !== null ? { label: "按时间重算", onClick: recalculateNewTaskEstimate } : null} onChange={updateNewTaskFields} onScheduleChange={updateNewTaskSchedule} /> : <RecurringItemEditor form={recurringForm} disabled={busy} idPrefix="new-recurring" autoFocusTitle onChange={setRecurringForm} />}
+              {createItemType === "task" ? <TaskEditorRegions form={newTaskForm} disabled={busy} idPrefix="new-task" autoFocusTitle onChange={updateNewTaskFields} onScheduleChange={updateNewTaskSchedule} /> : <RecurringItemEditor form={recurringForm} disabled={busy} idPrefix="new-recurring" autoFocusTitle onChange={setRecurringForm} />}
               <div className="create-task-actions">
-                <span className="task-draft-save-state" role="status">{createItemType === "task" ? draftSaving ? "正在保存草稿…" : persistedNewTaskDraft ? "草稿已保存在本机" : newTaskIsDirty ? newTaskAutosaveArmed ? "将在停止输入后自动保存" : "已保留输入，继续编辑后才会自动保存" : "尚未填写" : "创建前不会生成任务或发生记录"}</span>
+                <span className="task-draft-save-state" role="status">{createItemType === "task" ? draftSaving ? "正在保存草稿…" : !newTaskHasCompleteSchedule ? persistedNewTaskDraft ? "草稿已保存；补全开始和结束时间后可创建" : "时间未完整时只保存为草稿" : persistedNewTaskDraft ? "草稿已保存" : newTaskIsDirty ? newTaskAutosaveArmed ? "将在停止输入后自动保存" : "已保留输入，继续编辑后才会自动保存" : "尚未填写" : "创建前不会保存重复事项"}</span>
                 <div>
                   <button type="button" className="secondary-action" disabled={busy || draftSaving} onClick={() => void cancelNewTask()}>{createItemType === "task" ? "放弃草稿" : "取消"}</button>
                   {createItemType === "task" && <button type="button" className="secondary-action" disabled={busy || draftSaving || !newTaskIsDirty && !persistedNewTaskDraft} onClick={() => void keepCurrentDraft()}>仅保存草稿</button>}
-                  <button type="submit" className="create-task-submit" disabled={busy || (createItemType === "task" ? !newTaskForm.title.trim() || !newTaskHasValidRange : !recurringForm.title.trim() || recurringForm.frequency === "weekly" && !recurringForm.weekdays.length)}>{busy ? <span className="loader" /> : <Icon name={persistedNewTaskDraft?.draft_kind === "update" ? "check" : "plus"} size={16} />}{busy ? "正在写入…" : createItemType === "recurring" ? "创建重复事项" : persistedNewTaskDraft?.draft_kind === "update" ? "确认修改任务" : newTaskHasDate ? "确认创建任务" : "确认并放入 Inbox"}</button>
+                  <button type="submit" className="create-task-submit" disabled={busy || (createItemType === "task" ? !newTaskForm.title.trim() || !newTaskHasCompleteSchedule || !newTaskHasValidRange || !newTaskHasValidWorkload : !recurringForm.title.trim() || recurringForm.frequency === "weekly" && !recurringForm.weekdays.length)}>{busy ? <span className="loader" /> : <Icon name={persistedNewTaskDraft?.draft_kind === "update" ? "check" : "plus"} size={16} />}{busy ? "正在保存…" : createItemType === "recurring" ? "创建重复事项" : persistedNewTaskDraft?.draft_kind === "update" ? "确认修改任务" : "确认创建任务"}</button>
                 </div>
               </div>
             </form>
-          ) : view === "recurring" && selectedRecurringItem?.status === "ended" ? <div className="deleted-inspector recurring-terminal-inspector"><div className="inspector-title"><span>重复事项 · 已结束</span><h2>{selectedRecurringItem.title}</h2></div><p>该事项不会再产生新的发生记录，也不能恢复或修改。现在唯一可用的操作是移入回收站；历史发生与复盘记录在软删除后仍会保留。</p><div className="inspector-actions"><button className="danger-action" onClick={() => setPendingTrashRecurringItem(selectedRecurringItem)} disabled={busy}><Icon name="trash" size={15} />移入回收站</button></div></div> : view === "recurring" && selectedRecurringItem ? <form className="task-form create-task-form edit-task-form" onSubmit={saveRecurringItem}><div className="inspector-heading create-task-heading edit-task-heading"><div className="inspector-title"><h2>编辑重复事项</h2><p>修改只影响以后发生的日期；历史记录保持原样。</p></div><span className="task-editor-status"><Icon name="restore" size={14} />{recurringItemStatusLabel(selectedRecurringItem)}</span></div><RecurringItemEditor form={recurringForm} disabled={busy} idPrefix="edit-recurring" onChange={setRecurringForm} /><div className="state-actions recurring-state-actions">{selectedRecurringItem.status === "active" && <button type="button" disabled={busy} onClick={() => void changeRecurringItemStatus("paused")}><Icon name="close" size={14} />暂停</button>}{selectedRecurringItem.status === "paused" && <button type="button" disabled={busy} onClick={() => void changeRecurringItemStatus("active")}><Icon name="restore" size={14} />恢复</button>}<button type="button" className="text-danger" disabled={busy} onClick={() => void changeRecurringItemStatus("ended")}><Icon name="check" size={14} />结束事项</button></div>{recurringEditingDirty && <div className="edit-task-floating-actions"><span>有未保存的更改</span><div><button type="button" className="secondary-action" disabled={busy} onClick={() => setRecurringForm(recurringItemFormForItem(selectedRecurringItem))}>取消修改</button><button type="submit" className="create-task-submit" disabled={busy || !recurringForm.title.trim()}>保存重复事项</button></div></div>}</form> : view === "deleted" && selectedRecurringItem?.deleted_at ? (
-            <div className="deleted-inspector"><div className="inspector-title"><span>回收站 · 重复事项</span><h2>{selectedRecurringItem.title}</h2></div><p>该重复事项已结束并移出规则列表；恢复后仍保持“已结束”，历史发生与复盘记录继续保留。</p><div className="inspector-actions"><button className="secondary-action" onClick={() => void restoreSelectedRecurringItem()} disabled={busy}><Icon name="restore" size={15} />恢复重复事项</button><button className="danger-action" onClick={() => setPendingPermanentRecurringItem(true)} disabled={busy}><Icon name="trash" size={15} />永久删除</button></div></div>
+          ) : view === "recurring" && selectedRecurringItem?.status === "ended" ? <div className="deleted-inspector recurring-terminal-inspector"><div className="inspector-title"><span>重复事项 · 已结束</span><h2>{selectedRecurringItem.title}</h2></div><p>该事项不会再出现，也不能恢复或修改。现在可以将它移入回收站；过去的记录仍会保留。</p><div className="inspector-actions"><button className="danger-action" onClick={() => setPendingTrashRecurringItem(selectedRecurringItem)} disabled={busy}><Icon name="trash" size={15} />移入回收站</button></div></div> : view === "recurring" && selectedRecurringItem ? <form className="task-form create-task-form edit-task-form" onSubmit={saveRecurringItem}><div className="inspector-heading create-task-heading edit-task-heading"><div className="inspector-title"><h2>编辑重复事项</h2><p>修改只影响以后的日期；过去的记录保持不变。</p></div><span className="task-editor-status"><Icon name="restore" size={14} />{recurringItemStatusLabel(selectedRecurringItem)}</span></div><RecurringItemEditor form={recurringForm} disabled={busy} idPrefix="edit-recurring" onChange={setRecurringForm} /><section className="recurring-lifecycle-section" aria-labelledby="recurring-lifecycle-title"><header><div><h3 id="recurring-lifecycle-title">事项状态</h3><span>暂停后可以恢复；结束后不能再编辑</span></div></header><div className="state-actions recurring-state-actions">{selectedRecurringItem.status === "active" && <button type="button" disabled={busy} onClick={() => void changeRecurringItemStatus("paused")}><Icon name="close" size={14} />暂停</button>}{selectedRecurringItem.status === "paused" && <button type="button" disabled={busy} onClick={() => void changeRecurringItemStatus("active")}><Icon name="restore" size={14} />恢复</button>}<button type="button" className="text-danger" disabled={busy} onClick={() => void changeRecurringItemStatus("ended")}><Icon name="check" size={14} />结束事项</button></div></section>{recurringEditingDirty && <div className="edit-task-floating-actions"><span>有未保存的更改</span><div><button type="button" className="secondary-action" disabled={busy} onClick={() => setRecurringForm(recurringItemFormForItem(selectedRecurringItem))}>取消修改</button><button type="submit" className="create-task-submit" disabled={busy || !recurringForm.title.trim()}>保存重复事项</button></div></div>}</form> : view === "deleted" && selectedRecurringItem?.deleted_at ? (
+            <DeletedRecurringItemDetails item={selectedRecurringItem} />
           ) : !selectedTask || !draft ? <div className="inspector-empty"><Icon name={view === "draft" ? "sparkle" : view === "recurring" ? "restore" : view === "deleted" ? "trash" : "tasks"} size={21} /><p>{view === "draft" ? "当前没有待确认草稿" : view === "recurring" ? "选择一条重复事项查看和编辑" : view === "deleted" ? "选择一项回收内容查看类型与操作" : "选择一项任务查看和编辑"}</p></div> : selectedTask.status === "deleted" ? (
-            <div className="deleted-inspector"><div className="inspector-title"><span>回收站 · 普通任务</span><h2>{selectedTask.title}</h2></div><p>该任务已从普通列表和安排上下文中移除。</p><div className="inspector-actions"><button className="secondary-action" onClick={() => void restore()} disabled={busy}><Icon name="restore" size={15} />恢复任务</button><button className="danger-action" onClick={() => setPendingPermanentTask(true)} disabled={busy}><Icon name="trash" size={15} />永久删除</button></div></div>
+            <DeletedTaskDetails task={selectedTask} />
+          ) : selectedTask.status === "done" ? (
+            <CompletedTaskDetails task={selectedTask} busy={busy} onReopen={() => requestTaskChange({ kind: "reopen" })} onTrash={() => requestTaskChange({ kind: "trash" })} />
           ) : editingTaskForm ? (
             <form id="task-editor-form" className={isDirty ? "task-form create-task-form edit-task-form has-floating-actions" : "task-form create-task-form edit-task-form"} onSubmit={save}>
               <div className="inspector-heading create-task-heading edit-task-heading">
-                <div className="inspector-title"><h2>编辑任务</h2><p>修改任务内容与时间边界，保存后更新本地任务。</p></div>
+                <div className="inspector-title"><h2>编辑任务</h2><p>修改任务内容和可安排时间，保存后立即生效。</p></div>
                 <span className="task-editor-status"><Icon name={selectedTask.source_type === "ai_assistant" ? "sparkle" : "user"} size={14} />{selectedTask.source_type === "ai_assistant" ? "AI 创建" : "手动创建"}<i />{statusCopy[selectedTask.status]}</span>
               </div>
-              <TaskEditorRegions form={editingTaskForm} disabled={busy} idPrefix="edit-task" estimateHint={editingTaskEstimateHint} onChange={updateEditingTaskForm} onScheduleChange={updateEditingTaskForm} />
+              <TaskEditorRegions form={editingTaskForm} disabled={busy} idPrefix="edit-task" onChange={updateEditingTaskForm} onScheduleChange={updateEditingTaskSchedule} />
               <p className="task-lifecycle-help">这里改变整个任务的后续状态；今日页只记录当天这一次执行。</p>
               <div className="state-actions">
-                {selectedTask.status === "inbox" && <button type="button" onClick={() => requestTaskChange({ kind: "transition", status: "open" })} disabled={busy}><Icon name="tasks" size={14} />转为待办</button>}
                 {["open", "scheduled"].includes(selectedTask.status) && <button type="button" title="完成整个任务并停止后续安排；已保存的执行历史仍会保留" onClick={() => requestTaskChange({ kind: "transition", status: "done" })} disabled={busy}><Icon name="check" size={14} />完成整个任务</button>}
-                {["open", "scheduled"].includes(selectedTask.status) && <button type="button" title="放弃整个任务并停止后续安排；已保存的历史仍会保留" onClick={() => requestTaskChange({ kind: "transition", status: "cancelled" })} disabled={busy}><Icon name="close" size={14} />取消整个任务</button>}
-                {selectedTask.status === "done" && <button type="button" onClick={() => requestTaskChange({ kind: "reopen" })} disabled={busy}><Icon name="restore" size={14} />取消完成</button>}
-                {selectedTask.status === "cancelled" && <button type="button" onClick={() => requestTaskChange({ kind: "transition", status: "open" })} disabled={busy}><Icon name="restore" size={14} />重新打开</button>}
-                <button type="button" className="text-danger" onClick={() => requestTaskChange({ kind: "trash" })} disabled={busy}><Icon name="trash" size={14} />移入回收站</button>
+                <button type="button" className="text-danger" disabled={busy} onClick={() => requestTaskChange({ kind: "trash" })}><Icon name="trash" size={14} />移入回收站</button>
               </div>
             </form>
           ) : null}
           </div>
           {selectedTask && draft && selectedTask.status !== "deleted" && isDirty && <div className="draft-action-bar" aria-label="未保存的任务修改">
-            <strong>{busy ? "正在保存到本机…" : "有未保存的更改"}</strong>
+            <strong>{busy ? "正在保存…" : "有未保存的更改"}</strong>
             <div className="draft-bar-actions">
               <button className="draft-reset" type="button" disabled={busy} onClick={resetDraft}><Icon name="restore" size={15} />重置</button>
-              <button className="draft-save" type="submit" form="task-editor-form" disabled={busy || !draft.title.trim()} aria-label="保存修改" title="保存修改（Ctrl+S）">{busy ? <span className="loader" /> : <Icon name="check" size={16} />}{busy ? "保存中…" : "保存更改"}</button>
+              <button className="draft-save" type="submit" form="task-editor-form" disabled={busy || !draft.title.trim() || !editingTaskHasCompleteSchedule || !editingTaskHasValidRange || !editingTaskHasValidWorkload} aria-label="保存修改" title="保存修改（Ctrl+S）">{busy ? <span className="loader" /> : <Icon name="check" size={16} />}{busy ? "保存中…" : "保存更改"}</button>
             </div>
           </div>}
         </aside>
@@ -2012,15 +2230,15 @@ function TaskWorkspace({
           <div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingTrashTask(null)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void moveToTrash()}>{busy ? "正在移入…" : "确认移入"}</button></div>
         </section>
       </div>}
-      {pendingDiscardTaskDraft && <div className="dialog-backdrop task-trash-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingDiscardTaskDraft(null); }}><section className="unsaved-dialog task-trash-dialog" role="alertdialog" aria-modal="true" aria-labelledby="discard-task-draft-title" onKeyDown={(event) => { if (event.key === "Escape" && !busy) setPendingDiscardTaskDraft(null); }}><div className="dialog-icon trash"><Icon name="trash" size={19} /></div><h2 id="discard-task-draft-title">放弃草稿？</h2><p>“{pendingDiscardTaskDraft.title || "未命名草稿"}”将从本机草稿中移除，正式任务不会发生变化。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingDiscardTaskDraft(null)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void discardTaskDraftFromList(pendingDiscardTaskDraft)}>{busy ? "正在放弃…" : "确认放弃"}</button></div></section></div>}
-      {pendingEndRecurringItem && <div className="dialog-backdrop task-trash-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingEndRecurringItem(null); }}><section className="unsaved-dialog task-trash-dialog" role="alertdialog" aria-modal="true" aria-labelledby="end-recurring-item-title" onKeyDown={(event) => { if (event.key === "Escape" && !busy) setPendingEndRecurringItem(null); }}><div className="dialog-icon trash"><Icon name="close" size={19} /></div><h2 id="end-recurring-item-title">结束重复事项？</h2><p>“{pendingEndRecurringItem.title}”不会再产生新的发生记录；已保存的历史和复盘记录会保留。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingEndRecurringItem(null)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void endRecurringItemFromList(pendingEndRecurringItem)}>{busy ? "正在结束…" : "确认结束"}</button></div></section></div>}
-      {pendingTrashRecurringItem && <div className="dialog-backdrop task-trash-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingTrashRecurringItem(null); }}><section className="unsaved-dialog task-trash-dialog" role="alertdialog" aria-modal="true" aria-labelledby="trash-recurring-item-title" onKeyDown={(event) => { if (event.key === "Escape" && !busy) setPendingTrashRecurringItem(null); }}><div className="dialog-icon trash"><Icon name="trash" size={19} /></div><h2 id="trash-recurring-item-title">移入回收站？</h2><p>“{pendingTrashRecurringItem.title}”将从重复事项列表移除；历史发生与复盘记录仍会保留，之后可从回收站恢复。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingTrashRecurringItem(null)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void moveRecurringItemToTrash()}>{busy ? "正在移入…" : "确认移入"}</button></div></section></div>}
-      {pendingRecurringSave && selectedTask && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingRecurringSave(null); }}><section className="unsaved-dialog" role="alertdialog" aria-modal="true" aria-labelledby="recurring-scope-title" aria-describedby="recurring-scope-description" onKeyDown={(event) => { if (event.key === "Escape" && !busy) setPendingRecurringSave(null); }}><div className="dialog-icon"><Icon name="restore" size={19} /></div><h2 id="recurring-scope-title">修改哪些重复任务？</h2><p id="recurring-scope-description">“{selectedTask.title}”是重复任务实例。历史实例和已有执行事实不会被覆盖。</p><div className="dialog-actions"><button type="button" disabled={busy} onClick={() => setPendingRecurringSave(null)}>取消</button><button type="button" disabled={busy} onClick={() => void commitDraft("this")}>仅修改本次</button><button type="button" className="dialog-save" disabled={busy} onClick={() => void commitDraft("future")}>修改本次及以后</button></div></section></div>}
-      {pendingDiscardNew && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingDiscardNew(false); }}><section className="unsaved-dialog" role="alertdialog" aria-modal="true" aria-labelledby="discard-new-title"><h2 id="discard-new-title">放弃这个草稿？</h2><p>已填写的内容将从本机草稿中移除，正式任务不会发生变化。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingDiscardNew(false)}>继续编辑</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => { setPendingDiscardNew(false); void cancelNewTask(false); }}>放弃草稿</button></div></section></div>}
-      {pendingCreateType && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { setPendingCreateType(null); if (createItemType === "task" && newTaskIsDirty) setNewTaskAutosaveArmed(true); } }}><section className="unsaved-dialog" role="alertdialog" aria-modal="true" aria-labelledby="switch-create-type-title"><h2 id="switch-create-type-title">切换创建类型？</h2><p>标题、备注和标签会保留；当前类型专属的时间、工作量或重复规则将被清除。未确认的普通任务草稿不会保留。</p><div className="dialog-actions"><button type="button" autoFocus disabled={draftSaving} onClick={() => { setPendingCreateType(null); if (createItemType === "task" && newTaskIsDirty) setNewTaskAutosaveArmed(true); }}>继续编辑</button><button type="button" className="dialog-save" disabled={draftSaving} onClick={() => { const type = pendingCreateType; setPendingCreateType(null); void applyCreateItemType(type); }}>确认切换</button></div></section></div>}
-      {pendingDraftSelection && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !draftSaving && !busy) setPendingDraftSelection(null); }}><section className="unsaved-dialog" role="alertdialog" aria-modal="true" aria-labelledby="switch-draft-title"><h2 id="switch-draft-title">{createItemType === "recurring" ? "创建重复事项并切换？" : "保存当前草稿并切换？"}</h2><p>{createItemType === "recurring" ? `当前重复事项会先创建为独立规则，随后打开“${pendingDraftSelection.title || "未命名草稿"}”。它不会进入普通任务队列。` : `当前输入会先保存到本机，然后打开“${pendingDraftSelection.title || "未命名草稿"}”。`}</p><div className="dialog-actions"><button type="button" autoFocus disabled={draftSaving || busy} onClick={() => setPendingDraftSelection(null)}>留在当前草稿</button><button type="button" className="dialog-save" disabled={draftSaving || busy} onClick={() => { const target = pendingDraftSelection; setPendingDraftSelection(null); void saveAndSwitchPersistedTaskDraft(target); }}>{createItemType === "recurring" ? "创建并切换" : "保存并切换"}</button></div></section></div>}
+      {pendingDiscardTaskDraft && <div className="dialog-backdrop task-trash-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingDiscardTaskDraft(null); }}><section className="unsaved-dialog task-trash-dialog" role="alertdialog" aria-modal="true" aria-labelledby="discard-task-draft-title" onKeyDown={(event) => { if (event.key === "Escape" && !busy) setPendingDiscardTaskDraft(null); }}><div className="dialog-icon trash"><Icon name="trash" size={19} /></div><h2 id="discard-task-draft-title">放弃草稿？</h2><p>“{pendingDiscardTaskDraft.title || "未命名草稿"}”将从草稿中移除，原任务不会变化。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingDiscardTaskDraft(null)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void discardTaskDraftFromList(pendingDiscardTaskDraft)}>{busy ? "正在放弃…" : "确认放弃"}</button></div></section></div>}
+      {pendingEndRecurringItem && <div className="dialog-backdrop task-trash-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingEndRecurringItem(null); }}><section className="unsaved-dialog task-trash-dialog" role="alertdialog" aria-modal="true" aria-labelledby="end-recurring-item-title" onKeyDown={(event) => { if (event.key === "Escape" && !busy) setPendingEndRecurringItem(null); }}><div className="dialog-icon trash"><Icon name="close" size={19} /></div><h2 id="end-recurring-item-title">结束重复事项？</h2><p>“{pendingEndRecurringItem.title}”以后不会再出现；已经保存的记录会继续保留。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingEndRecurringItem(null)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void endRecurringItemFromList(pendingEndRecurringItem)}>{busy ? "正在结束…" : "确认结束"}</button></div></section></div>}
+      {pendingTrashRecurringItem && <div className="dialog-backdrop task-trash-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingTrashRecurringItem(null); }}><section className="unsaved-dialog task-trash-dialog" role="alertdialog" aria-modal="true" aria-labelledby="trash-recurring-item-title" onKeyDown={(event) => { if (event.key === "Escape" && !busy) setPendingTrashRecurringItem(null); }}><div className="dialog-icon trash"><Icon name="trash" size={19} /></div><h2 id="trash-recurring-item-title">移入回收站？</h2><p>“{pendingTrashRecurringItem.title}”将从重复事项列表移除；过去的记录仍会保留，之后也可以恢复。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingTrashRecurringItem(null)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void moveRecurringItemToTrash()}>{busy ? "正在移入…" : "确认移入"}</button></div></section></div>}
+      {pendingRecurringSave && selectedTask && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingRecurringSave(null); }}><section className="unsaved-dialog" role="alertdialog" aria-modal="true" aria-labelledby="recurring-scope-title" aria-describedby="recurring-scope-description" onKeyDown={(event) => { if (event.key === "Escape" && !busy) setPendingRecurringSave(null); }}><div className="dialog-icon"><Icon name="restore" size={19} /></div><h2 id="recurring-scope-title">修改哪些重复任务？</h2><p id="recurring-scope-description">“{selectedTask.title}”来自一项重复安排。以前的任务和执行记录不会改变。</p><div className="dialog-actions"><button type="button" disabled={busy} onClick={() => setPendingRecurringSave(null)}>取消</button><button type="button" disabled={busy} onClick={() => void commitDraft("this")}>仅修改本次</button><button type="button" className="dialog-save" disabled={busy} onClick={() => void commitDraft("future")}>修改本次及以后</button></div></section></div>}
+      {pendingDiscardNew && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingDiscardNew(false); }}><section className="unsaved-dialog" role="alertdialog" aria-modal="true" aria-labelledby="discard-new-title"><h2 id="discard-new-title">放弃这个草稿？</h2><p>已填写的内容将从草稿中移除，原任务不会变化。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingDiscardNew(false)}>继续编辑</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => { setPendingDiscardNew(false); void cancelNewTask(false); }}>放弃草稿</button></div></section></div>}
+      {pendingCreateType && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { setPendingCreateType(null); if (createItemType === "task" && newTaskIsDirty) setNewTaskAutosaveArmed(true); } }}><section className="unsaved-dialog" role="alertdialog" aria-modal="true" aria-labelledby="switch-create-type-title"><h2 id="switch-create-type-title">切换创建类型？</h2><p>标题和备注会保留；当前类型专属的时间、工作量或重复规则将被清除。未确认的普通任务草稿不会保留。</p><div className="dialog-actions"><button type="button" autoFocus disabled={draftSaving} onClick={() => { setPendingCreateType(null); if (createItemType === "task" && newTaskIsDirty) setNewTaskAutosaveArmed(true); }}>继续编辑</button><button type="button" className="dialog-save" disabled={draftSaving} onClick={() => { const type = pendingCreateType; setPendingCreateType(null); void applyCreateItemType(type); }}>确认切换</button></div></section></div>}
+      {pendingDraftSelection && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !draftSaving && !busy) setPendingDraftSelection(null); }}><section className="unsaved-dialog" role="alertdialog" aria-modal="true" aria-labelledby="switch-draft-title"><h2 id="switch-draft-title">{createItemType === "recurring" ? "创建重复事项并切换？" : "保存当前草稿并切换？"}</h2><p>{createItemType === "recurring" ? `当前内容会先创建为重复事项，随后打开“${pendingDraftSelection.title || "未命名草稿"}”。它不会进入普通任务列表。` : `当前输入会先保存，然后打开“${pendingDraftSelection.title || "未命名草稿"}”。`}</p><div className="dialog-actions"><button type="button" autoFocus disabled={draftSaving || busy} onClick={() => setPendingDraftSelection(null)}>留在当前草稿</button><button type="button" className="dialog-save" disabled={draftSaving || busy} onClick={() => { const target = pendingDraftSelection; setPendingDraftSelection(null); void saveAndSwitchPersistedTaskDraft(target); }}>{createItemType === "recurring" ? "创建并切换" : "保存并切换"}</button></div></section></div>}
       {pendingPermanentTask && selectedTask && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingPermanentTask(false); }}><section className="unsaved-dialog task-trash-dialog" role="alertdialog" aria-modal="true" aria-labelledby="permanent-task-title"><div className="dialog-icon trash"><Icon name="trash" size={19} /></div><h2 id="permanent-task-title">永久删除任务？</h2><p>“{selectedTask.title}”及其本地历史将无法恢复。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingPermanentTask(false)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void permanentlyDelete()}>{busy ? "正在删除…" : "永久删除"}</button></div></section></div>}
-      {pendingPermanentRecurringItem && selectedRecurringItem && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingPermanentRecurringItem(false); }}><section className="unsaved-dialog task-trash-dialog" role="alertdialog" aria-modal="true" aria-labelledby="permanent-recurring-item-title"><div className="dialog-icon trash"><Icon name="trash" size={19} /></div><h2 id="permanent-recurring-item-title">永久删除重复事项？</h2><p>“{selectedRecurringItem.title}”及其全部本地发生与复盘历史将无法恢复。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingPermanentRecurringItem(false)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void permanentlyDeleteSelectedRecurringItem()}>{busy ? "正在删除…" : "永久删除"}</button></div></section></div>}
+      {pendingPermanentRecurringItem && selectedRecurringItem && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingPermanentRecurringItem(false); }}><section className="unsaved-dialog task-trash-dialog" role="alertdialog" aria-modal="true" aria-labelledby="permanent-recurring-item-title"><div className="dialog-icon trash"><Icon name="trash" size={19} /></div><h2 id="permanent-recurring-item-title">永久删除重复事项？</h2><p>“{selectedRecurringItem.title}”及其全部历史和复盘记录将无法恢复。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingPermanentRecurringItem(false)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void permanentlyDeleteSelectedRecurringItem()}>{busy ? "正在删除…" : "永久删除"}</button></div></section></div>}
     </section>
   );
 }
@@ -2055,9 +2273,16 @@ function taskUnreservedMinutes(task: Task) {
   return remaining === null ? null : Math.max(0, remaining - task.reserved_minutes);
 }
 
+function waitingTaskMinutes(task: Task) {
+  const unreserved = taskUnreservedMinutes(task);
+  return unreserved === null ? null : preferredDailyAllocationMinutes(task, unreserved);
+}
+
 function waitingTaskLabel(task: Task) {
   const unreserved = taskUnreservedMinutes(task);
   if (unreserved === null) return "待补充预计工作量";
+  const suggested = waitingTaskMinutes(task) ?? unreserved;
+  if (suggested !== unreserved) return `今日建议 ${suggested} 分钟 · 共剩余 ${unreserved} 分钟`;
   if (task.status === "scheduled") return `部分已安排 · 还需安排 ${unreserved} 分钟`;
   return `待安排 ${unreserved} 分钟`;
 }
@@ -2065,16 +2290,29 @@ function waitingTaskLabel(task: Task) {
 function waitingTaskTooltipDetail(task: Task | undefined, primary: string) {
   return [
     primary,
-    task?.notes?.trim(),
-    task?.tags.length ? `标签：${task.tags.join("、")}` : ""
+    task?.notes?.trim()
   ].filter(Boolean).join(" · ");
 }
 
 type TimelineSelection = { kind: "block" | "event" | "draft"; id: string };
 type ExecutionDraft = { result: ExecutionResult | null; outcome: ReviewOutcome | null; note: string };
-type PlanDraftTimeEdit = { blockIndex: number; starts_at: string; ends_at: string; error: string };
+
+function ExecutionCaptureFields({ draft, disabled, onChange }: {
+  draft: ExecutionDraft; disabled: boolean; onChange: (update: Partial<ExecutionDraft>) => void;
+}) {
+  const [noteOpen, setNoteOpen] = useState(false);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (noteOpen) noteRef.current?.focus(); }, [noteOpen]);
+  const showNote = Boolean(draft.result) && (noteOpen || Boolean(draft.note) || draft.result === "partial" || draft.result === "not_completed");
+  return <div className="execution-capture-fields">
+    <div className="execution-result-label">本次结果</div>
+    <ExecutionOutcomePicker compact label="本次执行结果" result={draft.result} outcome={draft.outcome} disabled={disabled} onChange={(result, outcome) => { if (result === "completed") setNoteOpen(false); onChange({ result, outcome }); }} />
+    {showNote ? <label className="floating-execution-note"><span>备注<small>可选</small></span><textarea ref={noteRef} rows={2} maxLength={500} placeholder={draft.result === "partial" ? "完成了哪些，接下来还要做什么？" : draft.result === "not_completed" ? "遇到了什么问题？" : "记下一句，复盘时回看"} value={draft.note} disabled={disabled} onChange={(event) => onChange({ note: event.target.value })} /></label> : draft.result === "completed" ? <button type="button" className="execution-add-note" disabled={disabled} aria-expanded={false} onClick={() => setNoteOpen(true)}><Icon name="plus" size={13} />添加备注</button> : null}
+  </div>;
+}
+type PlanDraftTimeEdit = { blockIndex: number; sourceBlockId?: string; starts_at: string; ends_at: string; error: string };
 type TimelineTooltipContent = {
-  kind: "执行块" | "计划草案" | "固定日程" | "重复事项" | "待安排任务" | "非工作时间";
+  kind: "任务安排" | "计划草案" | "固定日程" | "重复事项" | "待安排任务" | "非工作时间";
   title: string;
   time: string;
   detail: string;
@@ -2138,9 +2376,7 @@ function taskSchedulingBoundaryIssue(task: Task | undefined, planDate: string) {
 }
 
 function planDraftErrorMessage(reason: unknown, task: Task | null, planDate: string) {
-  const raw = String(reason).trim()
-    .replace(/^领域规则不允许此操作：\s*/, "")
-    .replace(/^结构化操作无效：\s*/, "");
+  const raw = uiErrorMessage(reason);
   const allowedRange = taskAllowedRangeLabel(task, planDate);
   if (raw.includes("不能早于任务的最早开始时间")) {
     return allowedRange
@@ -2192,24 +2428,11 @@ function nonWorkingSegments(availability: AvailabilitySettings | null, date: str
   return segments;
 }
 
-function draftEditableBounds(task: Task | null, planDate: string) {
-  let min = 0;
-  let max = 23 * 60 + 45;
-  if (task?.earliest_start_at) {
-    const date = task.earliest_start_at.slice(0, 10);
-    if (date === planDate) min = Math.max(min, Math.ceil(clockMinutes(task.earliest_start_at.slice(11, 16)) / 15) * 15);
-  }
-  if (task?.due_at) {
-    const date = task.due_at.slice(0, 10);
-    if (date === planDate) max = Math.min(max, Math.floor(clockMinutes(task.due_at.slice(11, 16)) / 15) * 15);
-  }
-  if (max - min < 15) return { min: 0, max: 23 * 60 + 45 };
-  return { min, max };
-}
-
 function TimeRangeRail({
   start, end, onChange, segments = [], minMinute = 0, maxMinute = 23 * 60 + 45,
-  startLabel = "开始", endLabel = "结束", disabled = false, describedBy
+  startLabel = "开始", endLabel = "结束", disabled = false, describedBy,
+  showInputs = true, showPreference = true, minimumDuration = MIN_TASK_BLOCK_MINUTES,
+  focusedWindow = false
 }: {
   start: string;
   end: string;
@@ -2221,42 +2444,481 @@ function TimeRangeRail({
   endLabel?: string;
   disabled?: boolean;
   describedBy?: string;
+  showInputs?: boolean;
+  showPreference?: boolean;
+  minimumDuration?: number;
+  focusedWindow?: boolean;
 }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const startHandleRef = useRef<HTMLSpanElement>(null);
+  const endHandleRef = useRef<HTMLSpanElement>(null);
+  const dragRef = useRef<{ pointerId: number; edge: TimeRangeEdge; grabOffset: number; separated: boolean } | null>(null);
+  const [draggingHandle, setDraggingHandle] = useState<TimeRangeEdge | null>(null);
   const startMinute = clockMinutes(start);
   const endMinute = clockMinutes(end);
-  const span = Math.max(15, maxMinute - minMinute);
-  const position = (minute: number) => `${Math.max(0, Math.min(100, (minute - minMinute) / span * 100))}%`;
-  const safeStartMinute = Math.max(minMinute, Math.min(startMinute, maxMinute - 15, endMinute - 15));
-  const safeEndMinute = Math.min(maxMinute, Math.max(endMinute, minMinute + 15, startMinute + 15));
-  const visibleSegments = segments.filter((segment) => segment.end > minMinute && segment.start < maxMinute);
+  const safeStartMinute = Math.max(minMinute, Math.min(startMinute, maxMinute - minimumDuration, endMinute - minimumDuration));
+  const safeEndMinute = Math.min(maxMinute, Math.max(endMinute, minMinute + minimumDuration, safeStartMinute + minimumDuration));
+  const editingInputRef = useRef<TimeRangeEdge | null>(null);
+  const startInputDurationRef = useRef(Math.max(minimumDuration, safeEndMinute - safeStartMinute));
+  const [inputValues, setInputValues] = useState(() => ({
+    start: minutesClock(safeStartMinute),
+    end: minutesClock(safeEndMinute)
+  }));
+  const focusedWindowRef = useRef<{ start: number; end: number } | null>(null);
+  useEffect(() => {
+    setInputValues((current) => {
+      const next = {
+        start: editingInputRef.current === "start" ? current.start : minutesClock(safeStartMinute),
+        end: editingInputRef.current === "end" ? current.end : minutesClock(safeEndMinute)
+      };
+      return next.start === current.start && next.end === current.end ? current : next;
+    });
+  }, [safeStartMinute, safeEndMinute]);
+  if (focusedWindow && (
+    !focusedWindowRef.current
+    || safeStartMinute < focusedWindowRef.current.start
+    || safeEndMinute > focusedWindowRef.current.end
+  )) {
+    focusedWindowRef.current = focusedTimeRangeWindow({ start: safeStartMinute, end: safeEndMinute }, minMinute, maxMinute);
+  }
+  const visibleWindow = focusedWindow
+    ? focusedWindowRef.current ?? focusedTimeRangeWindow({ start: safeStartMinute, end: safeEndMinute }, minMinute, maxMinute)
+    : { start: minMinute, end: maxMinute };
+  const railMinMinute = visibleWindow.start;
+  const railMaxMinute = visibleWindow.end;
+  const span = Math.max(minimumDuration, railMaxMinute - railMinMinute);
+  const position = (minute: number) => `${Math.max(0, Math.min(100, (minute - railMinMinute) / span * 100))}%`;
+  const handlesAreTight = (safeEndMinute - safeStartMinute) / span <= 0.08;
+  const handlesAreSeparated = draggingHandle ? Boolean(dragRef.current?.separated) : handlesAreTight;
+  const visibleSegments = segments.filter((segment) => segment.end > railMinMinute && segment.start < railMaxMinute);
+
+  function updateEdge(edge: TimeRangeEdge, value: number, minimum = railMinMinute, maximum = railMaxMinute) {
+    const next = constrainTimeRange(
+      edge,
+      value,
+      { start: safeStartMinute, end: safeEndMinute },
+      minimum,
+      maximum,
+      minimumDuration,
+      15
+    );
+    if (next.start === safeStartMinute && next.end === safeEndMinute) return;
+    onChange({ start: minutesClock(next.start), end: minutesClock(next.end) });
+  }
 
   function updateStart(value: number) {
-    const snapped = Math.round(value / 15) * 15;
-    onChange({ start: minutesClock(Math.max(minMinute, Math.min(snapped, safeEndMinute - 15))), end: minutesClock(safeEndMinute) });
+    updateEdge("start", value);
   }
 
   function updateEnd(value: number) {
-    const snapped = Math.round(value / 15) * 15;
-    onChange({ start: minutesClock(safeStartMinute), end: minutesClock(Math.min(maxMinute, Math.max(snapped, safeStartMinute + 15))) });
+    updateEdge("end", value);
+  }
+
+  function beginInput(edge: TimeRangeEdge) {
+    editingInputRef.current = edge;
+    if (edge === "start") startInputDurationRef.current = Math.max(minimumDuration, safeEndMinute - safeStartMinute);
+  }
+
+  function updateInput(edge: TimeRangeEdge, value: string) {
+    setInputValues((current) => ({ ...current, [edge]: value }));
+    if (!validDraftClock(value)) return;
+    const next = edge === "start"
+      ? shiftTimeRangeFromStart(
+        clockMinutes(value),
+        startInputDurationRef.current,
+        minMinute,
+        maxMinute,
+        minimumDuration,
+        15
+      )
+      : constrainTimeRange(
+        edge,
+        clockMinutes(value),
+        { start: safeStartMinute, end: safeEndMinute },
+        minMinute,
+        maxMinute,
+        minimumDuration,
+        15
+      );
+    setInputValues({ start: minutesClock(next.start), end: minutesClock(next.end) });
+    if (next.start === safeStartMinute && next.end === safeEndMinute) return;
+    if (focusedWindow) focusedWindowRef.current = focusedTimeRangeWindow(next, minMinute, maxMinute);
+    onChange({ start: minutesClock(next.start), end: minutesClock(next.end) });
+  }
+
+  function finishInput() {
+    editingInputRef.current = null;
+    setInputValues({ start: minutesClock(safeStartMinute), end: minutesClock(safeEndMinute) });
+  }
+
+  function pointerMinute(clientX: number, grabOffset: number) {
+    const track = trackRef.current;
+    if (!track) return null;
+    const bounds = track.getBoundingClientRect();
+    if (bounds.width <= 0) return null;
+    const ratio = Math.max(0, Math.min(1, (clientX - bounds.left - grabOffset) / bounds.width));
+    return railMinMinute + ratio * span;
+  }
+
+  function startPointerDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (disabled || event.button !== 0) return;
+    const track = trackRef.current;
+    const startHandle = startHandleRef.current;
+    const endHandle = endHandleRef.current;
+    if (!track || !startHandle || !endHandle) return;
+    event.preventDefault();
+    const startBounds = startHandle.getBoundingClientRect();
+    const endBounds = endHandle.getBoundingClientRect();
+    const edge = closestTimeRangeEdge(
+      event.clientX,
+      startBounds.left + startBounds.width / 2,
+      endBounds.left + endBounds.width / 2
+    );
+    const handleBounds = edge === "start" ? startBounds : endBounds;
+    const handleCenter = handleBounds.left + handleBounds.width / 2;
+    const trackBounds = track.getBoundingClientRect();
+    const logicalMinute = edge === "start" ? safeStartMinute : safeEndMinute;
+    const logicalCenter = trackBounds.left + (logicalMinute - railMinMinute) / span * trackBounds.width;
+    const grabOffset = Math.abs(event.clientX - handleCenter) <= 14 ? event.clientX - logicalCenter : 0;
+    dragRef.current = { pointerId: event.pointerId, edge, grabOffset, separated: handlesAreTight };
+    setDraggingHandle(edge);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const minute = pointerMinute(event.clientX, grabOffset);
+    if (minute !== null) updateEdge(edge, minute);
+  }
+
+  function movePointerDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const minute = pointerMinute(event.clientX, drag.grabOffset);
+    if (minute !== null) updateEdge(drag.edge, minute);
+  }
+
+  function finishPointerDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    dragRef.current = null;
+    setDraggingHandle(null);
   }
 
   return <div className="time-range-rail">
-    <div className="time-range-values" aria-label="选择开始和结束时间">
-      <label><span>{startLabel}</span><input type="time" step={900} min={minutesClock(minMinute)} max={minutesClock(Math.max(minMinute, safeEndMinute - 15))} disabled={disabled} value={minutesClock(safeStartMinute)} aria-label={`输入${startLabel}`} onChange={(event) => updateStart(clockMinutes(event.target.value))} /></label>
-      <label><span>{endLabel}</span><input type="time" step={900} min={minutesClock(Math.min(maxMinute, safeStartMinute + 15))} max={minutesClock(maxMinute)} disabled={disabled} value={minutesClock(safeEndMinute)} aria-label={`输入${endLabel}`} onChange={(event) => updateEnd(clockMinutes(event.target.value))} /></label>
-    </div>
+    {showInputs && <div className="time-range-values" aria-label="选择开始和结束时间">
+      <label><span>{startLabel}</span><input type="time" step={900} disabled={disabled} value={inputValues.start} aria-label={`输入${startLabel}`} aria-describedby={describedBy} onFocus={() => beginInput("start")} onChange={(event) => updateInput("start", event.target.value)} onBlur={finishInput} /></label>
+      <label><span>{endLabel}</span><input type="time" step={900} disabled={disabled} value={inputValues.end} aria-label={`输入${endLabel}`} aria-describedby={describedBy} onFocus={() => beginInput("end")} onChange={(event) => updateInput("end", event.target.value)} onBlur={finishInput} /></label>
+    </div>}
     <div className="time-rail-surface">
-      <div className="time-rail-track-wrap">
-        <div className="time-rail-track" aria-hidden="true">
-          {visibleSegments.map((segment, index) => <span key={`${segment.start}-${segment.end}-${index}`} className="time-rail-nonworking" aria-hidden="true" style={{ left: position(Math.max(segment.start, minMinute)), width: `calc(${position(Math.min(segment.end, maxMinute))} - ${position(Math.max(segment.start, minMinute))})` }} />)}
+      <div className={`time-rail-track-wrap${handlesAreSeparated ? " handles-are-tight" : ""}${draggingHandle ? ` dragging-${draggingHandle}` : ""}${disabled ? " is-disabled" : ""}`} onPointerDown={startPointerDrag} onPointerMove={movePointerDrag} onPointerUp={finishPointerDrag} onPointerCancel={finishPointerDrag} onLostPointerCapture={finishPointerDrag}>
+        <div ref={trackRef} className="time-rail-track" aria-hidden="true">
+          {visibleSegments.map((segment, index) => <span key={`${segment.start}-${segment.end}-${index}`} className="time-rail-nonworking" aria-hidden="true" style={{ left: position(Math.max(segment.start, railMinMinute)), width: `calc(${position(Math.min(segment.end, railMaxMinute))} - ${position(Math.max(segment.start, railMinMinute))})` }} />)}
           <span className="time-rail-selection" style={{ left: position(safeStartMinute), width: `calc(${position(safeEndMinute)} - ${position(safeStartMinute)})` }} />
         </div>
-        <input className="time-rail-range start" type="range" min={minMinute} max={maxMinute} step={15} value={safeStartMinute} disabled={disabled} aria-label={`调整${startLabel}，15 分钟步进`} aria-describedby={describedBy} onChange={(event) => updateStart(Number(event.target.value))} />
-        <input className="time-rail-range end" type="range" min={minMinute} max={maxMinute} step={15} value={safeEndMinute} disabled={disabled} aria-label={`调整${endLabel}，15 分钟步进`} aria-describedby={describedBy} onChange={(event) => updateEnd(Number(event.target.value))} />
+        <input className="time-rail-range start" type="range" min={railMinMinute} max={railMaxMinute} step={15} value={safeStartMinute} disabled={disabled} aria-label={`调整${startLabel}，15 分钟步进，最短 ${minimumDuration} 分钟`} aria-valuemax={safeEndMinute - minimumDuration} aria-describedby={describedBy} onChange={(event) => updateStart(Number(event.target.value))} />
+        <input className="time-rail-range end" type="range" min={railMinMinute} max={railMaxMinute} step={15} value={safeEndMinute} disabled={disabled} aria-label={`调整${endLabel}，15 分钟步进，最短 ${minimumDuration} 分钟`} aria-valuemin={safeStartMinute + minimumDuration} aria-describedby={describedBy} onChange={(event) => updateEnd(Number(event.target.value))} />
+        <div className="time-rail-handles" aria-hidden="true">
+          <span ref={startHandleRef} className="time-rail-handle start" style={{ left: position(safeStartMinute) }} />
+          <span ref={endHandleRef} className="time-rail-handle end" style={{ left: position(safeEndMinute) }} />
+        </div>
       </div>
-      <div className="time-rail-scale" aria-hidden="true"><span>{minutesClock(minMinute)}</span><span>{minutesClock(Math.round((minMinute + span / 2) / 15) * 15)}</span><span>{minutesClock(maxMinute)}</span></div>
-      {visibleSegments.length > 0 && <small className="time-rail-preference">浅色区间仅表示非工作时间，仍可安排。</small>}
+      <div className="time-rail-scale" aria-hidden="true"><span>{minutesClock(railMinMinute)}</span><span>{minutesClock(Math.round((railMinMinute + span / 2) / 15) * 15)}</span><span>{minutesClock(railMaxMinute)}</span></div>
+      {showPreference && visibleSegments.length > 0 && <small className="time-rail-preference">浅色区间仅表示非工作时间，仍可安排。</small>}
     </div>
+  </div>;
+}
+
+function BlockEditorTimeRangeRail({
+  start,
+  end,
+  onChange,
+  segments = [],
+  minMinute = 0,
+  maxMinute = 23 * 60 + 59,
+  minimumDuration = MIN_TASK_BLOCK_MINUTES,
+  disabled = false,
+  describedBy
+}: {
+  start: string;
+  end: string;
+  onChange: (next: { start: string; end: string }) => void;
+  segments?: TimeRailSegment[];
+  minMinute?: number;
+  maxMinute?: number;
+  minimumDuration?: number;
+  disabled?: boolean;
+  describedBy?: string;
+}) {
+  const railStep = 5;
+  const collapsedSideWidth = 31;
+  const collapsedEndOffset = 100 - collapsedSideWidth;
+  const trackRef = useRef<HTMLDivElement>(null);
+  const startHandleRef = useRef<HTMLSpanElement>(null);
+  const endHandleRef = useRef<HTMLSpanElement>(null);
+  const editingInputRef = useRef<TimeRangeEdge | null>(null);
+  const dragRef = useRef<{ pointerId: number; edge: TimeRangeEdge; grabOffset: number; separated: boolean } | null>(null);
+  const presentationRef = useRef<ReturnType<typeof focusedTimeRangePresentation> | null>(null);
+  const [draggingHandle, setDraggingHandle] = useState<TimeRangeEdge | null>(null);
+  const startMinute = clockMinutes(start);
+  const endMinute = clockMinutes(end);
+  const safeStartMinute = Math.max(minMinute, Math.min(startMinute, maxMinute - minimumDuration, endMinute - minimumDuration));
+  const safeEndMinute = Math.min(maxMinute, Math.max(endMinute, minMinute + minimumDuration, safeStartMinute + minimumDuration));
+  const [inputValues, setInputValues] = useState(() => ({
+    start: minutesClock(safeStartMinute),
+    end: minutesClock(safeEndMinute)
+  }));
+
+  useEffect(() => {
+    setInputValues((current) => {
+      const next = {
+        start: editingInputRef.current === "start" ? current.start : minutesClock(safeStartMinute),
+        end: editingInputRef.current === "end" ? current.end : minutesClock(safeEndMinute)
+      };
+      return next.start === current.start && next.end === current.end ? current : next;
+    });
+  }, [safeStartMinute, safeEndMinute]);
+
+  const presentationContainsRange = (presentation: ReturnType<typeof focusedTimeRangePresentation>) => presentation.kind === "continuous"
+    ? safeStartMinute >= presentation.window.start && safeEndMinute <= presentation.window.end
+    : safeStartMinute >= presentation.startWindow.start
+      && safeStartMinute <= presentation.startWindow.end
+      && safeEndMinute >= presentation.endWindow.start
+      && safeEndMinute <= presentation.endWindow.end;
+  if (!presentationRef.current || !presentationContainsRange(presentationRef.current)) {
+    presentationRef.current = focusedTimeRangePresentation(
+      { start: safeStartMinute, end: safeEndMinute },
+      minMinute,
+      maxMinute,
+      4 * 60,
+      railStep
+    );
+  }
+
+  const presentation = presentationRef.current;
+  const collapsedPresentation = presentation.kind === "collapsed" ? presentation : null;
+  const visibleWindow = presentation.kind === "continuous" ? presentation.window : null;
+  const startRailBounds = collapsedPresentation?.startWindow ?? visibleWindow!;
+  const endRailBounds = collapsedPresentation?.endWindow ?? visibleWindow!;
+  const visibleWindows = collapsedPresentation
+    ? [collapsedPresentation.startWindow, collapsedPresentation.endWindow]
+    : [visibleWindow!];
+  const visibleSegments = segments.filter((segment) => visibleWindows.some((window) => segment.end > window.start && segment.start < window.end));
+  const continuousSpan = visibleWindow ? Math.max(minimumDuration, visibleWindow.end - visibleWindow.start) : 0;
+  const handlesAreTight = Boolean(visibleWindow && (safeEndMinute - safeStartMinute) / continuousSpan <= 0.08);
+  const handlesAreSeparated = draggingHandle ? Boolean(dragRef.current?.separated) : handlesAreTight;
+  const startSliderMax = Math.min(startRailBounds.end, safeEndMinute - minimumDuration);
+  const endSliderMin = Math.max(endRailBounds.start, safeStartMinute + minimumDuration);
+
+  function windowPosition(minute: number, window: TimeRailSegment, offset = 0, width = 100) {
+    const span = Math.max(1, window.end - window.start);
+    const ratio = Math.max(0, Math.min(1, (minute - window.start) / span));
+    return offset + ratio * width;
+  }
+
+  function edgePosition(edge: TimeRangeEdge, minute: number) {
+    if (!collapsedPresentation) return windowPosition(minute, visibleWindow!);
+    return windowPosition(
+      minute,
+      edge === "start" ? collapsedPresentation.startWindow : collapsedPresentation.endWindow,
+      edge === "start" ? 0 : collapsedEndOffset,
+      collapsedSideWidth
+    );
+  }
+
+  function refreshPresentation(next: { start: number; end: number }) {
+    presentationRef.current = focusedTimeRangePresentation(next, minMinute, maxMinute, 4 * 60, railStep);
+  }
+
+  function emitRange(next: { start: number; end: number }, recenter = false) {
+    const nextValues = { start: minutesClock(next.start), end: minutesClock(next.end) };
+    setInputValues(nextValues);
+    if (recenter) refreshPresentation(next);
+    if (next.start === safeStartMinute && next.end === safeEndMinute) return;
+    onChange(nextValues);
+  }
+
+  function updateEdge(edge: TimeRangeEdge, value: number) {
+    const bounds = edge === "start" ? startRailBounds : endRailBounds;
+    emitRange(constrainTimeRange(
+      edge,
+      value,
+      { start: safeStartMinute, end: safeEndMinute },
+      bounds.start,
+      bounds.end,
+      minimumDuration,
+      railStep
+    ));
+  }
+
+  function commitInput(edge: TimeRangeEdge, rawValue = inputValues[edge]) {
+    const normalized = normalizeClockInput(rawValue);
+    if (!validDraftClock(normalized)) {
+      setInputValues({ start: minutesClock(safeStartMinute), end: minutesClock(safeEndMinute) });
+      return;
+    }
+    emitRange(constrainTimeRange(
+      edge,
+      clockMinutes(normalized),
+      { start: safeStartMinute, end: safeEndMinute },
+      minMinute,
+      maxMinute,
+      minimumDuration,
+      1
+    ), true);
+  }
+
+  function handleInputKeyDown(event: KeyboardEvent<HTMLInputElement>, edge: TimeRangeEdge) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commitInput(edge, event.currentTarget.value);
+      event.currentTarget.select();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setInputValues({ start: minutesClock(safeStartMinute), end: minutesClock(safeEndMinute) });
+      editingInputRef.current = null;
+      event.currentTarget.blur();
+      return;
+    }
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    const normalized = normalizeClockInput(event.currentTarget.value);
+    const fallbackMinute = edge === "start" ? safeStartMinute : safeEndMinute;
+    const currentMinute = validDraftClock(normalized) ? clockMinutes(normalized) : fallbackMinute;
+    emitRange(constrainTimeRange(
+      edge,
+      currentMinute + (event.key === "ArrowUp" ? railStep : -railStep),
+      { start: safeStartMinute, end: safeEndMinute },
+      minMinute,
+      maxMinute,
+      minimumDuration,
+      1
+    ), true);
+  }
+
+  function pointerMinute(clientX: number, grabOffset: number, edge: TimeRangeEdge) {
+    const track = trackRef.current;
+    if (!track) return null;
+    const bounds = track.getBoundingClientRect();
+    if (bounds.width <= 0) return null;
+    const ratio = Math.max(0, Math.min(1, (clientX - bounds.left - grabOffset) / bounds.width));
+    if (!collapsedPresentation) return visibleWindow!.start + ratio * continuousSpan;
+    const window = edge === "start" ? collapsedPresentation.startWindow : collapsedPresentation.endWindow;
+    const localRatio = edge === "start"
+      ? Math.max(0, Math.min(1, ratio / (collapsedSideWidth / 100)))
+      : Math.max(0, Math.min(1, (ratio - collapsedEndOffset / 100) / (collapsedSideWidth / 100)));
+    return window.start + localRatio * (window.end - window.start);
+  }
+
+  function startPointerDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (disabled || event.button !== 0) return;
+    const track = trackRef.current;
+    const startHandle = startHandleRef.current;
+    const endHandle = endHandleRef.current;
+    if (!track || !startHandle || !endHandle) return;
+    const trackBounds = track.getBoundingClientRect();
+    if (trackBounds.width <= 0) return;
+    const pointerRatio = (event.clientX - trackBounds.left) / trackBounds.width;
+    if (collapsedPresentation && pointerRatio > collapsedSideWidth / 100 && pointerRatio < collapsedEndOffset / 100) return;
+    event.preventDefault();
+    const startBounds = startHandle.getBoundingClientRect();
+    const endBounds = endHandle.getBoundingClientRect();
+    const edge = closestTimeRangeEdge(
+      event.clientX,
+      startBounds.left + startBounds.width / 2,
+      endBounds.left + endBounds.width / 2
+    );
+    const handleBounds = edge === "start" ? startBounds : endBounds;
+    const handleCenter = handleBounds.left + handleBounds.width / 2;
+    const logicalMinute = edge === "start" ? safeStartMinute : safeEndMinute;
+    const logicalCenter = trackBounds.left + edgePosition(edge, logicalMinute) / 100 * trackBounds.width;
+    const grabOffset = Math.abs(event.clientX - handleCenter) <= 14 ? event.clientX - logicalCenter : 0;
+    dragRef.current = { pointerId: event.pointerId, edge, grabOffset, separated: handlesAreTight };
+    setDraggingHandle(edge);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const minute = pointerMinute(event.clientX, grabOffset, edge);
+    if (minute !== null) updateEdge(edge, minute);
+  }
+
+  function movePointerDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const minute = pointerMinute(event.clientX, drag.grabOffset, drag.edge);
+    if (minute !== null) updateEdge(drag.edge, minute);
+  }
+
+  function finishPointerDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    dragRef.current = null;
+    setDraggingHandle(null);
+  }
+
+  function setDuration(durationMinutes: number) {
+    if (safeStartMinute + durationMinutes > maxMinute) return;
+    emitRange({ start: safeStartMinute, end: safeStartMinute + durationMinutes }, true);
+  }
+
+  function renderTrackWindow(window: TimeRailSegment, offset: number, width: number, selection: TimeRailSegment) {
+    const localPosition = (minute: number) => windowPosition(minute, window, offset, width);
+    const selectionStart = Math.max(window.start, selection.start);
+    const selectionEnd = Math.min(window.end, selection.end);
+    return <Fragment key={`${window.start}-${window.end}-${offset}`}>
+      <span className="time-rail-track-piece" aria-hidden="true" style={{ left: `${offset}%`, width: `${width}%` }} />
+      {segments.filter((segment) => segment.end > window.start && segment.start < window.end).map((segment, index) => {
+        const clippedStart = Math.max(segment.start, window.start);
+        const clippedEnd = Math.min(segment.end, window.end);
+        return <span key={`${window.start}-${segment.start}-${segment.end}-${index}`} className="time-rail-nonworking" aria-hidden="true" style={{ left: `${localPosition(clippedStart)}%`, width: `${localPosition(clippedEnd) - localPosition(clippedStart)}%` }} />;
+      })}
+      {selectionEnd > selectionStart && <span className="time-rail-selection" aria-hidden="true" style={{ left: `${localPosition(selectionStart)}%`, width: `${localPosition(selectionEnd) - localPosition(selectionStart)}%` }} />}
+    </Fragment>;
+  }
+
+  const omittedLabel = collapsedPresentation
+    ? `折叠 ${Math.floor(collapsedPresentation.omittedMinutes / 60)}h${collapsedPresentation.omittedMinutes % 60 === 0 ? "" : ` ${collapsedPresentation.omittedMinutes % 60}m`}`
+    : "";
+
+  return <div className="time-range-rail block-editor">
+    <div className="time-range-values block-editor-values" aria-label="选择开始和结束时间">
+      <label><span><i className="time-range-marker start" aria-hidden="true" />开始</span><input type="text" inputMode="numeric" autoComplete="off" spellCheck={false} disabled={disabled} value={inputValues.start} aria-label="输入开始时间" aria-describedby={describedBy} onFocus={(event) => { editingInputRef.current = "start"; event.currentTarget.select(); }} onChange={(event) => setInputValues((current) => ({ ...current, start: event.target.value }))} onKeyDown={(event) => handleInputKeyDown(event, "start")} onBlur={() => { commitInput("start"); editingInputRef.current = null; }} /></label>
+      <span className="time-range-connector" aria-hidden="true"><Icon name="chevron-right" size={14} /></span>
+      <label><span><i className="time-range-marker end" aria-hidden="true" />结束</span><input type="text" inputMode="numeric" autoComplete="off" spellCheck={false} disabled={disabled} value={inputValues.end} aria-label="输入结束时间" aria-describedby={describedBy} onFocus={(event) => { editingInputRef.current = "end"; event.currentTarget.select(); }} onChange={(event) => setInputValues((current) => ({ ...current, end: event.target.value }))} onKeyDown={(event) => handleInputKeyDown(event, "end")} onBlur={() => { commitInput("end"); editingInputRef.current = null; }} /></label>
+    </div>
+    {describedBy && <small id={describedBy} className="plan-draft-sync-note">手写 1 分钟 · 时间轴与方向键 5 分钟 · 最短 15 分钟</small>}
+    <div className="time-rail-surface">
+      {collapsedPresentation ? <div className="time-rail-scale collapsed" aria-hidden="true">
+        <i>{minutesClock(collapsedPresentation.startWindow.start)}</i>
+        <strong>{minutesClock(safeStartMinute)}</strong>
+        <i>{minutesClock(collapsedPresentation.startWindow.end)}</i>
+        <em>折叠</em>
+        <i>{minutesClock(collapsedPresentation.endWindow.start)}</i>
+        <strong className="end">{minutesClock(safeEndMinute)}</strong>
+        <i>{minutesClock(collapsedPresentation.endWindow.end)}</i>
+      </div> : <div className="time-rail-scale" aria-hidden="true"><span>{minutesClock(visibleWindow!.start)}</span><span>{minutesClock(Math.round((visibleWindow!.start + continuousSpan / 2) / railStep) * railStep)}</span><span>{minutesClock(visibleWindow!.end)}</span></div>}
+      <div className={`time-rail-track-wrap${collapsedPresentation ? " is-collapsed" : ""}${handlesAreSeparated ? " handles-are-tight" : ""}${draggingHandle ? ` dragging-${draggingHandle}` : ""}${disabled ? " is-disabled" : ""}`} onPointerDown={startPointerDrag} onPointerMove={movePointerDrag} onPointerUp={finishPointerDrag} onPointerCancel={finishPointerDrag} onLostPointerCapture={finishPointerDrag}>
+        <div ref={trackRef} className="time-rail-track" aria-hidden="true">
+          {collapsedPresentation ? <>
+            <span className="time-rail-break" aria-hidden="true"><span>{omittedLabel}</span></span>
+          </> : renderTrackWindow(visibleWindow!, 0, 100, { start: safeStartMinute, end: safeEndMinute })}
+        </div>
+        <input className="time-rail-range start" type="range" min={startRailBounds.start} max={startSliderMax} step={railStep} value={safeStartMinute} disabled={disabled} aria-label={`调整开始时间，${railStep} 分钟步进，最短 ${minimumDuration} 分钟`} aria-valuetext={minutesClock(safeStartMinute)} aria-describedby={describedBy} onChange={(event) => updateEdge("start", Number(event.target.value))} />
+        <input className="time-rail-range end" type="range" min={endSliderMin} max={endRailBounds.end} step={railStep} value={safeEndMinute} disabled={disabled} aria-label={`调整结束时间，${railStep} 分钟步进，最短 ${minimumDuration} 分钟`} aria-valuetext={minutesClock(safeEndMinute)} aria-describedby={describedBy} onChange={(event) => updateEdge("end", Number(event.target.value))} />
+        {collapsedPresentation ? <div className="time-rail-endpoint-cards" aria-hidden="true">
+          <span ref={startHandleRef} className="time-rail-endpoint-card start"><span><i className="time-range-marker start" />{minutesClock(safeStartMinute)}</span><i className="time-rail-grip"><b /><b /></i></span>
+          <span ref={endHandleRef} className="time-rail-endpoint-card end"><i className="time-rail-grip"><b /><b /></i><span>{minutesClock(safeEndMinute)}<i className="time-range-marker end" /></span></span>
+        </div> : <div className="time-rail-handles" aria-hidden="true">
+          <span ref={startHandleRef} className="time-rail-handle start" style={{ left: `${edgePosition("start", safeStartMinute)}%` }} />
+          <span ref={endHandleRef} className="time-rail-handle end" style={{ left: `${edgePosition("end", safeEndMinute)}%` }} />
+        </div>}
+      </div>
+      {visibleSegments.length > 0 && <span className="sr-only">浅色区间表示非工作时间，仍可安排。</span>}
+    </div>
+    <div className="time-duration-presets" aria-label="快速设置时长"><span>时长</span>{[
+      { minutes: 15, label: "15 分钟" },
+      { minutes: 30, label: "30 分钟" },
+      { minutes: 60, label: "1 小时" },
+      { minutes: 120, label: "2 小时" }
+    ].map((preset) => <button key={preset.minutes} type="button" disabled={disabled || safeStartMinute + preset.minutes > maxMinute} onClick={() => setDuration(preset.minutes)}>{preset.label}</button>)}</div>
   </div>;
 }
 
@@ -2284,10 +2946,14 @@ function suggestedDraftAllocations(
   availability: AvailabilitySettings | null,
   task: Task | undefined
 ) {
-  if (durationMinutes <= 0) return null;
+  if (durationMinutes < MIN_TASK_BLOCK_MINUTES) {
+    return { allocations: [], remainingMinutes: durationMinutes, issue: "duration_too_short" as const };
+  }
   const earliestDate = task?.earliest_start_at?.slice(0, 10);
   const dueDate = task?.due_at?.slice(0, 10);
-  if ((earliestDate && earliestDate > planDate) || (dueDate && dueDate < planDate)) return null;
+  if ((earliestDate && earliestDate > planDate) || (dueDate && dueDate < planDate)) {
+    return { allocations: [], remainingMinutes: durationMinutes, issue: "outside_task_range" as const };
+  }
   const earliestMinute = task?.earliest_start_at?.slice(0, 10) === planDate
     ? clockMinutes(task.earliest_start_at.slice(11, 16))
     : 0;
@@ -2297,7 +2963,12 @@ function suggestedDraftAllocations(
   const preferredStart = availability ? clockMinutes(availability.workday_start) : 9 * 60;
   const startsAt = Math.max(earliestMinute, preferredStart);
   const endLimit = Math.min(dueMinute, 24 * 60);
-  if (startsAt >= endLimit) return null;
+  if (startsAt >= endLimit) {
+    return { allocations: [], remainingMinutes: durationMinutes, issue: "outside_task_range" as const };
+  }
+  if (endLimit - startsAt < MIN_TASK_BLOCK_MINUTES) {
+    return { allocations: [], remainingMinutes: durationMinutes, issue: "available_window_too_short" as const };
+  }
   const scheduledMinutes = Math.min(durationMinutes, endLimit - startsAt);
   return {
     allocations: [{
@@ -2305,7 +2976,8 @@ function suggestedDraftAllocations(
       ends_at: planTimestamp(planDate, minutesClock(startsAt + scheduledMinutes)),
       estimated_minutes: scheduledMinutes
     }],
-    remainingMinutes: durationMinutes - scheduledMinutes
+    remainingMinutes: durationMinutes - scheduledMinutes,
+    issue: null
   };
 }
 
@@ -2343,8 +3015,8 @@ function weekDateValues(selectedDate: string) {
   const selected = new Date(`${selectedDate}T00:00:00+08:00`);
   const weekdayName = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Shanghai", weekday: "short" }).format(selected);
   const weekdayIndex = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(weekdayName);
-  const weekday = weekdayIndex < 0 ? 0 : weekdayIndex;
-  return Array.from({ length: 7 }, (_, index) => shiftDateValue(selectedDate, index - weekday));
+  const mondayBasedIndex = weekdayIndex < 0 ? 0 : (weekdayIndex + 6) % 7;
+  return Array.from({ length: 7 }, (_, index) => shiftDateValue(selectedDate, index - mondayBasedIndex));
 }
 
 function shanghaiClockParts(value: Date) {
@@ -2358,7 +3030,8 @@ function shanghaiClockParts(value: Date) {
 
 function TodayPage({
   today, selectedDate, onSelectDate, tasks, recurringItems, recurringOccurrences, schedule, availability, loading, error, preview, busy,
-  onGeneratePlan, onAdjustPlan, onUpdatePlan, onConfirmPlan, onCancelPlan, onOpenTasks, onFactsChanged, onNotify, message
+  onGeneratePlan, onAdjustPlan, onUpdatePlan, onConfirmPlan, onCancelPlan, onOpenTasks, onFactsChanged, onNotify, message,
+  timelineReturnContext, onTimelineReturnHandled
 }: {
   today: string;
   selectedDate: string;
@@ -2377,10 +3050,12 @@ function TodayPage({
   onUpdatePlan: (preview: RulePlanPreview) => Promise<RulePlanPreview>;
   onConfirmPlan: () => void;
   onCancelPlan: () => Promise<boolean>;
-  onOpenTasks: (taskId?: string) => void;
+  onOpenTasks: (taskId?: string, returnContext?: TimelineReturnContext) => void;
   onFactsChanged: (date?: string) => Promise<void>;
   onNotify: (label: string, message: string, icon?: IconName) => void;
   message: string;
+  timelineReturnContext: TimelineReturnContext | null;
+  onTimelineReturnHandled: () => void;
 }) {
   const [monthKey, setMonthKey] = useState(selectedDate.slice(0, 7));
   const [monthSelectionPending, setMonthSelectionPending] = useState(false);
@@ -2391,8 +3066,6 @@ function TodayPage({
   const [executionMessage, setExecutionMessage] = useState("");
   const [savingExecution, setSavingExecution] = useState(false);
   const [quickCompletingBlockId, setQuickCompletingBlockId] = useState<string | null>(null);
-  const [debugFixtureControlsAvailable, setDebugFixtureControlsAvailable] = useState(false);
-  const [debugFixturesBusy, setDebugFixturesBusy] = useState(false);
   const [clock, setClock] = useState(() => new Date());
   const [followingNow, setFollowingNow] = useState(true);
   const [showReturnToNow, setShowReturnToNow] = useState(false);
@@ -2401,12 +3074,10 @@ function TodayPage({
   const timelineCenteredDateRef = useRef<string | null>(null);
   const returnToNowFrameRef = useRef(0);
   const timelineFloatingPanelRef = useRef<HTMLElement>(null);
-  const timelineSelectionTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const timelineSelectionTriggerRef = useRef<HTMLElement | null>(null);
+  const timelineSelectionAnchorRef = useRef<HTMLElement | null>(null);
   const cells = useMemo(() => calendarCells(monthKey), [monthKey]);
 
-  useEffect(() => {
-    void debugTimelineFixturesAvailable().then(setDebugFixtureControlsAvailable).catch(() => setDebugFixtureControlsAvailable(false));
-  }, []);
   const fixedEvents = schedule?.fixed_events ?? [];
   const taskBlocks = schedule?.task_blocks ?? [];
   const timedEvents = fixedEvents.filter((event) => !event.is_all_day);
@@ -2482,7 +3153,6 @@ function TodayPage({
     .format(new Date(`${selectedDate}T00:00:00+08:00`));
   const selectedLunarDay = lunarDayLabel(selectedDate);
   const nonWorkingTimeSegments = nonWorkingSegments(availability, selectedDate);
-  const draftTimeBounds = draftEditableBounds(selectedDraftTask, selectedDate);
   const holidayCoverageAvailable = officialHolidayCoverageFor(`${monthKey}-01`);
 
   function showTimelineTooltipForTarget(content: TimelineTooltipContent, target: HTMLElement, anchorMode: TimelineTooltipAnchor) {
@@ -2618,6 +3288,44 @@ function TodayPage({
   }, [selectedDate]);
 
   useEffect(() => {
+    if (!timelineReturnContext) return;
+    if (timelineReturnContext.date !== selectedDate) {
+      onSelectDate(timelineReturnContext.date);
+      return;
+    }
+    if (loading) return;
+    setTodayView("timeline");
+    setFollowingNow(false);
+    setTimelineTooltip(null);
+    setPlanDraftTimeEdit(null);
+    const block = taskBlocks.find((item) => item.id === timelineReturnContext.blockId);
+    if (!block) {
+      onTimelineReturnHandled();
+      return;
+    }
+    setSelection({ kind: "block", id: block.id });
+    setExecutionMessage("");
+    const frame = window.requestAnimationFrame(() => {
+      const scroller = timelineScrollRef.current;
+      const target = Array.from(scroller?.querySelectorAll<HTMLElement>("[data-timeline-kind][data-timeline-id]") ?? [])
+        .find((candidate) => candidate.dataset.timelineKind === "block" && candidate.dataset.timelineId === block.id) ?? null;
+      if (scroller && target) {
+        timelineSelectionTriggerRef.current = target;
+        timelineSelectionAnchorRef.current = target;
+        const scrollerRect = scroller.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const desiredTop = scroller.scrollTop + targetRect.top - scrollerRect.top - (scroller.clientHeight - targetRect.height) / 2;
+        scroller.scrollTo({
+          top: Math.max(0, Math.min(desiredTop, scroller.scrollHeight - scroller.clientHeight)),
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+        });
+      }
+      onTimelineReturnHandled();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [timelineReturnContext?.date, timelineReturnContext?.blockId, selectedDate, loading, schedule]);
+
+  useEffect(() => {
     if (!timelineTooltip) return;
     const dismiss = () => setTimelineTooltip(null);
     window.addEventListener("resize", dismiss);
@@ -2641,19 +3349,105 @@ function TodayPage({
     return () => window.cancelAnimationFrame(frame);
   }, [selection?.kind, selection?.id]);
 
+  useLayoutEffect(() => {
+    const panel = timelineFloatingPanelRef.current;
+    const scroll = timelineScrollRef.current;
+    if (!selection || !panel || !scroll) return;
+    const positionPanel = () => {
+      const selectedAnchor = timelineSelectionAnchorRef.current?.isConnected
+        ? timelineSelectionAnchorRef.current
+        : Array.from(scroll.querySelectorAll<HTMLElement>("[data-timeline-kind][data-timeline-id]"))
+          .find((candidate) => candidate.dataset.timelineKind === selection.kind && candidate.dataset.timelineId === selection.id) ?? null;
+      if (!selectedAnchor) return;
+
+      timelineSelectionAnchorRef.current = selectedAnchor;
+      const scrollRect = scroll.getBoundingClientRect();
+      const anchorRect = selectedAnchor.getBoundingClientRect();
+      const isCompact = window.matchMedia("(max-width: 860px)").matches;
+      const viewportMargin = 14;
+      const gap = 12;
+      const visibleTop = Math.max(viewportMargin, scrollRect.top + 8);
+      const visibleBottom = Math.min(window.innerHeight - viewportMargin, scrollRect.bottom - 8);
+      const availableHeight = Math.max(220, Math.floor(visibleBottom - visibleTop));
+
+      panel.style.setProperty("--floating-panel-height", `${availableHeight}px`);
+      if (isCompact) {
+        panel.dataset.placement = "drawer";
+        panel.style.removeProperty("--floating-panel-left");
+        panel.style.removeProperty("--floating-panel-top");
+        return;
+      }
+
+      const panelWidth = panel.offsetWidth;
+      const panelHeight = Math.min(panel.scrollHeight, availableHeight);
+      const anchorTop = Math.max(visibleTop, Math.min(anchorRect.top, visibleBottom));
+      const anchorBottom = Math.max(visibleTop, Math.min(anchorRect.bottom, visibleBottom));
+      const anchorCenterX = anchorRect.left + anchorRect.width / 2;
+      const canPlaceRight = anchorRect.right + gap + panelWidth <= window.innerWidth - viewportMargin;
+      const canPlaceLeft = anchorRect.left - gap - panelWidth >= viewportMargin;
+      const canPlaceBelow = anchorBottom + gap + panelHeight <= visibleBottom;
+      const canPlaceAbove = anchorTop - gap - panelHeight >= visibleTop;
+
+      let placement: "right" | "left" | "below" | "above";
+      let left: number;
+      let top: number;
+      if (canPlaceRight || canPlaceLeft) {
+        placement = canPlaceRight ? "right" : "left";
+        left = placement === "right" ? anchorRect.right + gap : anchorRect.left - gap - panelWidth;
+        top = Math.max(visibleTop, Math.min(anchorTop, visibleBottom - panelHeight));
+      } else {
+        placement = canPlaceBelow || !canPlaceAbove ? "below" : "above";
+        left = Math.max(viewportMargin, Math.min(anchorCenterX - panelWidth / 2, window.innerWidth - viewportMargin - panelWidth));
+        top = placement === "below"
+          ? Math.min(anchorBottom + gap, visibleBottom - panelHeight)
+          : Math.max(visibleTop, anchorTop - gap - panelHeight);
+      }
+
+      panel.dataset.placement = placement;
+      panel.style.setProperty("--floating-panel-left", `${Math.round(left)}px`);
+      panel.style.setProperty("--floating-panel-top", `${Math.round(top)}px`);
+    };
+    positionPanel();
+    const observer = new ResizeObserver(positionPanel);
+    observer.observe(scroll);
+    observer.observe(panel);
+    window.addEventListener("resize", positionPanel);
+    window.addEventListener("scroll", positionPanel, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", positionPanel);
+      window.removeEventListener("scroll", positionPanel, true);
+    };
+  }, [selection?.kind, selection?.id, Boolean(planDraftTimeEdit)]);
+
   useEffect(() => {
-    if (!selection) return;
+    if (!selection || savingExecution) return;
     const dismissOnOutsidePointer = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (timelineFloatingPanelRef.current?.contains(target)) return;
       if (timelineSelectionTriggerRef.current?.contains(target)) return;
+      if (timelineSelectionAnchorRef.current?.contains(target)) return;
       setSelection(null);
       setPlanDraftTimeEdit(null);
     };
     document.addEventListener("pointerdown", dismissOnOutsidePointer);
     return () => document.removeEventListener("pointerdown", dismissOnOutsidePointer);
-  }, [selection]);
+  }, [selection, savingExecution]);
+
+  useEffect(() => {
+    if (todayView !== "timeline") return;
+    const returnToMonthOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || selection) return;
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable)) return;
+      setTimelineTooltip(null);
+      setTodayView("month");
+    };
+    window.addEventListener("keydown", returnToMonthOnEscape);
+    return () => window.removeEventListener("keydown", returnToMonthOnEscape);
+  }, [todayView, selection]);
 
   useEffect(() => {
     if (!selectedBlock || selectedBlock.review || selectedDate !== today) {
@@ -2685,53 +3479,42 @@ function TodayPage({
     selectCalendarDate(today);
   }
 
-  async function loadDebugTimelineFixtures() {
-    setDebugFixturesBusy(true);
-    try {
-      const fixtureDate = await seedDebugTimelineLayoutFixtures();
-      if (!onSelectDate(fixtureDate)) return;
-      setMonthKey(fixtureDate.slice(0, 7));
-      setMonthSelectionPending(false);
-      setTodayView("timeline");
-      await onFactsChanged(fixtureDate);
-      onNotify("布局样例已载入", `${fixtureDate} · 可查看等分、包含、链式与局部右扩`, "calendar");
-    } catch (reason) {
-      onNotify("布局样例未载入", String(reason), "review");
-    } finally {
-      setDebugFixturesBusy(false);
-    }
-  }
-
-  async function clearDebugTimelineFixtures() {
-    setDebugFixturesBusy(true);
-    try {
-      await clearDebugTimelineLayoutFixtures();
-      await onFactsChanged(selectedDate);
-      onNotify("布局样例已移除", "仅删除“布局样例”数据，不影响你的日程。", "restore");
-    } catch (reason) {
-      onNotify("布局样例未移除", String(reason), "review");
-    } finally {
-      setDebugFixturesBusy(false);
-    }
-  }
-
   function selectCalendarDate(date: string) {
-    if (!onSelectDate(date)) return;
+    if (!onSelectDate(date)) return false;
     setMonthSelectionPending(false);
     if (date.slice(0, 7) !== monthKey) setMonthKey(date.slice(0, 7));
+    return true;
   }
 
-  function selectTimelineItem(nextSelection: TimelineSelection, trigger?: HTMLButtonElement) {
+  function openTimelineDate(date: string) {
+    if (!selectCalendarDate(date)) return;
+    setTodayView("timeline");
+  }
+
+  function returnToMonth() {
+    setSelection(null);
+    setPlanDraftTimeEdit(null);
+    setExecutionDraft(null);
+    setExecutionMessage("");
+    setTimelineTooltip(null);
+    setTodayView("month");
+  }
+
+  function selectTimelineItem(nextSelection: TimelineSelection, trigger?: HTMLElement, anchor: HTMLElement | null = trigger ?? null) {
+    if (savingExecution) return;
     if (trigger) timelineSelectionTriggerRef.current = trigger;
+    if (anchor) timelineSelectionAnchorRef.current = anchor;
     setTimelineTooltip(null);
     setSelection(nextSelection);
     setExecutionMessage("");
   }
 
   function selectPlanDraftBlock(blockIndex: number, trigger: HTMLButtonElement) {
+    if (savingExecution) return;
     const block = draftBlocks[blockIndex];
     if (!block) return;
     timelineSelectionTriggerRef.current = trigger;
+    timelineSelectionAnchorRef.current = trigger;
     setTimelineTooltip(null);
     setSelection({ kind: "draft", id: String(blockIndex) });
     setPlanDraftTimeEdit({
@@ -2742,34 +3525,62 @@ function TodayPage({
     });
   }
 
-  async function adjustSelectedBlockTime() {
-    if (!selectedBlock || selectedBlock.execution_status !== "planned" || selectedBlock.review || isPastDate || busy) return;
-    const target = selectedBlock;
-    closeTimelinePanel();
-    const adjustment = await onAdjustPlan();
-    if (!adjustment) return;
-    const blockIndex = adjustment.blocks.findIndex((block) =>
-      block.task_id === target.task_id
-      && block.starts_at === target.starts_at
-      && block.ends_at === target.ends_at
-    );
-    if (blockIndex < 0) {
-      onNotify("暂时不能调整这个时间块", "该时间块已经产生执行记录或计划已发生变化", "review");
-      return;
-    }
-    const block = adjustment.blocks[blockIndex];
-    setSelection({ kind: "draft", id: String(blockIndex) });
+  function adjustSelectedBlockTime() {
+    if (!selectedBlock || selectedBlock.execution_status !== "planned" || selectedBlock.review || isPastDate || busy || !["open", "scheduled"].includes(selectedBlock.task_status)) return;
+    setExecutionDraft(null);
     setPlanDraftTimeEdit({
-      blockIndex,
-      starts_at: timeInputValue(block.starts_at),
-      ends_at: timeInputValue(block.ends_at),
+      blockIndex: -1,
+      sourceBlockId: selectedBlock.id,
+      starts_at: timeInputValue(selectedBlock.starts_at),
+      ends_at: timeInputValue(selectedBlock.ends_at),
       error: ""
     });
   }
 
+  function returnToSelectedBlockDetails() {
+    if (!selectedBlock || !planDraftTimeEdit?.sourceBlockId || busy) return;
+    const outcome = selectedBlock.execution_status === "planned" ? null : selectedBlock.execution_status;
+    setPlanDraftTimeEdit(null);
+    setExecutionDraft(!selectedBlock.review && selectedDate === today ? {
+      result: executionResultForOutcome(outcome),
+      outcome,
+      note: selectedBlock.execution_note ?? ""
+    } : null);
+    setExecutionMessage("");
+    window.requestAnimationFrame(() => timelineFloatingPanelRef.current?.focus());
+  }
+
+  async function resolveEditablePlanDraftBlock(edit: PlanDraftTimeEdit | null = planDraftTimeEdit) {
+    if (!edit) return null;
+    let workingPreview = preview;
+    let blockIndex = edit.blockIndex;
+    if (edit.sourceBlockId) {
+      const sourceBlock = taskBlocks.find((item) => item.id === edit.sourceBlockId);
+      if (!sourceBlock) {
+        onNotify("暂时不能调整这个时间块", "这项安排已经发生变化，请重新打开后再试", "review");
+        return null;
+      }
+      if (!workingPreview) workingPreview = await onAdjustPlan();
+      if (!workingPreview) return null;
+      blockIndex = workingPreview.blocks.findIndex((block) =>
+        block.task_id === sourceBlock.task_id
+        && block.starts_at === sourceBlock.starts_at
+        && block.ends_at === sourceBlock.ends_at
+      );
+      if (blockIndex < 0) {
+        onNotify("暂时不能调整这个时间块", "这项安排已经产生执行记录或计划已发生变化", "review");
+        return null;
+      }
+    }
+    if (!workingPreview) return null;
+    const block = workingPreview.blocks[blockIndex];
+    if (!block) return null;
+    return { preview: workingPreview, blockIndex, block };
+  }
+
   async function savePlanDraftTime(event: FormEvent) {
     event.preventDefault();
-    if (!preview || !planDraftTimeEdit) return;
+    if (!planDraftTimeEdit) return;
     const startsAt = normalizeDraftClock(planDraftTimeEdit.starts_at);
     const endsAt = normalizeDraftClock(planDraftTimeEdit.ends_at);
     if (!validDraftClock(startsAt) || !validDraftClock(endsAt)) {
@@ -2782,87 +3593,155 @@ function TodayPage({
       setPlanDraftTimeEdit({ ...planDraftTimeEdit, error: "结束时间必须晚于开始时间。" });
       return;
     }
-    const block = preview.blocks[planDraftTimeEdit.blockIndex];
-    if (!block) return;
-    const nextBlock: RulePlanBlock = {
-      ...block,
-      starts_at: planTimestamp(selectedDate, startsAt),
-      ends_at: planTimestamp(selectedDate, endsAt),
-      estimated_minutes: endMinute - startMinute
-    };
+    if (endMinute - startMinute < MIN_TASK_BLOCK_MINUTES) {
+      setPlanDraftTimeEdit({ ...planDraftTimeEdit, error: `普通任务块至少需要 ${MIN_TASK_BLOCK_MINUTES} 分钟。` });
+      return;
+    }
+    const originalBlock = planDraftTimeEdit.sourceBlockId
+      ? taskBlocks.find((item) => item.id === planDraftTimeEdit.sourceBlockId) ?? null
+      : selectedDraftBlock;
+    if (originalBlock
+      && timeInputValue(originalBlock.starts_at) === startsAt
+      && timeInputValue(originalBlock.ends_at) === endsAt
+    ) {
+      closeTimelinePanel();
+      return;
+    }
     try {
+      const resolved = await resolveEditablePlanDraftBlock();
+      if (!resolved) return;
+      const nextBlock: RulePlanBlock = {
+        ...resolved.block,
+        starts_at: planTimestamp(selectedDate, startsAt),
+        ends_at: planTimestamp(selectedDate, endsAt),
+        estimated_minutes: endMinute - startMinute
+      };
       await onUpdatePlan({
-        ...preview,
-        blocks: preview.blocks.map((item, index) => index === planDraftTimeEdit.blockIndex ? nextBlock : item)
+        ...resolved.preview,
+        blocks: resolved.preview.blocks.map((item, index) => index === resolved.blockIndex ? nextBlock : item)
       });
       closeTimelinePanel();
     } catch (reason) {
       setPlanDraftTimeEdit({ ...planDraftTimeEdit, starts_at: startsAt, ends_at: endsAt, error: "" });
-      onNotify("时间未保存", planDraftErrorMessage(reason, selectedDraftTask, selectedDate), "review");
+      const task = selectedDraftTask ?? (selectedBlock ? tasks.find((item) => item.id === selectedBlock.task_id) ?? null : null);
+      onNotify("时间未保存", planDraftErrorMessage(reason, task, selectedDate), "review");
     }
   }
 
-  async function removePlanDraftBlock() {
-    if (!preview || !selectedDraftBlock || selectedDraftIndex < 0) return;
-    const remainingBlocks = preview.blocks.filter((_, index) => index !== selectedDraftIndex);
-    const existingUnscheduled = preview.unscheduled.find((item) => item.task_id === selectedDraftBlock.task_id);
-    const removedMinutes = (existingUnscheduled?.estimated_minutes ?? 0) + selectedDraftBlock.estimated_minutes;
+  async function removePlanDraftBlock(edit: PlanDraftTimeEdit | null = planDraftTimeEdit) {
+    const resolved = await resolveEditablePlanDraftBlock(edit);
+    if (!resolved) return;
+    const task = tasks.find((item) => item.id === resolved.block.task_id) ?? null;
+    const remainingBlocks = resolved.preview.blocks.filter((_, index) => index !== resolved.blockIndex);
+    const existingUnscheduled = resolved.preview.unscheduled.find((item) => item.task_id === resolved.block.task_id);
+    const removedMinutes = (existingUnscheduled?.estimated_minutes ?? 0) + resolved.block.estimated_minutes;
     const unscheduled: RuleUnscheduledTask[] = [
-      ...preview.unscheduled.filter((item) => item.task_id !== selectedDraftBlock.task_id),
+      ...resolved.preview.unscheduled.filter((item) => item.task_id !== resolved.block.task_id),
       {
-        task_id: selectedDraftBlock.task_id,
-        task_title: selectedDraftBlock.task_title,
+        task_id: resolved.block.task_id,
+        task_title: resolved.block.task_title,
         reason: `手动移出今日 · ${removedMinutes} 分钟待安排`,
         estimated_minutes: removedMinutes
       }
     ];
     try {
-      await onUpdatePlan({ ...preview, blocks: remainingBlocks, unscheduled });
+      await onUpdatePlan({ ...resolved.preview, blocks: remainingBlocks, unscheduled });
       setSelection(null);
       setPlanDraftTimeEdit(null);
       window.requestAnimationFrame(() => timelineScrollRef.current?.focus());
     } catch (reason) {
-      onNotify("没有移出草案", planDraftErrorMessage(reason, selectedDraftTask, selectedDate), "review");
+      onNotify("没有移出草案", planDraftErrorMessage(reason, task, selectedDate), "review");
     }
   }
 
-  async function includeUnscheduledTask(item: RuleUnscheduledTask) {
-    if (!preview || !item.estimated_minutes) return;
+  function revealDraftBlock(blockIndex: number) {
+    setFollowingNow(false);
+    window.requestAnimationFrame(() => {
+      const scroller = timelineScrollRef.current;
+      const target = scroller?.querySelector<HTMLElement>(`[data-timeline-kind="draft"][data-timeline-id="${blockIndex}"]`);
+      if (!scroller || !target) return;
+      const scrollerRect = scroller.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const desiredTop = scroller.scrollTop + targetRect.top - scrollerRect.top - (scroller.clientHeight - targetRect.height) / 2;
+      const nextTop = Math.max(0, Math.min(desiredTop, scroller.scrollHeight - scroller.clientHeight));
+      scroller.scrollTo({
+        top: nextTop,
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+      });
+    });
+  }
+
+  function removeSelectedBlockFromToday() {
+    if (!selectedBlock || selectedBlock.execution_status !== "planned" || selectedBlock.review || isPastDate || busy || !["open", "scheduled"].includes(selectedBlock.task_status)) return;
+    setExecutionDraft(null);
+    void removePlanDraftBlock({
+      blockIndex: -1,
+      sourceBlockId: selectedBlock.id,
+      starts_at: timeInputValue(selectedBlock.starts_at),
+      ends_at: timeInputValue(selectedBlock.ends_at),
+      error: ""
+    });
+  }
+
+  async function includeUnscheduledTask(
+    item: RuleUnscheduledTask,
+    sourcePreview: RulePlanPreview | null = preview,
+    trigger?: HTMLButtonElement
+  ) {
+    if (!sourcePreview || !item.estimated_minutes) return;
     const task = tasks.find((candidate) => candidate.id === item.task_id);
     const boundaryIssue = taskSchedulingBoundaryIssue(task, selectedDate);
     if (boundaryIssue) {
       onNotify("当前日期不能安排", `“${item.task_title}”${boundaryIssue}。`, "clock");
       return;
     }
-    const suggested = suggestedDraftAllocations(selectedDate, item.estimated_minutes, availability, task);
-    if (!suggested) {
-      onNotify("无法加入当天", `“${item.task_title}”不在当天允许的时间范围内，请调整任务日期边界或选择其他日期。`, "clock");
+    const preferredMinutes = preferredDailyAllocationMinutes(task, item.estimated_minutes);
+    const suggested = suggestedDraftAllocations(selectedDate, preferredMinutes, availability, task);
+    if (suggested.issue) {
+      const message = suggested.issue === "duration_too_short"
+        ? `“${item.task_title}”剩余待安排时长为 ${item.estimated_minutes} 分钟；普通任务块至少需要 ${MIN_TASK_BLOCK_MINUTES} 分钟，请先调整任务工作量。`
+        : suggested.issue === "available_window_too_short"
+          ? `“${item.task_title}”当天可安排的时间不足 ${MIN_TASK_BLOCK_MINUTES} 分钟，请调整任务时间或选择其他日期。`
+          : `“${item.task_title}”不能安排在当天，请调整任务时间或选择其他日期。`;
+      onNotify("无法加入当天", message, "clock");
       return;
     }
-    const scheduledMinutes = item.estimated_minutes - suggested.remainingMinutes;
+    const scheduledMinutes = preferredMinutes - suggested.remainingMinutes;
     const newBlocks: RulePlanBlock[] = suggested.allocations.map((allocation) => ({
       task_id: item.task_id,
       task_title: item.task_title,
       ...allocation
     }));
-    const unscheduled = preview.unscheduled.filter((candidate) => candidate.task_id !== item.task_id);
-    if (suggested.remainingMinutes > 0) {
-      unscheduled.push({
-        ...item,
-        reason: `今日已安排 ${scheduledMinutes} 分钟 · 剩余 ${suggested.remainingMinutes} 分钟可在后续日期继续安排`,
-        estimated_minutes: suggested.remainingMinutes
-      });
-    }
+    const unscheduled = sourcePreview.unscheduled.filter((candidate) => candidate.task_id !== item.task_id);
+    const remainingMinutes = item.estimated_minutes - scheduledMinutes;
     try {
-      await onUpdatePlan({
-        ...preview,
-        blocks: [...preview.blocks, ...newBlocks],
+      const saved = await onUpdatePlan({
+        ...sourcePreview,
+        blocks: [...sourcePreview.blocks, ...newBlocks],
         unscheduled
       });
+      const firstBlock = newBlocks[0];
+      const blockIndex = firstBlock ? saved.blocks.findIndex((block) =>
+        block.task_id === firstBlock.task_id
+        && block.starts_at === firstBlock.starts_at
+        && block.ends_at === firstBlock.ends_at
+      ) : -1;
+      if (blockIndex >= 0) {
+        if (trigger) timelineSelectionTriggerRef.current = trigger;
+        timelineSelectionAnchorRef.current = null;
+        setSelection({ kind: "draft", id: String(blockIndex) });
+        setPlanDraftTimeEdit({
+          blockIndex,
+          starts_at: timeInputValue(saved.blocks[blockIndex].starts_at),
+          ends_at: timeInputValue(saved.blocks[blockIndex].ends_at),
+          error: ""
+        });
+        revealDraftBlock(blockIndex);
+      }
       onNotify(
-        suggested.remainingMinutes > 0 ? "已拆分加入时间线" : "已加入时间线",
-        suggested.remainingMinutes > 0
-          ? `今天已安排 ${scheduledMinutes} 分钟，剩余 ${suggested.remainingMinutes} 分钟可在后续日期继续安排。`
+        remainingMinutes > 0 ? "已拆分加入时间线" : "已加入时间线",
+        remainingMinutes > 0
+          ? `今天已安排 ${scheduledMinutes} 分钟，剩余 ${remainingMinutes} 分钟可在后续日期继续安排。`
           : `“${item.task_title}”已加入当前计划草案。`,
         "check"
       );
@@ -2871,10 +3750,41 @@ function TodayPage({
     }
   }
 
+  async function includeWaitingTask(task: Task, trigger: HTMLButtonElement) {
+    const estimatedMinutes = taskUnreservedMinutes(task);
+    if (!estimatedMinutes) {
+      onOpenTasks(task.id);
+      return;
+    }
+    const adjustment = await onAdjustPlan();
+    if (!adjustment) return;
+    const item = adjustment.unscheduled.find((candidate) => candidate.task_id === task.id);
+    if (!item?.estimated_minutes) {
+      onNotify("暂时不能加入时间线", "任务或计划已经发生变化，请刷新后再试", "review");
+      return;
+    }
+    await includeUnscheduledTask(item, adjustment, trigger);
+  }
+
   function closeTimelinePanel() {
+    if (savingExecution) return;
     setSelection(null);
     setPlanDraftTimeEdit(null);
-    window.requestAnimationFrame(() => timelineSelectionTriggerRef.current?.focus());
+    timelineSelectionAnchorRef.current = null;
+    window.requestAnimationFrame(() => {
+      const trigger = timelineSelectionTriggerRef.current;
+      if (trigger?.isConnected) trigger.focus();
+      else timelineScrollRef.current?.focus();
+    });
+  }
+
+  function openTimelineTask(taskId: string, blockId: string) {
+    if (savingExecution) return;
+    setSelection(null);
+    setPlanDraftTimeEdit(null);
+    setTimelineTooltip(null);
+    timelineSelectionAnchorRef.current = null;
+    onOpenTasks(taskId, { date: selectedDate, blockId });
   }
 
   function pauseTimelineFollowing() {
@@ -2917,6 +3827,7 @@ function TodayPage({
   }
 
   function updateExecutionDraft(update: Partial<ExecutionDraft>) {
+    setExecutionMessage("");
     setExecutionDraft((current) => current ? { ...current, ...update } : current);
   }
 
@@ -2935,7 +3846,7 @@ function TodayPage({
       return;
     }
     setSavingExecution(true);
-    setExecutionMessage("正在记录本次执行…");
+    setExecutionMessage("");
     try {
       await saveExecutionCapture(selectedDate, {
         plan_block_id: selectedBlock.id,
@@ -2943,10 +3854,12 @@ function TodayPage({
         note: executionDraft.note.trim() || null
       });
       await onFactsChanged();
-      setExecutionMessage("本次执行已记录，等待每日复盘核对。");
+      setSelection(null);
+      setPlanDraftTimeEdit(null);
+      window.requestAnimationFrame(() => timelineSelectionTriggerRef.current?.focus());
       onNotify("本次执行已记录", `${selectedBlock.task_title} · 等待每日复盘`, "check");
     } catch (reason) {
-      setExecutionMessage(`未记录：${String(reason)}`);
+      setExecutionMessage(`未记录：${uiErrorMessage(reason)}`);
     } finally {
       setSavingExecution(false);
     }
@@ -2964,7 +3877,7 @@ function TodayPage({
       await onFactsChanged();
       onNotify("本次执行已完成", `${block.task_title} · 等待每日复盘`, "check");
     } catch (reason) {
-      onNotify("执行块未完成", String(reason), "review");
+      onNotify("本次完成未记录", uiErrorMessage(reason), "review");
     } finally {
       setQuickCompletingBlockId(null);
     }
@@ -2978,7 +3891,7 @@ function TodayPage({
       await onFactsChanged();
       onNotify("已取消本次完成", `${block.task_title} · 恢复为计划中`, "restore");
     } catch (reason) {
-      onNotify("未能取消完成", String(reason), "review");
+      onNotify("未能取消完成", uiErrorMessage(reason), "review");
     } finally {
       setQuickCompletingBlockId(null);
     }
@@ -2989,26 +3902,24 @@ function TodayPage({
       {message && <p className="page-status" role="status">{message}</p>}
       <div className="timeline-page-shell">
         <header className="timeline-design-topbar">
-          <div className="timeline-date-copy"><h1>{todayView === "month" && monthSelectionPending ? monthTitle : selectedDateTitle}</h1><span>{todayView === "month" && monthSelectionPending ? "选择一天查看安排" : `${selectedWeekday}${selectedLunarDay ? ` · 农历${selectedLunarDay}` : ""}`}</span></div>
+          <div className="timeline-heading">
+            {todayView === "timeline" && <CalendarOverviewButton onClick={returnToMonth} />}
+            <div className="timeline-date-copy"><h1>{todayView === "month" && monthSelectionPending ? monthTitle : selectedDateTitle}</h1><span>{todayView === "month" && monthSelectionPending ? "选择一天查看安排" : `${selectedWeekday}${selectedLunarDay ? ` · 农历${selectedLunarDay}` : ""}`}</span></div>
+          </div>
           <div className="timeline-top-actions">
-            {debugFixtureControlsAvailable && <div className="confirmed-plan-actions" aria-label="debug 布局样例"><span>布局样例</span><button type="button" className="quiet-button" disabled={debugFixturesBusy} onClick={() => void loadDebugTimelineFixtures()}>{debugFixturesBusy ? "处理中…" : "载入"}</button><button type="button" className="quiet-button" disabled={debugFixturesBusy} onClick={() => void clearDebugTimelineFixtures()}>移除</button></div>}
             {isAwayFromToday && <button type="button" className="quiet-button" onClick={returnToday}>回到今天</button>}
             {todayView === "timeline" && (preview ? <div className="plan-draft-top-actions" aria-label="日计划草案操作">
-              <span className="plan-draft-mode"><i />{isAdjustingConfirmedPlan ? "调整模式" : "草案模式"}</span>
-              <button type="button" className="quiet-button" disabled={busy} onClick={onGeneratePlan}>重新生成</button>
-              <button type="button" className="quiet-button" disabled={busy} onClick={() => void onCancelPlan()}>放弃</button>
-              <button type="button" className="primary-action" disabled={busy || (!isAdjustingConfirmedPlan && preview.blocks.length === 0)} onClick={onConfirmPlan}>{busy ? "正在保存…" : isAdjustingConfirmedPlan ? "保存调整" : "确认并写入"}</button>
-            </div> : hasConfirmedPlan && !isPastDate ? <div className="confirmed-plan-actions" aria-label="已确认计划操作"><span><Icon name="check" size={13} />计划已确认</span><button type="button" className="quiet-button" disabled={busy} onClick={onAdjustPlan}>{busy ? "正在读取…" : "调整计划"}</button></div> : <button type="button" className="primary-action" disabled={busy || isPastDate} title={planActionTitle} onClick={onGeneratePlan}>{busy ? "正在生成…" : planActionLabel}</button>)}
-            <div className="segmented-control timeline-view-switch" aria-label="今日页视图">
-              <button type="button" aria-pressed={todayView === "month"} onClick={() => setTodayView("month")}>月历</button>
-              <button type="button" aria-pressed={todayView === "timeline"} onClick={() => setTodayView("timeline")}>日计划</button>
-            </div>
+              <span className="plan-draft-mode"><i />{isAdjustingConfirmedPlan ? "有未保存的修改" : "计划待确认"}</span>
+              <PlanRegenerateButton confirmed={isAdjustingConfirmedPlan} busy={busy} onClick={onGeneratePlan} />
+              <button type="button" className="quiet-button" disabled={busy} onClick={() => void onCancelPlan()}>{isAdjustingConfirmedPlan ? "放弃修改" : "放弃草案"}</button>
+              <button type="button" className="primary-action" disabled={busy || (!isAdjustingConfirmedPlan && preview.blocks.length === 0)} onClick={onConfirmPlan}>{busy ? "正在保存…" : isAdjustingConfirmedPlan ? "保存调整" : "确认计划"}</button>
+            </div> : hasConfirmedPlan && !isPastDate ? <div className="confirmed-plan-actions" aria-label="已确认计划操作"><span className="confirmed-plan-status"><Icon name="check" size={13} />计划已确认</span><PlanRegenerateButton confirmed busy={busy} onClick={onGeneratePlan} /></div> : <button type="button" className="primary-action" disabled={busy || isPastDate} title={planActionTitle} onClick={onGeneratePlan}>{busy ? "正在生成…" : planActionLabel}</button>)}
           </div>
         </header>
 
         {todayView === "month" ? <main className="today-month-view" aria-label={monthTitle}>
           <section className="month-sheet today-month-sheet">
-            <div className="month-controls"><button type="button" aria-label="上一个月" onClick={() => moveMonth(-1)}><Icon name="chevron-left" size={17} /></button><strong>{monthTitle}</strong><button type="button" aria-label="下一个月" onClick={() => moveMonth(1)}><Icon name="chevron-right" size={17} /></button></div><div className={`holiday-coverage${holidayCoverageAvailable ? " available" : " missing"}`} role="status">{holidayCoverageAvailable ? `${OFFICIAL_HOLIDAY_COVERAGE.version} · 覆盖 2026 年` : "当前月份超出法定节假日/调休数据覆盖范围；农历和节气仍可显示"}</div>
+            <div className="month-controls"><button type="button" aria-label="上一个月" onClick={() => moveMonth(-1)}><Icon name="chevron-left" size={17} /></button><strong>{monthTitle}</strong><button type="button" aria-label="下一个月" onClick={() => moveMonth(1)}><Icon name="chevron-right" size={17} /></button></div><div className={`holiday-coverage${holidayCoverageAvailable ? " available" : " missing"}`} role="status">{holidayCoverageAvailable ? "已包含 2026 年法定节假日与调休" : "当前月份暂无法定节假日和调休信息；农历与节气仍可显示"}</div>
             <div className="weekday-row">{["一", "二", "三", "四", "五", "六", "日"].map((day) => <span key={day}>周{day}</span>)}</div>
             <div className="month-grid" role="grid" aria-label={monthTitle}>{cells.map((cell) => {
               const dayTasks = tasks.filter((task) => task.status !== "deleted" && taskAppearsOnDate(task, cell.key));
@@ -3019,7 +3930,7 @@ function TodayPage({
               const lunarLabel = lunarDayLabel(cell.key);
               const workStateLabel = dayInfo?.workState === "rest" ? "休" : dayInfo?.workState === "work" ? "班" : "";
               const calendarLabel = dayInfo?.labels.map((label) => label.text).join("、") ?? "";
-              return <button key={cell.key} type="button" role="gridcell" aria-selected={selectedDate === cell.key} aria-label={`${cell.key}${lunarLabel ? `，农历${lunarLabel}` : ""}${calendarLabel ? `，${calendarLabel}` : ""}${workStateLabel ? `，${workStateLabel === "休" ? "放假" : "调休上班"}` : ""}${count ? `，${count} 项任务` : ""}${recurringCount ? `，${recurringCount} 项重复事项` : ""}`} className={`${cell.inMonth ? "in-month" : "outside"}${cell.key === today ? " today" : ""}${selectedDate === cell.key ? " selected" : ""}${dayInfo?.workState ? ` ${dayInfo.workState}` : ""}${count ? " has-tasks" : ""}${recurringCount ? " has-recurring-items" : ""}`} onClick={() => selectCalendarDate(cell.key)}>
+              return <button key={cell.key} type="button" role="gridcell" aria-selected={selectedDate === cell.key} aria-label={`${cell.key}${lunarLabel ? `，农历${lunarLabel}` : ""}${calendarLabel ? `，${calendarLabel}` : ""}${workStateLabel ? `，${workStateLabel === "休" ? "放假" : "调休上班"}` : ""}${count ? `，${count} 项任务` : ""}${recurringCount ? `，${recurringCount} 项重复事项` : ""}`} className={`${cell.inMonth ? "in-month" : "outside"}${cell.key === today ? " today" : ""}${selectedDate === cell.key ? " selected" : ""}${dayInfo?.workState ? ` ${dayInfo.workState}` : ""}${count ? " has-tasks" : ""}${recurringCount ? " has-recurring-items" : ""}`} onClick={() => selectCalendarDate(cell.key)} onDoubleClick={() => openTimelineDate(cell.key)}>
                 <span className="calendar-day-head"><span className="day-number"><span className="solar-day-number">{cell.day}</span>{lunarLabel && <span className="lunar-day-number">{lunarLabel}</span>}</span>{workStateLabel && <span className={`work-state ${dayInfo?.workState}`}>{workStateLabel}</span>}</span>
                 {dayInfo?.labels.length ? <span className="calendar-labels">{dayInfo.labels.map((label) => <span key={`${label.kind}:${label.text}`} className={`calendar-label ${label.kind}`}>{label.text}</span>)}</span> : null}
                 {count > 0 || recurringCount > 0 ? <span className="calendar-indicators" aria-hidden="true">
@@ -3029,17 +3940,27 @@ function TodayPage({
               </button>;
             })}</div>
           </section>
-          <aside className="today-month-summary">{monthSelectionPending ? <div className="today-month-selection-prompt" role="status"><strong>选择一天查看安排</strong><span>日期详情会在你选择日期后显示。</span></div> : <><div><h2>{fullDateLabel(selectedDate, today)}</h2><p>{selectedDate} · Asia/Shanghai</p></div><div className="overview-stats"><div><strong>{taskBlocks.length}</strong><span>执行块</span></div><div><strong>{recordedCount}</strong><span>已记录</span></div><div><strong>{waitingTasks.length}</strong><span>待安排</span></div></div><button type="button" className="primary-action" onClick={() => setTodayView("timeline")}>打开这一天的日计划</button></>}</aside>
+          <aside className="today-month-summary">{monthSelectionPending ? <div className="today-month-selection-prompt" role="status"><strong>选择一天查看安排</strong><span>日期详情会在你选择日期后显示。</span></div> : <><div><h2>{fullDateLabel(selectedDate, today)}</h2><p>{selectedDate} · 中国标准时间</p></div><div className="overview-stats"><div><strong>{taskBlocks.length}</strong><span>任务安排</span></div><div><strong>{recordedCount}</strong><span>已记录</span></div><div><strong>{waitingTasks.length}</strong><span>待安排</span></div></div><button type="button" className="primary-action" onClick={() => openTimelineDate(selectedDate)}>查看日计划</button><small className="today-month-shortcut">也可以双击日期直接打开</small></>}</aside>
         </main> : <main className={`timeline-main${error || loading ? " is-status" : ""}${preview ? " is-plan-draft" : ""}`} aria-label={`${selectedDateTitle}时间线`}>
-          {error ? <div className="timeline-state"><strong>无法读取这一天</strong><span>{error}</span><button type="button" className="quiet-button" onClick={() => void onFactsChanged()}>重新读取</button></div> : loading ? <div className="timeline-state">正在读取本地日程…</div> : <>
+          {error ? <div className="timeline-state"><strong>这一天暂时无法打开</strong><span>{error}</span><button type="button" className="quiet-button" onClick={() => void onFactsChanged()}>重试</button></div> : loading ? <div className="timeline-state">正在载入这一天的安排…</div> : <>
             <div className="timeline-week" role="group" aria-label="本周日期">{weekDates.map((date) => {
               const dateValue = new Date(`${date}T00:00:00+08:00`);
               const weekday = new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", weekday: "short" }).format(dateValue).replace("周", "");
               const lunarLabel = lunarDayLabel(date);
               const isWeekend = weekday === "六" || weekday === "日";
-              return <button key={date} type="button" className={`${isWeekend ? "weekend " : ""}${date === today ? "today " : ""}${date === selectedDate ? "selected" : ""}`.trim()} aria-pressed={date === selectedDate} aria-current={date === today ? "date" : undefined} aria-label={`${date}，周${weekday}${lunarLabel ? `，农历${lunarLabel}` : ""}`} onClick={() => selectCalendarDate(date)}><small>{weekday}</small><span className="timeline-week-date"><strong>{Number(date.slice(8, 10))}</strong>{lunarLabel && <span>{lunarLabel}</span>}</span></button>;
+              const dayInfo = calendarDayInfo(date);
+              const workStateLabel = dayInfo?.workState === "rest" ? "休" : dayInfo?.workState === "work" ? "班" : "";
+              const calendarLabels = dayInfo?.labels.map((label) => label.text).join("、") ?? "";
+              const primaryCalendarLabel = dayInfo?.labels[0] ?? null;
+              return <button key={date} type="button" className={`${isWeekend ? "weekend " : ""}${date === today ? "today " : ""}${date === selectedDate ? "selected " : ""}${dayInfo?.workState ? dayInfo.workState : ""}`.trim()} aria-pressed={date === selectedDate} aria-current={date === today ? "date" : undefined} aria-label={`${date}，星期${weekday}${lunarLabel ? `，农历${lunarLabel}` : ""}${calendarLabels ? `，${calendarLabels}` : ""}${workStateLabel ? `，${workStateLabel === "休" ? "放假" : "调休上班"}` : ""}`} onClick={() => selectCalendarDate(date)}>
+                <span className="timeline-week-heading"><small>{weekday}</small>{workStateLabel && <span className={`work-state ${dayInfo?.workState}`}>{workStateLabel}</span>}</span>
+                <span className="timeline-week-date"><strong>{Number(date.slice(8, 10))}</strong>{lunarLabel && <span>{lunarLabel}</span>}</span>
+                <span className="timeline-week-calendar-meta" aria-hidden="true">
+                  {primaryCalendarLabel && <span className={`calendar-label ${primaryCalendarLabel.kind}`}>{primaryCalendarLabel.text}</span>}
+                </span>
+              </button>;
             })}</div>
-            {preview && <div className="plan-draft-summary" role="status"><span><Icon name="sparkle" size={14} /><strong>{preview.blocks.length} 个拟安排时间块</strong>{preview.unscheduled.length > 0 && <> · {preview.unscheduled.length} 项未排入</>}</span><small>{isAdjustingConfirmedPlan ? "可调整时间块或重新生成；保存前，原确认计划保持不变。" : "点击浅蓝虚线时间块可修改；所有调整已保存为本机草案，确认前不会写入正式日历。"}</small></div>}
+            {preview && <div className="plan-draft-summary" role="status"><span><Icon name="sparkle" size={14} /><strong>{preview.blocks.length} 项草案安排</strong>{preview.unscheduled.length > 0 && <> · {preview.unscheduled.length} 项未排入</>}</span><small>{isAdjustingConfirmedPlan ? "可调整时间块或重新生成；保存前，原计划不会变化。" : "点击浅蓝虚线时间块可以修改；确认计划前，正式日历不会变化。"}</small></div>}
             <div className="timeline-lanes">
               {untimedRecurringOccurrences.length > 0 && <section className="recurring-occurrence-lane" aria-label="今天的重复事项"><h2>重复事项</h2><div>{untimedRecurringOccurrences.map((item) => <div key={item.id} className="lane-item recurring" role="note" tabIndex={0} {...timelineTooltipProps({ kind: "重复事项", title: item.title, time: "时间未指定", detail: item.outcome ? `已复盘 · ${item.outcome === "completed" ? "完成" : item.outcome === "partial" ? "部分完成" : "未完成"}` : "待复盘；未设置展示时间", tone: "recurring" })}><span className="lane-symbol recurring" aria-hidden="true" /><span className="lane-copy"><strong>{item.title}</strong><small>{item.outcome ? `已复盘 · ${item.outcome === "completed" ? "完成" : item.outcome === "partial" ? "部分完成" : "未完成"}` : "时间未指定 · 待复盘"}</small></span></div>)}</div></section>}
               <section className="waiting-task-lane" aria-label={preview ? "草案中未排入今日的任务" : "待安排任务"}><h2>{preview ? "未排入" : "待安排"}</h2><div>{preview ? preview.unscheduled.length ? preview.unscheduled.map((item) => {
@@ -3055,39 +3976,38 @@ function TodayPage({
                     detail: waitingTaskTooltipDetail(task, item.reason),
                     tone: "task"
                   })}
-                ><TaskCapsuleContent title={item.task_title} notes={item.reason} priority={task?.priority} tags={task?.tags} timing={task ? taskTimingFact(task, selectedDate) : null} minutes={item.estimated_minutes} status="未排入" sourceType={task?.source_type} compact /><button type="button" disabled={busy} title={item.estimated_minutes ? `加入当天日计划，预计 ${item.estimated_minutes} 分钟` : "打开任务并填写预计工作量"} onClick={() => !item.estimated_minutes ? onOpenTasks(item.task_id) : void includeUnscheduledTask(item)}>{actionLabel}</button></div>;
-              }) : <span className="timeline-lane-empty">所有任务都已排入草案</span> : waitingTasks.length ? waitingTasks.map((task) => (
-                <button
-                  key={task.id}
-                  type="button"
-                  className="lane-item task"
-                  aria-label={`打开任务：${task.title}，${waitingTaskLabel(task)}`}
-                  {...timelineTooltipProps({
-                    kind: "待安排任务",
-                    title: task.title,
-                    time: "时间待定",
-                    detail: waitingTaskTooltipDetail(task, waitingTaskLabel(task)),
-                    tone: "task"
-                  })}
-                  onClick={() => onOpenTasks(task.id)}
-                ><TaskCapsuleContent title={task.title} notes={task.notes || waitingTaskLabel(task)} priority={task.priority} tags={task.tags} timing={taskTimingFact(task, selectedDate)} minutes={taskUnreservedMinutes(task)} status="待安排" sourceType={task.source_type} compact /></button>
-              )) : <span className="timeline-lane-empty">暂无待安排任务</span>}</div></section>
+                ><TaskCapsuleContent title={item.task_title} notes={item.reason} priority={task?.priority} timing={task ? taskTimingFact(task, selectedDate) : null} minutes={item.estimated_minutes} status="未排入" sourceType={task?.source_type} compact /><button type="button" className="waiting-task-action" disabled={busy} aria-label={item.estimated_minutes ? `将“${item.task_title}”加入时间线` : `打开“${item.task_title}”并补充预计时长`} onClick={(event) => !item.estimated_minutes ? onOpenTasks(item.task_id) : void includeUnscheduledTask(item, preview, event.currentTarget)}>{actionLabel}</button></div>;
+              }) : <span className="timeline-lane-empty">所有任务都已排入草案</span> : waitingTasks.length ? waitingTasks.map((task) => {
+                const canInclude = hasConfirmedPlan && !isPastDate;
+                const suggestedMinutes = waitingTaskMinutes(task);
+                const taskContent = <TaskCapsuleContent title={task.title} notes={task.notes || waitingTaskLabel(task)} priority={task.priority} timing={taskTimingFact(task, selectedDate)} minutes={suggestedMinutes} status="待安排" sourceType={task.source_type} compact />;
+                const tooltip = timelineTooltipProps({
+                  kind: "待安排任务",
+                  title: task.title,
+                  time: suggestedMinutes ? `建议今天安排 ${suggestedMinutes} 分钟` : "时间待定",
+                  detail: waitingTaskTooltipDetail(task, waitingTaskLabel(task)),
+                  tone: "task"
+                });
+                return canInclude ? <div key={task.id} className="lane-item draft-unscheduled" {...tooltip}>
+                  <button type="button" className="waiting-task-open" aria-label={`打开任务：${task.title}`} onClick={() => onOpenTasks(task.id)}>{taskContent}</button>
+                  <button type="button" className="waiting-task-action" disabled={busy} aria-label={suggestedMinutes ? `将“${task.title}”加入时间线` : `打开“${task.title}”并补充预计时长`} onClick={(event) => void includeWaitingTask(task, event.currentTarget)}>{suggestedMinutes ? "加入时间线" : "补充估时"}</button>
+                </div> : <button key={task.id} type="button" className="lane-item task" aria-label={`打开任务：${task.title}，${waitingTaskLabel(task)}`} {...tooltip} onClick={() => onOpenTasks(task.id)}>{taskContent}</button>;
+              }) : <span className="timeline-lane-empty">暂无待安排任务</span>}</div></section>
             </div>
             <div ref={timelineScrollRef} className="timeline-scroll" tabIndex={0} aria-label="24 小时时间线" onScroll={handleTimelineScroll} onWheel={pauseTimelineFollowing} onTouchMove={pauseTimelineFollowing} onPointerDown={(event) => { if (event.currentTarget === event.target) pauseTimelineFollowing(); }} onKeyDown={handleTimelineScrollKey}>
               {selectedDate === today && showReturnToNow && <div className="return-to-now-layer"><button type="button" onClick={resumeTimelineFollowing}><Icon name="clock" size={14} />回到现在</button></div>}
-              {selection && <div className="timeline-floating-layer"><section ref={timelineFloatingPanelRef} className={`timeline-floating-panel${selectedDraftBlock ? " plan-draft-editor" : ""}`} role="dialog" aria-label={selectedDraftBlock ? `${selectedDraftBlock.task_title}草案时间` : selectedBlock ? `${selectedBlock.task_title}本次执行记录` : selectedEvent ? `${selectedEvent.title}日程详情` : "时间线详情"} aria-live="polite" tabIndex={-1} onKeyDown={(event) => { if (event.key === "Escape") closeTimelinePanel(); }}>
-                {selectedDraftBlock && planDraftTimeEdit ? <>
-                  <header><div><strong>调整草案时间</strong><small>{selectedDraftBlock.task_title} · 尚未写入正式日历</small></div><button type="button" aria-label="关闭草案编辑面板" onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></header>
+              {selection && <div className={`timeline-floating-layer${planDraftTimeEdit ? " is-time-editor" : ""}`}><section id="timeline-context-panel" ref={timelineFloatingPanelRef} className={`timeline-floating-panel${planDraftTimeEdit ? " plan-draft-editor" : ""}`} role="dialog" aria-modal={planDraftTimeEdit ? true : undefined} aria-label={planDraftTimeEdit && (selectedDraftBlock || selectedBlock) ? `${selectedDraftBlock?.task_title ?? selectedBlock?.task_title}时间调整` : selectedBlock ? `${selectedBlock.task_title}本次执行记录` : selectedEvent ? `${selectedEvent.title}日程详情` : "时间线详情"} aria-live="polite" tabIndex={-1} onKeyDown={(event) => { if (event.key === "Escape") closeTimelinePanel(); }}>
+                {planDraftTimeEdit && (selectedDraftBlock || selectedBlock) ? <>
+                  <header><div className="timeline-panel-heading">{planDraftTimeEdit.sourceBlockId && <button type="button" className="timeline-panel-back" aria-label="返回任务块详情" title="返回任务块详情" disabled={busy} onClick={returnToSelectedBlockDetails}><Icon name="chevron-left" size={16} /></button>}<div className="timeline-panel-heading-copy"><strong>调整时间</strong><small>{selectedDraftBlock?.task_title ?? selectedBlock?.task_title}</small></div></div><button type="button" aria-label="关闭时间调整面板" onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></header>
                   <form className="plan-draft-time-form" noValidate onSubmit={(event) => void savePlanDraftTime(event)}>
-                    <dl id="plan-draft-constraints" className="plan-draft-bounds" aria-label="任务允许的时间范围"><div><dt>最早开始</dt><dd>{taskBoundaryLabel(selectedDraftTask?.earliest_start_at ?? null, selectedDate)}</dd></div><div><dt>最晚结束（截止）</dt><dd>{taskBoundaryLabel(selectedDraftTask?.due_at ?? null, selectedDate)}</dd></div></dl>
-                    <div className="plan-draft-time-fields"><TimeRangeRail start={planDraftTimeEdit.starts_at} end={planDraftTimeEdit.ends_at} minMinute={draftTimeBounds.min} maxMinute={draftTimeBounds.max} segments={nonWorkingTimeSegments} disabled={busy} describedBy="plan-draft-constraints" onChange={(next) => setPlanDraftTimeEdit({ ...planDraftTimeEdit, starts_at: next.start, ends_at: next.end, error: "" })} /></div>
-                    <p className="plan-draft-availability"><Icon name="clock" size={14} /><span>{availability ? `工作时间 ${availability.workday_start} – ${availability.workday_end} 仅作安排偏好与时间线参照。` : ""}可直接输入或拖动开始、结束端；每次以 15 分钟为步进调整，保存后仍会再次校验任务日期边界。</span></p>
+                    <div className="plan-draft-time-fields"><BlockEditorTimeRangeRail start={planDraftTimeEdit.starts_at} end={planDraftTimeEdit.ends_at} segments={nonWorkingTimeSegments} disabled={busy} describedBy="plan-draft-sync-note" minimumDuration={MIN_TASK_BLOCK_MINUTES} onChange={(next) => setPlanDraftTimeEdit({ ...planDraftTimeEdit, starts_at: next.start, ends_at: next.end, error: "" })} /></div>
                     {planDraftTimeEdit.error && <span className="plan-draft-edit-error" role="alert">{planDraftTimeEdit.error}</span>}
-                    <footer><button type="button" className="text-danger" disabled={busy} onClick={() => void removePlanDraftBlock()}><Icon name="trash" size={14} />移出今日</button><div><button type="button" className="quiet-button" disabled={busy} onClick={closeTimelinePanel}>取消</button><button type="submit" className="primary-action" disabled={busy}>{busy ? "正在保存…" : "保存草案时间"}</button></div></footer>
+                    <footer><button type="button" className="execution-remove-today" disabled={busy} onClick={() => void removePlanDraftBlock()}><Icon name="trash" size={14} />从今日计划移除</button><div><button type="button" className="quiet-button" disabled={busy} onClick={closeTimelinePanel}>取消</button><button type="submit" className="primary-action" disabled={busy}>{busy ? "正在保存…" : "保存调整"}</button></div></footer>
                   </form>
-                </> : selectedBlock ? <><header><div><strong>{selectedBlock.review ? "每日复盘已确认" : selectedBlock.execution_status === "planned" ? "记录本次执行" : "本次执行已记录"}</strong><small>{selectedBlock.task_title} · 详细信息在每日复盘核对</small></div><div className="timeline-panel-header-actions">{selectedBlock.execution_status === "planned" && !selectedBlock.review && !isPastDate && <button type="button" className="timeline-adjust-action" disabled={busy} onClick={() => void adjustSelectedBlockTime()}>调整时间</button>}<button type="button" aria-label="关闭执行面板" onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></div></header>
-                  {selectedBlock.review ? <><div className={`floating-facts execution-${selectedBlock.review.outcome}`}><div><span>本次结果</span><strong>{reviewOutcomeCopy[selectedBlock.review.outcome]}</strong></div><div><span>实际耗时</span><strong>{selectedBlock.review.actual_minutes} 分钟</strong></div><div><span>剩余工作量</span><strong>{selectedBlock.review.remaining_workload_minutes === null ? "未重估" : `${selectedBlock.review.remaining_workload_minutes} 分钟`}</strong></div>{selectedBlock.review.notes && <div className="wide"><span>备注</span><strong>{selectedBlock.review.notes}</strong></div>}{selectedBlock.review.defer_reason && <div className="wide"><span>延期原因</span><strong>{selectedBlock.review.defer_reason}</strong></div>}</div><footer><span role="status">最终事实已在每日复盘确认。</span><strong className="context-readonly-state">只读</strong></footer></> : selectedDate !== today ? selectedBlock.execution_status !== "planned" ? <><div className={`floating-capture-fact execution-${selectedBlock.execution_status}`}><span>本次结果</span><strong>{reviewOutcomeCopy[selectedBlock.execution_status]}</strong>{selectedBlock.execution_note && <p>{selectedBlock.execution_note}</p>}</div><div className="floating-readonly"><strong>当日已记录，尚未复盘</strong><span>历史记录保持原样，今序不会事后补填实际耗时或剩余工作量。</span></div></> : <div className="floating-readonly"><strong>{isPastDate ? "历史日期只读" : "未来执行块暂不可记录"}</strong><span>{isPastDate ? "这条执行块当时没有保存执行记录。" : "到执行日期后再记录本次结果。"}</span></div> : executionDraft ? <><div className="floating-capture-intro"><strong>只记录现在确定的事实</strong><span>实际耗时、剩余工作量和整个任务状态留到每日复盘。</span></div><ExecutionOutcomePicker compact label="本次执行结果" result={executionDraft.result} outcome={executionDraft.outcome} disabled={savingExecution} onChange={(result, outcome) => updateExecutionDraft({ result, outcome })} /><label className="floating-execution-note">简短备注<textarea rows={2} maxLength={500} placeholder="可选，先记下一句，复盘时还能修改" value={executionDraft.note} disabled={savingExecution} onChange={(event) => updateExecutionDraft({ note: event.target.value })} /></label><footer><span role="status" className={executionMessage.startsWith("未记录") ? "error" : ""}>{executionMessage || "保存后仍可在今天的每日复盘中核对。"}</span><div><button type="button" className="quiet-button" onClick={closeTimelinePanel}>取消</button><button type="button" className="primary-action" disabled={savingExecution} onClick={() => void saveSelectedBlockExecution()}>{savingExecution ? "正在记录…" : "保存本次记录"}</button></div></footer></> : null}
-                </> : selectedEvent ? <><header><div><strong>{selectedEvent.title}</strong><small>{selectedEvent.is_all_day ? "全天固定日程" : `${timeRangeLabel(selectedEvent.starts_at, selectedEvent.ends_at)} · 固定日程`}</small></div><button type="button" aria-label="关闭日程详情" onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></header><div className="floating-readonly"><strong>固定日程</strong><span>固定日程不使用执行块完成控件，也不会限制同一时段安排其他事项。</span></div></> : null}
+                </> : selectedBlock ? <><header><div><strong>{selectedBlock.task_title}</strong><small>{selectedBlock.review ? "复盘已确认" : selectedBlock.execution_status === "planned" ? "本次执行" : "本次执行已记录"}</small></div><button type="button" aria-label="关闭执行面板" disabled={savingExecution} onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></header>
+                  <div className="execution-plan-time"><div className="execution-plan-fact"><span>计划时间</span><strong>{timeRangeLabel(selectedBlock.starts_at, selectedBlock.ends_at)}</strong></div><div className="execution-plan-actions"><button type="button" className="execution-open-task" disabled={savingExecution} onClick={() => openTimelineTask(selectedBlock.task_id, selectedBlock.id)}>查看任务</button>{selectedBlock.execution_status === "planned" && !selectedBlock.review && !isPastDate && ["open", "scheduled"].includes(selectedBlock.task_status) && <button type="button" className="execution-adjust-time" disabled={busy || savingExecution} onClick={adjustSelectedBlockTime}>调整时间</button>}</div></div>
+                  {selectedBlock.review ? <><div className={`floating-facts execution-${selectedBlock.review.outcome}`}><div><span>本次结果</span><strong>{reviewOutcomeCopy[selectedBlock.review.outcome]}</strong></div><div><span>实际耗时</span><strong>{selectedBlock.review.actual_minutes} 分钟</strong></div><div><span>剩余工作量</span><strong>{selectedBlock.review.remaining_workload_minutes === null ? "未重估" : `${selectedBlock.review.remaining_workload_minutes} 分钟`}</strong></div>{selectedBlock.review.notes && <div className="wide"><span>备注</span><strong>{selectedBlock.review.notes}</strong></div>}{selectedBlock.review.defer_reason && <div className="wide"><span>延期原因</span><strong>{selectedBlock.review.defer_reason}</strong></div>}</div><footer><span role="status">这次复盘已经确认。</span><strong className="context-readonly-state">只读</strong></footer></> : selectedDate !== today ? selectedBlock.execution_status !== "planned" ? <><div className={`floating-capture-fact execution-${selectedBlock.execution_status}`}><span>本次结果</span><strong>{reviewOutcomeCopy[selectedBlock.execution_status]}</strong>{selectedBlock.execution_note && <p>{selectedBlock.execution_note}</p>}</div><div className="floating-readonly"><strong>当日已记录，尚未复盘</strong><span>历史记录保持原样，实际耗时和剩余工作量不会在事后补填。</span></div></> : <div className="floating-readonly"><strong>{isPastDate ? "历史日期只读" : "未来安排暂不可记录"}</strong><span>{isPastDate ? "这项安排当时没有保存执行记录。" : "到执行日期后再记录本次结果。"}</span></div> : executionDraft ? <><ExecutionCaptureFields key={selectedBlock.id} draft={executionDraft} disabled={savingExecution} onChange={updateExecutionDraft} /><footer className="execution-capture-footer"><span role="status" className={executionMessage ? "error" : ""}>{executionMessage || "本次记录会带入每日复盘"}</span>{selectedBlock.execution_status === "planned" && <button type="button" className="execution-remove-today" disabled={busy || savingExecution} onClick={removeSelectedBlockFromToday}><Icon name="trash" size={14} />从今日计划移除</button>}<div><button type="button" className="quiet-button" disabled={savingExecution} onClick={closeTimelinePanel}>暂不记录</button><button type="button" className="primary-action" disabled={savingExecution || !executionDraft.outcome} onClick={() => void saveSelectedBlockExecution()}>{savingExecution ? "正在保存…" : "保存记录"}</button></div></footer></> : null}
+                </> : selectedEvent ? <><header><div><strong>{selectedEvent.title}</strong><small>{selectedEvent.is_all_day ? "全天固定日程" : `${timeRangeLabel(selectedEvent.starts_at, selectedEvent.ends_at)} · 固定日程`}</small></div><button type="button" aria-label="关闭日程详情" onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></header><div className="floating-readonly"><strong>固定日程</strong><span>固定日程不提供完成按钮，也不会限制同一时段安排其他事项。</span></div></> : null}
               </section></div>}
               <div className="hourly-timeline" style={{ "--timeline-height": `${timelineHeight}px` } as CSSProperties}><div className="timeline-hours" aria-hidden="true">{timelineHours.map((hour, index) => <div key={hour} className={`timeline-hour${showNowLine && Math.abs(nowMinute - index * 60) / 60 * pixelsPerHour <= nowLabelOverlapDistance ? " current-time-covered" : ""}`} style={{ top: `${index * pixelsPerHour}px` }}><time>{String(hour).padStart(2, "0")}:00</time><span /></div>)}</div><div className="timeline-events" style={{ height: `${timelineHeight}px` }}>
                 {nonWorkingTimeSegments.map((segment, index) => <div
@@ -3107,6 +4027,8 @@ function TodayPage({
                 {timedEvents.map((event) => <button
                   key={event.id}
                   type="button"
+                  data-timeline-kind="event"
+                  data-timeline-id={event.id}
                   className={`timeline-event fixed-event${selection?.kind === "event" && selection.id === event.id ? " selected" : ""}`}
                   style={timelineEventPosition(event.starts_at, event.ends_at, selectedDate, axisStart, pixelsPerHour, timelineItemLanes[`event:${event.id}`])}
                   aria-pressed={selection?.kind === "event" && selection.id === event.id}
@@ -3119,11 +4041,13 @@ function TodayPage({
                   })}
                   onClick={(clickEvent) => selectTimelineItem({ kind: "event", id: event.id }, clickEvent.currentTarget)}
                 ><span className="timeline-event-symbol fixed" aria-hidden="true" /><span className="timeline-event-copy"><strong>{event.title}</strong><small>{timeRangeLabel(event.starts_at, event.ends_at)} · 固定日程</small></span></button>)}
-                {recurringTimelineBlocks.map(({ item, starts_at, ends_at, layoutKey }) => <div key={item.id} className={`timeline-event recurring-event${item.outcome ? ` reviewed outcome-${item.outcome}` : ""}`} style={timelineEventPosition(starts_at, ends_at, selectedDate, axisStart, pixelsPerHour, timelineItemLanes[layoutKey])} tabIndex={0} {...timelineTooltipProps({ kind: "重复事项", title: item.title, time: timeRangeLabel(starts_at, ends_at), detail: item.outcome ? `已复盘 · ${item.outcome === "completed" ? "完成" : item.outcome === "partial" ? "部分完成" : "未完成"}` : "待复盘；重复事项不生成普通任务或执行块", tone: "recurring" }, "block-bottom")}><span className="timeline-event-symbol recurring" aria-hidden="true" /><span className="timeline-event-copy"><strong>{item.title}</strong><small><Icon name="clock" size={11} />{timeRangeLabel(starts_at, ends_at)}</small></span><span className="recurring-event-icon" aria-hidden="true"><img src={recurringIcon} alt="" /></span></div>)}
+                {recurringTimelineBlocks.map(({ item, starts_at, ends_at, layoutKey }) => <div key={item.id} className={`timeline-event recurring-event${item.outcome ? ` reviewed outcome-${item.outcome}` : ""}`} style={timelineEventPosition(starts_at, ends_at, selectedDate, axisStart, pixelsPerHour, timelineItemLanes[layoutKey])} tabIndex={0} {...timelineTooltipProps({ kind: "重复事项", title: item.title, time: timeRangeLabel(starts_at, ends_at), detail: item.outcome ? `已复盘 · ${item.outcome === "completed" ? "完成" : item.outcome === "partial" ? "部分完成" : "未完成"}` : "待复盘；这项重复安排会单独显示", tone: "recurring" }, "block-bottom")}><span className="timeline-event-symbol recurring" aria-hidden="true" /><span className="timeline-event-copy"><strong>{item.title}</strong><small><Icon name="clock" size={11} />{timeRangeLabel(starts_at, ends_at)}</small></span><span className="recurring-event-icon" aria-hidden="true"><img src={recurringIcon} alt="" /></span></div>)}
                 {draftBlocks.map((block, index) => <button
                   key={draftLayoutKeys[index]}
                   type="button"
-                  className={`timeline-event plan-draft-block${block.estimated_minutes <= 45 ? " is-compact" : ""}${selection?.kind === "draft" && selection.id === String(index) ? " selected" : ""}`}
+                  data-timeline-kind="draft"
+                  data-timeline-id={String(index)}
+                  className={`timeline-event plan-draft-block${shortTaskBlockClass(block.starts_at, block.ends_at)}${selection?.kind === "draft" && selection.id === String(index) ? " selected" : ""}`}
                   style={timelineEventPosition(block.starts_at, block.ends_at, selectedDate, axisStart, pixelsPerHour, timelineItemLanes[draftLayoutKeys[index]])}
                   aria-pressed={selection?.kind === "draft" && selection.id === String(index)}
                   {...timelineTooltipProps({
@@ -3149,10 +4073,18 @@ function TodayPage({
                         : `${block.task_title}仅可在执行当天记录`;
                   return <div
                     key={block.id}
-                    className={`timeline-event execution-block${effectiveOutcome ? ` ${block.review ? "reviewed" : "captured"} execution-${effectiveOutcome}` : ""}${selection?.kind === "block" && selection.id === block.id ? " selected" : ""}`}
+                    data-timeline-kind="block"
+                    data-timeline-id={block.id}
+                    className={`timeline-event execution-block${shortTaskBlockClass(block.starts_at, block.ends_at)}${effectiveOutcome ? ` ${block.review ? "reviewed" : "captured"} execution-${effectiveOutcome}` : ""}${selection?.kind === "block" && selection.id === block.id ? " selected" : ""}`}
                     style={timelineEventPosition(block.starts_at, block.ends_at, selectedDate, axisStart, pixelsPerHour, timelineItemLanes[`block:${block.id}`])}
+                    onClick={(event) => {
+                      const target = event.target;
+                      if (target instanceof Element && target.closest(".timeline-event-check")) return;
+                      const trigger = event.currentTarget.querySelector<HTMLElement>(".timeline-event-body") ?? event.currentTarget;
+                      selectTimelineItem({ kind: "block", id: block.id }, trigger, event.currentTarget);
+                    }}
                     {...timelineTooltipProps({
-                      kind: "执行块",
+                      kind: "任务安排",
                       title: block.task_title,
                       time: timeRangeLabel(block.starts_at, block.ends_at),
                       detail: block.review
@@ -3165,8 +4097,8 @@ function TodayPage({
                   >
                     <span className="plan-draft-grip" aria-hidden="true" />
                     <div className="timeline-execution-content">
-                      <button type="button" className={`timeline-event-check${blockCompleted ? " done" : ""}${blockHasFact && !blockCompleted ? " recorded" : ""}${blockIsSaving ? " saving" : ""}`} aria-label={block.review ? `${block.task_title}已完成每日复盘，不能取消完成` : blockCompleted ? `取消完成：${block.task_title}` : quickCompleteLabel} aria-pressed={blockCompleted} disabled={Boolean(block.review) || blockHasFact && !blockCompleted || blockIsSaving || selectedDate !== today} onClick={() => void (blockCompleted ? clearQuickCompletedTimelineBlock(block) : quickCompleteTimelineBlock(block))}>{blockIsSaving ? <span className="timeline-check-spinner" /> : blockCompleted ? <Icon name="check" size={11} /> : null}</button>
-                      <button type="button" className="timeline-event-body" aria-pressed={selection?.kind === "block" && selection.id === block.id} onClick={(event) => selectTimelineItem({ kind: "block", id: block.id }, event.currentTarget)}><span className="timeline-event-copy"><strong>{block.task_title}</strong><small><Icon name="clock" size={11} />{timeRangeLabel(block.starts_at, block.ends_at)} · {block.review ? `${reviewOutcomeCopy[block.review.outcome]} ${block.review.actual_minutes} 分钟` : effectiveOutcome ? `本次${reviewOutcomeCopy[effectiveOutcome]} · 待复盘` : `计划 ${durationLabel(block.starts_at, block.ends_at)}`}</small></span></button>
+                      <button type="button" className={`timeline-event-check${blockCompleted ? " done" : ""}${blockHasFact && !blockCompleted ? " recorded" : ""}${blockIsSaving ? " saving" : ""}`} aria-label={block.review ? `${block.task_title}已完成每日复盘，不能取消完成` : blockCompleted ? `取消完成：${block.task_title}` : quickCompleteLabel} aria-pressed={blockCompleted} disabled={Boolean(block.review) || blockHasFact && !blockCompleted || blockIsSaving || selectedDate !== today} onClick={(event) => { event.stopPropagation(); void (blockCompleted ? clearQuickCompletedTimelineBlock(block) : quickCompleteTimelineBlock(block)); }}>{blockIsSaving ? <span className="timeline-check-spinner" /> : blockCompleted ? <Icon name="check" size={11} /> : null}</button>
+                      <button type="button" className="timeline-event-body" aria-label={`打开本次执行：${block.task_title}`} aria-haspopup="dialog" aria-controls="timeline-context-panel" aria-pressed={selection?.kind === "block" && selection.id === block.id}><span className="timeline-event-copy"><strong>{block.task_title}</strong><small><Icon name="clock" size={11} />{timeRangeLabel(block.starts_at, block.ends_at)} · {block.review ? `${reviewOutcomeCopy[block.review.outcome]} ${block.review.actual_minutes} 分钟` : effectiveOutcome ? `本次${reviewOutcomeCopy[effectiveOutcome]} · 待复盘` : `计划 ${durationLabel(block.starts_at, block.ends_at)}`}</small></span></button>
                     </div>
                   </div>;
                 })}
@@ -3235,7 +4167,7 @@ function ReviewPage({ today, onFactsChanged }: { today: string; onFactsChanged: 
       setSchedule(null);
       setRecurringOccurrences([]);
       setDrafts({});
-      setError(String(reason));
+      setError(uiErrorMessage(reason));
     } finally {
       setLoading(false);
     }
@@ -3253,7 +4185,7 @@ function ReviewPage({ today, onFactsChanged }: { today: string; onFactsChanged: 
 
   async function saveBlockReview(blockId: string) {
     if (reviewDate !== today) {
-      setMessages((current) => ({ ...current, [blockId]: "历史日期只展示已经保存的执行与复盘事实。" }));
+      setMessages((current) => ({ ...current, [blockId]: "历史日期只展示当时保存的执行和复盘记录。" }));
       return;
     }
     const draft = drafts[blockId];
@@ -3288,14 +4220,14 @@ function ReviewPage({ today, onFactsChanged }: { today: string; onFactsChanged: 
       remaining_workload_minutes: remainingMinutes
     };
     setSavingBlockId(blockId);
-    setMessages((current) => ({ ...current, [blockId]: "正在写入本机…" }));
+    setMessages((current) => ({ ...current, [blockId]: "正在保存…" }));
     try {
       await saveReviewEntry(reviewDate, input);
       await loadReviewSchedule(reviewDate);
       onFactsChanged(reviewDate);
-      setMessages((current) => ({ ...current, [blockId]: "执行与复盘事实已写入 SQLite。" }));
+      setMessages((current) => ({ ...current, [blockId]: "这次复盘已保存。" }));
     } catch (reason) {
-      setMessages((current) => ({ ...current, [blockId]: `未保存：${String(reason)}` }));
+      setMessages((current) => ({ ...current, [blockId]: `未保存：${uiErrorMessage(reason)}` }));
     } finally {
       setSavingBlockId(null);
     }
@@ -3313,9 +4245,9 @@ function ReviewPage({ today, onFactsChanged }: { today: string; onFactsChanged: 
       await completeTaskFromReview(taskId, reviewDate, true);
       await loadReviewSchedule(reviewDate);
       onFactsChanged(reviewDate);
-      setMessages((current) => ({ ...current, [blockId]: "整个任务已完成；执行块和复盘事实仍已保留。" }));
+      setMessages((current) => ({ ...current, [blockId]: "整个任务已完成；原有执行和复盘记录仍会保留。" }));
     } catch (reason) {
-      setMessages((current) => ({ ...current, [blockId]: `任务未完成：${String(reason)}` }));
+      setMessages((current) => ({ ...current, [blockId]: `任务未完成：${uiErrorMessage(reason)}` }));
     } finally {
       setCompletingTaskId(null);
     }
@@ -3332,9 +4264,9 @@ function ReviewPage({ today, onFactsChanged }: { today: string; onFactsChanged: 
       await saveRecurringOccurrenceReview(occurrenceId, { outcome: draft.outcome, notes: draft.notes.trim() || null });
       await loadReviewSchedule(reviewDate);
       onFactsChanged(reviewDate);
-      setMessages((current) => ({ ...current, [occurrenceId]: "重复事项结果已写入 SQLite。" }));
+      setMessages((current) => ({ ...current, [occurrenceId]: "这次结果已保存。" }));
     } catch (reason) {
-      setMessages((current) => ({ ...current, [occurrenceId]: `未保存：${String(reason)}` }));
+      setMessages((current) => ({ ...current, [occurrenceId]: `未保存：${uiErrorMessage(reason)}` }));
     } finally {
       setSavingBlockId(null);
     }
@@ -3348,34 +4280,33 @@ function ReviewPage({ today, onFactsChanged }: { today: string; onFactsChanged: 
   const nextDate = shiftDateValue(reviewDate, 1);
 
   return <section className="next-page review-page">
-    <header className="page-commandbar"><div><h1>复盘</h1><p>记录实际发生的事，不覆盖原计划。</p></div><div className="review-date-controls"><button type="button" aria-label="前一天" title="前一天" onClick={() => setReviewDate(previousDate)}><Icon name="chevron-left" size={15} /></button><input type="date" max={today} aria-label="复盘日期" value={reviewDate} onChange={(event) => event.target.value && setReviewDate(event.target.value)} /><button type="button" aria-label="后一天" title="后一天" disabled={nextDate > today} onClick={() => setReviewDate(nextDate)}><Icon name="chevron-right" size={15} /></button><button type="button" className="review-today" disabled={isToday} onClick={() => setReviewDate(today)}>今天</button></div></header>
-    <div className="review-date-line"><strong>{fullDateLabel(reviewDate, today)}</strong><span>{isToday ? "今天的记录可逐条保存" : "历史日期只呈现已确认计划与已保存事实"}</span></div>
-    <div className="review-summary"><div><strong>{blocks.length}</strong><span>执行块</span></div><div><strong>{recurringOccurrences.length}</strong><span>重复事项</span></div><div><strong>{savedCount + recurringSavedCount}</strong><span>已保存</span></div><p>执行块与重复事项分别记录，不互相改变状态。</p></div>
-    {!loading && !error && recurringOccurrences.length > 0 && <section className="recurring-review-section" aria-labelledby="recurring-review-title"><header><div><h2 id="recurring-review-title">重复事项</h2><p>直接记录今天这一次，不提供“跳过本次”。</p></div><span>{recurringSavedCount}/{recurringOccurrences.length} 已处理</span></header><div className="review-ledger recurring-review-ledger">{recurringOccurrences.map((item) => { const draft = recurringDrafts[item.id]; const busy = savingBlockId === item.id; return <article key={item.id} className={item.outcome ? "review-saved" : ""}><header><div><strong>{item.title}</strong><span>{item.display_time && item.display_duration_minutes ? `${item.display_time} · ${item.display_duration_minutes} 分钟 · 时间展示` : "时间未指定"}</span></div><span>{item.outcome ? "复盘已确认" : "待复盘"}</span></header>{item.outcome ? <><div className="review-facts"><div><span>本次结果</span><strong>{item.outcome === "completed" ? "完成" : item.outcome === "partial" ? "部分完成" : "未完成"}</strong></div>{item.review_notes && <div className="review-fact-wide"><span>复盘备注</span><strong>{item.review_notes}</strong></div>}</div><div className="review-actions"><span role="status">结果已保存，规则仍按原计划继续。</span></div></> : draft ? <><div className="recurring-outcome-picker" role="group" aria-label={`${item.title}本次结果`}>{([['completed','完成'],['partial','部分完成'],['not_completed','未完成']] as const).map(([value,label]) => <button key={value} type="button" aria-pressed={draft.outcome === value} disabled={busy} onClick={() => setRecurringDrafts((current) => ({ ...current, [item.id]: { ...draft, outcome: value } }))}>{label}</button>)}</div><label className="recurring-review-notes">复盘备注<textarea rows={2} maxLength={2000} value={draft.notes} placeholder="可选，记录今天这一次" disabled={busy} onChange={(event) => setRecurringDrafts((current) => ({ ...current, [item.id]: { ...draft, notes: event.target.value } }))} /></label><div className="review-actions"><span role="status">{messages[item.id] || "确认后只保存今天这一次的结果。"}</span><button type="button" disabled={busy || !draft.outcome} onClick={() => void saveRecurringReview(item.id)}>{busy ? "正在写入…" : "确认本次复盘"}</button></div></> : <div className="review-history-readonly"><strong>历史日期只读</strong><span>这一次没有保存复盘结果。</span></div>}</article>; })}</div></section>}
-    {loading ? <div className="review-empty compact"><Icon name="clock" size={24} /><h2>正在读取本机记录</h2><p>执行块和复盘事实都以 SQLite 返回结果为准。</p></div> : error ? <div className="review-empty compact error"><Icon name="review" size={26} /><h2>这一天的记录没有读出来</h2><p>{error}</p><button type="button" className="quiet-button" onClick={() => void loadReviewSchedule(reviewDate)}>重新读取</button></div> : blocks.length ? <div className="review-ledger">{blocks.map((block) => {
+    <header className="review-context-bar"><div className="review-context-copy"><h1>{fullDateLabel(reviewDate, today)}</h1><span>{isToday ? "今天的记录可以逐条保存" : "这里只显示当时保存的计划和记录"}</span></div><div className="review-date-controls"><button type="button" aria-label="前一天" title="前一天" onClick={() => setReviewDate(previousDate)}><Icon name="chevron-left" size={15} /></button><input type="date" max={today} aria-label="复盘日期" value={reviewDate} onChange={(event) => event.target.value && setReviewDate(event.target.value)} /><button type="button" aria-label="后一天" title="后一天" disabled={nextDate > today} onClick={() => setReviewDate(nextDate)}><Icon name="chevron-right" size={15} /></button><button type="button" className="review-today" disabled={isToday} onClick={() => setReviewDate(today)}>今天</button></div></header>
+    <div className="review-summary"><div><strong>{blocks.length}</strong><span>任务安排</span></div><div><strong>{recurringOccurrences.length}</strong><span>重复事项</span></div><div><strong>{savedCount + recurringSavedCount}</strong><span>已保存</span></div><p>任务安排与重复事项分别记录，不会互相影响。</p></div>
+    {!loading && !error && recurringOccurrences.length > 0 && <section className="recurring-review-section" aria-labelledby="recurring-review-title"><header><div><h2 id="recurring-review-title">重复事项</h2><p>直接记录今天这一次，不提供“跳过本次”。</p></div><span>{recurringSavedCount}/{recurringOccurrences.length} 已处理</span></header><div className="review-ledger recurring-review-ledger">{recurringOccurrences.map((item) => { const draft = recurringDrafts[item.id]; const busy = savingBlockId === item.id; return <article key={item.id} className={item.outcome ? "review-saved" : ""}><header><div><strong>{item.title}</strong><span>{item.display_time && item.display_duration_minutes ? `${item.display_time} · ${item.display_duration_minutes} 分钟 · 时间展示` : "时间未指定"}</span></div><span>{item.outcome ? "复盘已确认" : "待复盘"}</span></header>{item.outcome ? <><div className="review-facts"><div><span>本次结果</span><strong>{item.outcome === "completed" ? "完成" : item.outcome === "partial" ? "部分完成" : "未完成"}</strong></div>{item.review_notes && <div className="review-fact-wide"><span>复盘备注</span><strong>{item.review_notes}</strong></div>}</div><div className="review-actions"><span role="status">结果已保存，重复安排会继续。</span></div></> : draft ? <><div className="recurring-outcome-picker" role="group" aria-label={`${item.title}本次结果`}>{([['completed','完成'],['partial','部分完成'],['not_completed','未完成']] as const).map(([value,label]) => <button key={value} type="button" aria-pressed={draft.outcome === value} disabled={busy} onClick={() => setRecurringDrafts((current) => ({ ...current, [item.id]: { ...draft, outcome: value } }))}>{label}</button>)}</div><label className="recurring-review-notes">复盘备注<textarea rows={2} maxLength={2000} value={draft.notes} placeholder="可选，记录今天这一次" disabled={busy} onChange={(event) => setRecurringDrafts((current) => ({ ...current, [item.id]: { ...draft, notes: event.target.value } }))} /></label><div className="review-actions"><span role="status">{messages[item.id] || "确认后只保存今天这一次的结果。"}</span><button type="button" disabled={busy || !draft.outcome} onClick={() => void saveRecurringReview(item.id)}>{busy ? "正在保存…" : "确认本次复盘"}</button></div></> : <div className="review-history-readonly"><strong>历史日期只读</strong><span>这一次没有保存复盘结果。</span></div>}</article>; })}</div></section>}
+    {loading ? <div className="review-empty compact"><Icon name="clock" size={24} /><h2>正在载入这一天的记录</h2><p>稍等一下，今序正在整理已保存的安排和复盘。</p></div> : error ? <div className="review-empty compact error"><Icon name="review" size={26} /><h2>这一天的记录暂时无法打开</h2><p>{error}</p><button type="button" className="quiet-button" onClick={() => void loadReviewSchedule(reviewDate)}>重试</button></div> : blocks.length ? <div className="review-ledger">{blocks.map((block) => {
       const draft = drafts[block.id];
       const saved = block.review;
       const busy = savingBlockId === block.id;
-      const canCompleteTask = isToday && saved && !["done", "cancelled", "deleted"].includes(block.task_status);
+      const canCompleteTask = isToday && saved && !["done", "deleted"].includes(block.task_status);
       const capturedOutcome = !saved && block.execution_status !== "planned" ? block.execution_status : null;
       const captured = capturedOutcome !== null;
       const reviewTone = saved?.outcome ?? capturedOutcome;
       return <article key={block.id} className={`${saved ? "review-saved" : captured ? "review-captured" : ""}${reviewTone ? ` execution-${reviewTone}` : ""}`.trim()}>
         <header><div><strong>{block.task_title}</strong><span>{timeRangeLabel(block.starts_at, block.ends_at)} · 原计划 {durationLabel(block.starts_at, block.ends_at)}</span></div><span>{saved ? "复盘已确认" : captured ? "已记录 · 待复盘" : "待复盘"}</span></header>
         {saved ? <>
-          <div className="review-facts" aria-label={`${block.task_title}已保存复盘事实`}><div><span>执行结果</span><strong>{reviewOutcomeCopy[saved.outcome]}</strong></div><div><span>实际耗时</span><strong>{saved.actual_minutes} 分钟</strong></div><div><span>剩余工作量</span><strong>{saved.remaining_workload_minutes === null ? "未重估" : `${saved.remaining_workload_minutes} 分钟`}</strong></div>{saved.defer_reason && <div className="review-fact-wide"><span>延期原因</span><strong>{saved.defer_reason}</strong></div>}{saved.notes && <div className="review-fact-wide"><span>复盘备注</span><strong>{saved.notes}</strong></div>}</div>
-          <div className="review-actions"><span role="status">{messages[block.id] || `已于本机保存 · ${saved.created_at.slice(0, 10)}`}</span></div>
-          <div className="review-task-followup"><div><strong>任务后续</strong><span>这里决定整件任务是否还需要继续，不改变上面的本次执行事实。</span></div>{block.task_status === "done" ? <strong className="task-complete-state"><Icon name="check" size={14} />整个任务已完成</strong> : canCompleteTask ? <button type="button" className="complete-task-action" disabled={completingTaskId === block.task_id} onClick={() => setPendingTaskCompletion({ taskId: block.task_id, taskTitle: block.task_title, blockId: block.id })}>{completingTaskId === block.task_id ? "正在完成任务…" : "完成整个任务"}</button> : null}</div>
+          <div className="review-facts" aria-label={`${block.task_title}已保存的复盘`}><div><span>执行结果</span><strong>{reviewOutcomeCopy[saved.outcome]}</strong></div><div><span>实际耗时</span><strong>{saved.actual_minutes} 分钟</strong></div><div><span>剩余工作量</span><strong>{saved.remaining_workload_minutes === null ? "未重估" : `${saved.remaining_workload_minutes} 分钟`}</strong></div>{saved.defer_reason && <div className="review-fact-wide"><span>延期原因</span><strong>{saved.defer_reason}</strong></div>}{saved.notes && <div className="review-fact-wide"><span>复盘备注</span><strong>{saved.notes}</strong></div>}</div>
+          <div className="review-actions"><span role="status">{messages[block.id] || `已保存 · ${saved.created_at.slice(0, 10)}`}</span></div>
+          <div className="review-task-followup"><div><strong>任务后续</strong><span>这里决定整件任务是否还需要继续，不会改变上面的复盘记录。</span></div>{block.task_status === "done" ? <strong className="task-complete-state"><Icon name="check" size={14} />整个任务已完成</strong> : canCompleteTask ? <button type="button" className="complete-task-action" disabled={completingTaskId === block.task_id} onClick={() => setPendingTaskCompletion({ taskId: block.task_id, taskTitle: block.task_title, blockId: block.id })}>{completingTaskId === block.task_id ? "正在完成任务…" : "完成整个任务"}</button> : null}</div>
         </> : draft ? <>
           {capturedOutcome && <div className="review-capture-note"><Icon name="check" size={14} /><span>已从时间线带入“本次{reviewOutcomeCopy[capturedOutcome]}”{block.execution_note ? "和简短备注" : ""}，请核对后确认。</span></div>}
           <ExecutionOutcomePicker label={`${block.task_title}本次执行结果`} result={draft.result} outcome={draft.outcome} disabled={busy} onChange={(result, outcome) => updateDraft(block.id, { result, outcome })} />
-          <div className="review-fields"><label>实际耗时<input type="number" min="0" step="1" placeholder="必填" value={draft.actual_minutes} disabled={busy} onChange={(event) => updateDraft(block.id, { actual_minutes: event.target.value })} /><span>分钟</span></label><label>剩余工作量<input type="number" min="0" step="1" placeholder="不重估" value={draft.remaining_workload_minutes} disabled={busy} onChange={(event) => updateDraft(block.id, { remaining_workload_minutes: event.target.value })} /><span>分钟</span></label><label className="review-wide">延期原因<input maxLength={500} placeholder="可选，记录推迟或受阻原因" value={draft.defer_reason} disabled={busy} onChange={(event) => updateDraft(block.id, { defer_reason: event.target.value })} /></label><label className="review-wide">复盘备注<textarea rows={2} maxLength={2000} placeholder="可选，核对或补充本次事实" value={draft.notes} disabled={busy} onChange={(event) => updateDraft(block.id, { notes: event.target.value })} /></label></div>
-          <div className="review-actions"><span role="status" className={messages[block.id]?.startsWith("未保存") ? "error" : ""}>{messages[block.id] || "核对后保存为今天的最终复盘事实。"}</span><button type="button" disabled={busy} onClick={() => void saveBlockReview(block.id)}>{busy ? "正在写入…" : "确认本次复盘"}</button></div>
-        </> : capturedOutcome ? <div className={`review-history-readonly has-capture execution-${capturedOutcome}`}><strong>本次{reviewOutcomeCopy[capturedOutcome]} · 未完成复盘</strong><span>{block.execution_note || "当天保存了轻量执行记录，但没有确认实际耗时和剩余工作量。"}</span></div> : <div className="review-history-readonly"><strong>历史日期只读</strong><span>这条执行块当时没有保存执行或复盘事实；今序不会事后补造记录。</span></div>}
+          <div className="review-fields"><label>实际耗时<input type="number" min="0" step="1" placeholder="必填" value={draft.actual_minutes} disabled={busy} onChange={(event) => updateDraft(block.id, { actual_minutes: event.target.value })} /><span>分钟</span></label><label>剩余工作量<input type="number" min="0" step="1" placeholder="不重估" value={draft.remaining_workload_minutes} disabled={busy} onChange={(event) => updateDraft(block.id, { remaining_workload_minutes: event.target.value })} /><span>分钟</span></label><label className="review-wide">延期原因<input maxLength={500} placeholder="可选，记录推迟或受阻原因" value={draft.defer_reason} disabled={busy} onChange={(event) => updateDraft(block.id, { defer_reason: event.target.value })} /></label><label className="review-wide">复盘备注<textarea rows={2} maxLength={2000} placeholder="可选，核对或补充这次记录" value={draft.notes} disabled={busy} onChange={(event) => updateDraft(block.id, { notes: event.target.value })} /></label></div>
+          <div className="review-actions"><span role="status" className={messages[block.id]?.startsWith("未保存") ? "error" : ""}>{messages[block.id] || "核对后保存今天的复盘。"}</span><button type="button" disabled={busy} onClick={() => void saveBlockReview(block.id)}>{busy ? "正在保存…" : "确认本次复盘"}</button></div>
+        </> : capturedOutcome ? <div className={`review-history-readonly has-capture execution-${capturedOutcome}`}><strong>本次{reviewOutcomeCopy[capturedOutcome]} · 未完成复盘</strong><span>{block.execution_note || "当天记录了执行结果，但还没有填写实际耗时和剩余工作量。"}</span></div> : <div className="review-history-readonly"><strong>历史日期只读</strong><span>这项安排当时没有执行或复盘记录。</span></div>}
       </article>;
-    })}</div> : recurringOccurrences.length ? <div className="review-no-task-blocks"><Icon name="check" size={16} /><span>今天没有执行块，重复事项可以直接在上方处理。</span></div> : <div className="review-empty"><Icon name="review" size={28} /><h2>{isToday ? "今天没有需要复盘的内容" : "这一天没有复盘内容"}</h2><p>{isToday ? "确认过的日计划执行块或到期的重复事项会出现在这里。" : "历史只展示实际写入过的计划和复盘记录，不补造空白内容。"}</p></div>}
-    <footer className="review-page-footer"><span><Icon name="check" size={14} />保存后从 SQLite 重新读取；原计划时间不会被实际耗时覆盖。</span></footer>
-    {pendingTaskCompletion && <div className="dialog-backdrop task-completion-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !completingTaskId) setPendingTaskCompletion(null); }}><section className="unsaved-dialog task-completion-dialog" role="alertdialog" aria-modal="true" aria-labelledby="review-task-completion-title" aria-describedby="review-task-completion-description" onKeyDown={(event) => { if (event.key === "Escape" && !completingTaskId) setPendingTaskCompletion(null); }}><div className="dialog-icon completion"><Icon name="check" size={19} /></div><h2 id="review-task-completion-title">确认完成整个任务？</h2><p id="review-task-completion-description">“{pendingTaskCompletion.taskTitle}”以后将不再进入计划；今天已经确认的本次执行事实会继续保留。</p><div className="dialog-actions"><button type="button" autoFocus disabled={Boolean(completingTaskId)} onClick={() => setPendingTaskCompletion(null)}>取消</button><button type="button" className="dialog-save" disabled={Boolean(completingTaskId)} onClick={() => void completeWholeTask(pendingTaskCompletion.taskId, pendingTaskCompletion.blockId)}>{completingTaskId ? "正在完成…" : "确认完成任务"}</button></div></section></div>}
+    })}</div> : recurringOccurrences.length ? <div className="review-no-task-blocks"><Icon name="check" size={16} /><span>今天没有任务安排，重复事项可以直接在上方处理。</span></div> : <div className="review-empty"><Icon name="review" size={28} /><h2>{isToday ? "今天没有需要复盘的内容" : "这一天没有复盘内容"}</h2><p>{isToday ? "日计划中的任务安排或到期的重复事项会出现在这里。" : "这里只显示当时保存的计划和复盘记录。"}</p></div>}
+    <footer className="review-page-footer"><span><Icon name="check" size={14} />保存后会立即更新；实际耗时不会改变原计划时间。</span></footer>
+    {pendingTaskCompletion && <div className="dialog-backdrop task-completion-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !completingTaskId) setPendingTaskCompletion(null); }}><section className="unsaved-dialog task-completion-dialog" role="alertdialog" aria-modal="true" aria-labelledby="review-task-completion-title" aria-describedby="review-task-completion-description" onKeyDown={(event) => { if (event.key === "Escape" && !completingTaskId) setPendingTaskCompletion(null); }}><div className="dialog-icon completion"><Icon name="check" size={19} /></div><h2 id="review-task-completion-title">确认完成整个任务？</h2><p id="review-task-completion-description">“{pendingTaskCompletion.taskTitle}”以后将不再进入计划；今天的复盘记录会继续保留。</p><div className="dialog-actions"><button type="button" autoFocus disabled={Boolean(completingTaskId)} onClick={() => setPendingTaskCompletion(null)}>取消</button><button type="button" className="dialog-save" disabled={Boolean(completingTaskId)} onClick={() => void completeWholeTask(pendingTaskCompletion.taskId, pendingTaskCompletion.blockId)}>{completingTaskId ? "正在完成…" : "确认完成任务"}</button></div></section></div>}
   </section>;
 }
 
@@ -3403,7 +4334,7 @@ function SettingsPage({ availability, availabilityError, onSaved, onReload, onNo
   const [preferenceBusy, setPreferenceBusy] = useState(false);
   const [preferenceMessage, setPreferenceMessage] = useState("");
   const savedPreferences = useRef<{ reminders: typeof reminders; appearance: typeof appearance; desktop: typeof desktop } | null>(null);
-  const availabilityState = saving ? "正在保存" : availability ? "已读取本机" : availabilityError ? "读取失败" : "正在读取";
+  const availabilityState = saving ? "正在保存" : availability ? "已加载" : availabilityError ? "暂时不可用" : "正在加载";
   const availabilityDirty = Boolean(draft && availability && JSON.stringify(draft) !== JSON.stringify(availability));
   const aiDirty = Boolean(aiSettings && (aiKey.trim() || aiForm.api_type !== aiSettings.api_type || aiForm.endpoint !== aiSettings.endpoint || aiForm.model !== aiSettings.model));
   const preferencesDirty = Boolean(savedPreferences.current && JSON.stringify({ reminders, appearance, desktop }) !== JSON.stringify(savedPreferences.current));
@@ -3421,7 +4352,7 @@ function SettingsPage({ availability, availabilityError, onSaved, onReload, onNo
       if (!active) return;
       setAiSettings(settings);
       setAiForm({ api_type: settings.api_type, endpoint: settings.endpoint, model: settings.model });
-    }).catch((reason) => { if (active) setAiMessage(String(reason)); });
+    }).catch((reason) => { if (active) setAiMessage(uiErrorMessage(reason)); });
     return () => { active = false; };
   }, []);
 
@@ -3446,7 +4377,7 @@ function SettingsPage({ availability, availabilityError, onSaved, onReload, onNo
       setReminders(nextReminders);
       setDesktop(nextDesktop);
       savedPreferences.current = { reminders: nextReminders, appearance: nextAppearance, desktop: nextDesktop };
-    }).catch((reason) => { if (active) setPreferenceMessage(String(reason)); });
+    }).catch((reason) => { if (active) setPreferenceMessage(uiErrorMessage(reason)); });
     return () => { active = false; };
   }, []);
 
@@ -3521,13 +4452,13 @@ function SettingsPage({ availability, availabilityError, onSaved, onReload, onNo
       return;
     }
     setSaving(true);
-    setSaveMessage("正在写入本机 SQLite…");
+    setSaveMessage("正在保存工作时间…");
     try {
       const saved = await saveAvailabilitySettings(draft);
       setDraft(saved);
       setSaveMessage("日计划偏好已保存。");
       onSaved(saved);
-      onNotify("日计划偏好已保存", "工作日和工作时间已写入本机；它们只影响安排偏好与时间线参照。", "check");
+      onNotify("日计划偏好已保存", "工作日和工作时间已更新，只用于安排建议和时间线显示。", "check");
     } catch (reason) {
       const message = planDraftErrorMessage(reason, null, shanghaiDateValue());
       setSaveMessage(message);
@@ -3541,17 +4472,18 @@ function SettingsPage({ availability, availabilityError, onSaved, onReload, onNo
     event.preventDefault();
     if (aiBusy) return;
     setAiBusy(true);
-    setAiMessage("正在保存到本机 SQLite…");
+    setAiMessage("正在保存 AI 连接…");
     try {
       const saved = await saveAiConnectionSettings({ ...aiForm, api_key: aiKey.trim() || null });
       setAiSettings(saved);
       setAiForm({ api_type: saved.api_type, endpoint: saved.endpoint, model: saved.model });
       setAiKey("");
-      setAiMessage("AI 连接设置已保存。可先测试连接，不会读取任务。");
-      onNotify("AI 连接已保存", "模型类型、地址和凭据已写入本机。", "check");
+      setAiMessage("AI 连接已保存。可以先测试连接，测试时不会发送任务内容。");
+      onNotify("AI 连接已保存", "接口类型、连接地址和访问密钥已保存在这台电脑上。", "check");
     } catch (reason) {
-      setAiMessage(String(reason));
-      onNotify("AI 连接未保存", String(reason), "review");
+      const message = uiErrorMessage(reason);
+      setAiMessage(message);
+      onNotify("AI 连接未保存", message, "review");
     } finally { setAiBusy(false); }
   }
 
@@ -3562,14 +4494,15 @@ function SettingsPage({ availability, availabilityError, onSaved, onReload, onNo
       return;
     }
     setAiBusy(true);
-    setAiMessage("正在发送最小连接测试；不会读取任务或其他对话…");
+    setAiMessage("正在测试连接；不会发送任务或对话内容…");
     try {
       const result = await testAiConnection();
       setAiMessage(`连接成功：${result}`);
       onNotify("AI 连接可用", "最小连接测试已通过。", "check");
     } catch (reason) {
-      setAiMessage(String(reason));
-      onNotify("AI 连接测试失败", String(reason), "review");
+      const message = uiErrorMessage(reason);
+      setAiMessage(message);
+      onNotify("AI 连接测试失败", message, "review");
     } finally { setAiBusy(false); }
   }
 
@@ -3595,8 +4528,9 @@ function SettingsPage({ availability, availabilityError, onSaved, onReload, onNo
       savedPreferences.current = { reminders, appearance, desktop };
       onNotify("设置已保存", "提醒、主题与 Windows 集成已经更新。", "check");
     } catch (reason) {
-      setPreferenceMessage(String(reason));
-      onNotify("设置未保存", String(reason), "review");
+      const message = uiErrorMessage(reason);
+      setPreferenceMessage(message);
+      onNotify("设置未保存", message, "review");
     } finally { setPreferenceBusy(false); }
   }
 
@@ -3608,26 +4542,26 @@ function SettingsPage({ availability, availabilityError, onSaved, onReload, onNo
   }
 
   return <section className={`next-page settings-page${dirty || saving ? " has-floating-actions" : ""}`}>
-    <header className="page-commandbar"><div><h1>设置</h1><p>把会影响安排偏好、提醒和阅读的规则集中在这里。</p></div><span className="local-only"><Icon name="check" size={14} />本机数据</span></header>
+    <h1 className="sr-only">设置</h1>
     <div className="settings-layout"><nav aria-label="设置分类">{settingsCategories.map(([category, label]) => <button key={category} type="button" className={activeCategory === category ? "active" : ""} aria-current={activeCategory === category ? "location" : undefined} onClick={() => requestCategory(category)}>{label}</button>)}</nav><div className="settings-sections">
       <section id="ai"><header><div><h2>AI 连接</h2><p>模型只接收当前对话所需的最小内容。</p></div><span className={`setting-state${aiSettings?.api_key_configured ? " connected" : ""}`}>{aiSettings?.api_key_configured ? "已配置" : "未配置"}</span></header><form className="ai-connection-form" onSubmit={(event) => void submitAiConnection(event)}>
-        <label>API 类型<select value={aiForm.api_type} disabled={aiBusy} onChange={(event) => { setAiForm({ ...aiForm, api_type: event.target.value as "chat_completions" | "responses" }); setAiMessage(""); }}><option value="chat_completions">Chat Completions 兼容</option><option value="responses">Responses API 兼容</option></select></label>
+        <label>接口类型<select value={aiForm.api_type} disabled={aiBusy} onChange={(event) => { setAiForm({ ...aiForm, api_type: event.target.value as "chat_completions" | "responses" }); setAiMessage(""); }}><option value="chat_completions">Chat Completions（兼容接口）</option><option value="responses">Responses（兼容接口）</option></select></label>
         <label>连接地址<input value={aiForm.endpoint} disabled={aiBusy} placeholder="https://api.openai.com/v1" onChange={(event) => { setAiForm({ ...aiForm, endpoint: event.target.value }); setAiMessage(""); }} /></label>
         <label>模型<input value={aiForm.model} disabled={aiBusy} placeholder="gpt-5-mini" onChange={(event) => { setAiForm({ ...aiForm, model: event.target.value }); setAiMessage(""); }} /></label>
-        <label>API Key<input type="password" autoComplete="off" value={aiKey} disabled={aiBusy} placeholder={aiSettings?.api_key_configured ? "已保存；留空表示不更换" : "请输入 API Key"} onChange={(event) => { setAiKey(event.target.value); setAiMessage(""); }} /></label>
-        <div className="ai-connection-actions"><span role="status">{aiMessage || "测试连接只发送一条最小测试消息，不读取任何任务。"}</span><div><button type="button" className="quiet-button" disabled={aiBusy || !aiSettings?.api_key_configured || aiDirty} onClick={() => void testConnection()}>测试连接</button><button type="submit" disabled={aiBusy || !aiDirty}>{aiBusy ? "处理中…" : "保存连接"}</button></div></div>
-      </form><p className="risk-note">API Key 以明文保存在本机 SQLite；诊断、日志和导出不会显示 Key。数据库文件本身仍需妥善保管。</p></section>
+        <label>访问密钥（API Key）<input type="password" autoComplete="off" value={aiKey} disabled={aiBusy} placeholder={aiSettings?.api_key_configured ? "已保存；留空表示不更换" : "请输入访问密钥"} onChange={(event) => { setAiKey(event.target.value); setAiMessage(""); }} /></label>
+        <div className="ai-connection-actions"><span role="status">{aiMessage || "测试连接只发送测试请求，不会包含任务或对话内容。"}</span><div><button type="button" className="quiet-button" disabled={aiBusy || !aiSettings?.api_key_configured || aiDirty} onClick={() => void testConnection()}>测试连接</button><button type="submit" disabled={aiBusy || !aiDirty}>{aiBusy ? "处理中…" : "保存连接"}</button></div></div>
+      </form><p className="risk-note">访问密钥会保存在这台电脑上，目前未加密。问题报告、日志和导出不会显示密钥；请妥善保管今序的数据文件。</p></section>
       <section id="work" className="availability-settings-section"><header><div><h2>工作时间偏好</h2><p>用于自动安排的优先起点和时间线参照，不限制手动安排。</p></div><span className={`setting-state${availability ? " connected" : ""}`}>{availabilityState}</span></header>
-        {availabilityError && !draft ? <div className="setting-load-error"><strong>日计划偏好没有读出来</strong><span>{availabilityError}</span><button type="button" className="quiet-button" onClick={onReload}>重新读取</button></div> : draft ? <form className="setting-availability-form" onSubmit={(event) => void submitAvailability(event)}>
+        {availabilityError && !draft ? <div className="setting-load-error"><strong>日计划偏好暂时无法打开</strong><span>{availabilityError}</span><button type="button" className="quiet-button" onClick={onReload}>重试</button></div> : draft ? <form className="setting-availability-form" onSubmit={(event) => void submitAvailability(event)}>
           <fieldset className="setting-weekdays"><legend>工作日</legend><div>{["一", "二", "三", "四", "五", "六", "日"].map((label, index) => <button key={label} type="button" aria-pressed={draft.weekdays.includes(index + 1)} disabled={saving} onClick={() => toggleWorkday(index + 1)}>周{label}</button>)}</div><small>未选中的日期会使用更浅的网格背景；仍可安排事项。</small></fieldset>
           <div className="setting-time-group"><div className="setting-time-heading"><div><h3>每日工作时间</h3><p>自动安排会优先从这段时间开始；其他时段同样可以安排。</p></div><strong>{draft.workday_start} – {draft.workday_end}</strong></div><TimeRangeRail start={draft.workday_start} end={draft.workday_end} startLabel="开始工作" endLabel="结束工作" disabled={saving} onChange={updateWorkdayRange} /></div>
           {(availabilityDirty || saving) && <footer className="setting-save-bar" aria-label="未保存的更改"><strong role="status" className={saveMessage && !saveMessage.includes("已保存") && !saveMessage.includes("正在") ? "error" : ""}>{saving ? "正在保存到本机…" : draft.weekdays.length === 0 ? "至少选择一个工作日后才能保存。" : saveMessage || "有未保存的更改"}</strong><div className="draft-bar-actions"><button type="button" className="draft-reset" disabled={saving} onClick={() => { setDraft(availability); setSaveMessage(""); }}>撤销</button><button type="submit" className="draft-save" disabled={saving || draft.weekdays.length === 0}>{saving ? "保存中…" : "保存更改"}</button></div></footer>}
-        </form> : <div className="setting-loading"><span className="loader dark" />正在读取本机日计划偏好…</div>}
+        </form> : <div className="setting-loading"><span className="loader dark" />正在载入日计划偏好…</div>}
       </section>
-      <section id="reminder"><header><div><h2>提醒</h2><p>提醒只唤起你，不会自动调用模型。</p></div><button type="button" className="quiet-button" onClick={() => void sendTestNotification().then(() => setPreferenceMessage("测试通知已发送。")).catch((reason) => setPreferenceMessage(String(reason)))}>发送测试通知</button></header><div className="setting-row"><div><strong>晨间计划</strong><span>每日首次达到设定时间后提醒一次</span></div><div className="setting-inline-controls"><input type="time" value={reminders.morningTime} disabled={!reminders.morning} onChange={(event) => setReminders({ ...reminders, morningTime: event.target.value })} /><button type="button" role="switch" aria-checked={reminders.morning} className={`switch-control${reminders.morning ? " enabled" : ""}`} onClick={() => setReminders({ ...reminders, morning: !reminders.morning })}><span /></button></div></div><div className="setting-row"><div><strong>晚间复盘</strong><span>每日首次达到设定时间后提醒一次</span></div><div className="setting-inline-controls"><input type="time" value={reminders.eveningTime} disabled={!reminders.evening} onChange={(event) => setReminders({ ...reminders, eveningTime: event.target.value })} /><button type="button" role="switch" aria-checked={reminders.evening} className={`switch-control${reminders.evening ? " enabled" : ""}`} onClick={() => setReminders({ ...reminders, evening: !reminders.evening })}><span /></button></div></div><label className="setting-buffer">任务块开始前提醒<span><input type="number" min={0} max={60} step={5} value={reminders.taskLead} onChange={(event) => setReminders({ ...reminders, taskLead: Number(event.target.value) })} />分钟</span></label></section>
-      <section id="appearance"><header><div><h2>外观</h2><p>主题会即时预览，保存后随应用启动恢复。</p></div><span className="setting-state connected">可配置</span></header><div className="theme-options">{[["default", "默认"], ["github", "GitHub"], ["codex", "Codex"]].map(([value, label]) => <button key={value} type="button" aria-pressed={appearance.theme === value} onClick={() => previewAppearance({ ...appearance, theme: value })}><span className={`theme-swatch ${value}`} />{label}</button>)}</div><div className="setting-row"><div><strong>明暗模式</strong><span>暗色模式保持低饱和、账本式层级</span></div><select value={appearance.mode} onChange={(event) => previewAppearance({ ...appearance, mode: event.target.value })}><option value="light">浅色</option><option value="dark">深色</option></select></div><label className="setting-buffer">界面字号<span><input type="range" min={13} max={18} value={appearance.fontSize} onChange={(event) => previewAppearance({ ...appearance, fontSize: Number(event.target.value) })} />{appearance.fontSize}px</span></label></section>
+      <section id="reminder"><header><div><h2>提醒</h2><p>提醒只会通知你，不会自动使用 AI。</p></div><button type="button" className="quiet-button" onClick={() => void sendTestNotification().then(() => setPreferenceMessage("测试通知已发送。")).catch((reason) => setPreferenceMessage(uiErrorMessage(reason)))}>发送测试通知</button></header><div className="setting-row"><div><strong>晨间计划</strong><span>每日首次达到设定时间后提醒一次</span></div><div className="setting-inline-controls"><input type="time" value={reminders.morningTime} disabled={!reminders.morning} onChange={(event) => setReminders({ ...reminders, morningTime: event.target.value })} /><button type="button" role="switch" aria-checked={reminders.morning} className={`switch-control${reminders.morning ? " enabled" : ""}`} onClick={() => setReminders({ ...reminders, morning: !reminders.morning })}><span /></button></div></div><div className="setting-row"><div><strong>晚间复盘</strong><span>每日首次达到设定时间后提醒一次</span></div><div className="setting-inline-controls"><input type="time" value={reminders.eveningTime} disabled={!reminders.evening} onChange={(event) => setReminders({ ...reminders, eveningTime: event.target.value })} /><button type="button" role="switch" aria-checked={reminders.evening} className={`switch-control${reminders.evening ? " enabled" : ""}`} onClick={() => setReminders({ ...reminders, evening: !reminders.evening })}><span /></button></div></div><label className="setting-buffer">任务块开始前提醒<span><input type="number" min={0} max={60} step={5} value={reminders.taskLead} onChange={(event) => setReminders({ ...reminders, taskLead: Number(event.target.value) })} />分钟</span></label></section>
+      <section id="appearance"><header><div><h2>外观</h2><p>主题会即时预览，保存后随应用启动恢复。</p></div><span className="setting-state connected">可配置</span></header><div className="theme-options">{[["default", "默认"], ["github", "GitHub"], ["codex", "Codex"]].map(([value, label]) => <button key={value} type="button" aria-pressed={appearance.theme === value} onClick={() => previewAppearance({ ...appearance, theme: value })}><span className={`theme-swatch ${value}`} />{label}</button>)}</div><div className="setting-row"><div><strong>明暗模式</strong><span>暗色模式保持低饱和、账本式层级</span></div><select value={appearance.mode} onChange={(event) => previewAppearance({ ...appearance, mode: event.target.value })}><option value="light">浅色</option><option value="dark">深色</option></select></div><label className="setting-buffer">界面字号<span><input type="range" min={13} max={18} value={appearance.fontSize} onChange={(event) => previewAppearance({ ...appearance, fontSize: Number(event.target.value) })} />{appearance.fontSize}</span></label></section>
       <section id="desktop"><header><div><h2>Windows 集成</h2><p>快捷唤起、开机启动和关闭到托盘。</p></div><span className="setting-state connected">已接入</span></header><div className="setting-row"><div><strong>开机启动</strong><span>登录 Windows 后自动启动今序</span></div><button type="button" role="switch" aria-checked={desktop.autostart} className={`switch-control${desktop.autostart ? " enabled" : ""}`} onClick={() => setDesktop({ ...desktop, autostart: !desktop.autostart })}><span /></button></div><div className="setting-row"><div><strong>关闭到托盘</strong><span>窗口关闭后仍在后台提供提醒</span></div><button type="button" role="switch" aria-checked={desktop.closeToTray} className={`switch-control${desktop.closeToTray ? " enabled" : ""}`} onClick={() => setDesktop({ ...desktop, closeToTray: !desktop.closeToTray })}><span /></button></div><label className="setting-buffer">全局快捷键<span><input value={desktop.shortcut} maxLength={80} onChange={(event) => setDesktop({ ...desktop, shortcut: event.target.value })} /></span><small>例如 Ctrl+Alt+Space；若已被其他应用占用，保存时会提示。</small></label></section>
-      <section id="privacy"><header><div><h2>数据与隐私</h2><p>任务、草稿、计划和历史均保存在本机。</p></div><span className="setting-state connected">SQLite</span></header><div className="setting-row"><div><strong>本地数据库</strong><span>由 Rust 统一访问；当前版本不加密</span></div></div><div className="setting-row"><div><strong>回收站</strong><span>软删除的普通任务与重复事项默认保留 30 天，启动时自动清理过期项</span></div></div></section>
+      <section id="privacy"><header><div><h2>数据与隐私</h2><p>任务、草稿、计划和历史都保存在这台电脑上。</p></div><span className="setting-state connected">仅存本机</span></header><div className="setting-row"><div><strong>本地数据</strong><span>由今序保存在这台电脑上；当前版本未加密</span></div></div><div className="setting-row"><div><strong>回收站</strong><span>普通任务和重复事项移入回收站后默认保留 30 天，过期内容会在启动时清理</span></div></div></section>
       <footer className="settings-preference-footer"><span role="status">{preferenceMessage || (preferencesDirty ? "提醒、外观或 Windows 集成有未保存的更改。" : "提醒、外观和 Windows 集成已与本机设置一致。")}</span><button type="button" disabled={preferenceBusy || !preferencesDirty} onClick={() => void savePreferences()}>{preferenceBusy ? "保存中…" : "保存提醒与外观"}</button></footer>
     </div></div>
     {pendingCategory && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) resolveCategoryNavigation(false); }}><section className="unsaved-dialog leave-dialog" role="alertdialog" aria-modal="true" aria-labelledby="settings-category-dialog-title" aria-describedby="settings-category-dialog-description" onKeyDown={(event) => { if (event.key === "Escape") resolveCategoryNavigation(false); }}><header><h2 id="settings-category-dialog-title">放弃未保存修改？</h2><button type="button" aria-label="继续编辑" onClick={() => resolveCategoryNavigation(false)}><Icon name="close" size={16} /></button></header><p id="settings-category-dialog-description">设置中还有未保存内容。放弃后，日计划、提醒、外观和 Windows 偏好会恢复为本机当前值。</p><div className="dialog-actions"><button type="button" autoFocus onClick={() => resolveCategoryNavigation(false)}>继续编辑</button><button type="button" className="dialog-discard" onClick={() => resolveCategoryNavigation(true)}>放弃修改</button></div></section></div>}
@@ -3688,7 +4622,7 @@ function FloatingAssistant({ open, onToggle, onNavigate, onDataChanged }: { open
         setMessages(nextMessages);
         setProposals(nextProposals);
       })
-      .catch((reason) => { if (active) setNotice(String(reason)); })
+      .catch((reason) => { if (active) setNotice(uiErrorMessage(reason)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [open]);
@@ -3696,7 +4630,7 @@ function FloatingAssistant({ open, onToggle, onNavigate, onDataChanged }: { open
   useEffect(() => {
     if (!open || !selectorOpen) return;
     const timer = window.setTimeout(() => {
-      void refreshConversations(conversationId, showArchived, search).catch((reason) => setNotice(String(reason)));
+      void refreshConversations(conversationId, showArchived, search).catch((reason) => setNotice(uiErrorMessage(reason)));
     }, 180);
     return () => window.clearTimeout(timer);
   }, [search, showArchived]);
@@ -3718,7 +4652,7 @@ function FloatingAssistant({ open, onToggle, onNavigate, onDataChanged }: { open
       setShowArchived(false);
       await refreshConversations(created.id, false, "");
       await selectConversation(created.id);
-    } catch (reason) { setNotice(String(reason)); }
+    } catch (reason) { setNotice(uiErrorMessage(reason)); }
   }
 
   async function renameCurrent() {
@@ -3727,7 +4661,7 @@ function FloatingAssistant({ open, onToggle, onNavigate, onDataChanged }: { open
       await renameAiConversation(currentConversation.id, renameValue);
       setRenameValue(null);
       await refreshConversations(currentConversation.id);
-    } catch (reason) { setNotice(String(reason)); }
+    } catch (reason) { setNotice(uiErrorMessage(reason)); }
   }
 
   async function toggleCurrentArchive() {
@@ -3737,7 +4671,7 @@ function FloatingAssistant({ open, onToggle, onNavigate, onDataChanged }: { open
       await setAiConversationArchived(currentConversation.id, archived);
       setNotice(archived ? "对话已归档；关联草稿仍然保留。" : "对话已恢复。 ");
       await refreshConversations(null);
-    } catch (reason) { setNotice(String(reason)); }
+    } catch (reason) { setNotice(uiErrorMessage(reason)); }
   }
 
   async function deleteCurrentConversation() {
@@ -3747,7 +4681,7 @@ function FloatingAssistant({ open, onToggle, onNavigate, onDataChanged }: { open
       setPendingConversationDelete(false);
       setNotice("对话已永久删除。");
       await refreshConversations(null);
-    } catch (reason) { setNotice(String(reason)); }
+    } catch (reason) { setNotice(uiErrorMessage(reason)); }
   }
 
   async function submitMessage(event: FormEvent) {
@@ -3772,12 +4706,12 @@ function FloatingAssistant({ open, onToggle, onNavigate, onDataChanged }: { open
         setMessages(await listAiMessages(activeId));
         setProposals(await listAiConversationProposals(activeId));
         await refreshConversations(activeId);
-        setNotice(result.drafts.length ? `已生成 ${result.drafts.length} 条待确认草稿；确认前不会成为正式任务。` : result.proposal ? "已生成一项待确认操作；确认前不会修改本机事实。" : "这次回复没有生成草稿，你可以继续补充信息。");
+        setNotice(result.drafts.length ? `已生成 ${result.drafts.length} 条待确认草稿；确认前不会成为正式任务。` : result.proposal ? "已准备一项待确认操作；确认前不会改变任务或日计划。" : "这次回复没有生成草稿，你可以继续补充信息。");
       } catch (reason) {
         setMessages(await listAiMessages(activeId));
-        setNotice(String(reason));
+        setNotice(uiErrorMessage(reason));
       } finally { setRunId(null); }
-    } catch (reason) { setRunId(null); setNotice(String(reason)); }
+    } catch (reason) { setRunId(null); setNotice(uiErrorMessage(reason)); }
   }
 
   async function stopAnalysis() {
@@ -3786,8 +4720,8 @@ function FloatingAssistant({ open, onToggle, onNavigate, onDataChanged }: { open
     setRunId(null);
     try {
       await stopAiRun(stoppingId);
-      setNotice("分析已停止；迟到结果不会生成或覆盖草稿。");
-    } catch (reason) { setNotice(String(reason)); }
+      setNotice("分析已停止；本次未完成的结果不会保留。");
+    } catch (reason) { setNotice(uiErrorMessage(reason)); }
   }
 
   function proposalLabel(preview: ProposalPreview) {
@@ -3809,8 +4743,8 @@ function FloatingAssistant({ open, onToggle, onNavigate, onDataChanged }: { open
       setPendingDestructiveProposal(null);
       if (conversationId) setProposals(await listAiConversationProposals(conversationId));
       await onDataChanged();
-      setNotice(preview.proposal.operation.type === "proposed_plan" ? "日计划已确认写入 SQLite。" : preview.proposal.operation.type === "proposed_task_soft_delete" ? "所选任务已移入回收站。" : "任务已确认完成。");
-    } catch (reason) { setNotice(`操作未写入：${String(reason)}`); }
+      setNotice(preview.proposal.operation.type === "proposed_plan" ? "日计划已确认并保存。" : preview.proposal.operation.type === "proposed_task_soft_delete" ? "所选任务已移入回收站。" : "任务已确认完成。");
+    } catch (reason) { setNotice(`操作没有完成：${uiErrorMessage(reason)}`); }
   }
 
   const visibleConversations = conversations;
@@ -3823,14 +4757,14 @@ function FloatingAssistant({ open, onToggle, onNavigate, onDataChanged }: { open
   }, []);
   return <div className={`floating-assistant${open ? " open" : ""}`}>
     {open && <section className="assistant-popover" aria-label="今序 AI 助手">
-      <header><div><span className="assistant-avatar"><Icon name="sparkle" size={18} /></span><div className="assistant-title-control"><button type="button" className="assistant-title-button" aria-expanded={selectorOpen} onClick={() => setSelectorOpen((value) => !value)}><strong>{currentConversation?.title || "新对话"}</strong><span>{runId ? "正在分析" : "应用内助手 · 本地留存"}</span></button></div></div><button type="button" aria-label="收起 AI 助手" onClick={onToggle}><Icon name="close" size={17} /></button></header>
+      <header><div><span className="assistant-avatar"><Icon name="sparkle" size={18} /></span><div className="assistant-title-control"><button type="button" className="assistant-title-button" aria-expanded={selectorOpen} onClick={() => setSelectorOpen((value) => !value)}><strong>{currentConversation?.title || "新对话"}</strong><span>{runId ? "正在分析" : "今序助手 · 对话仅存本机"}</span></button></div></div><button type="button" aria-label="收起 AI 助手" onClick={onToggle}><Icon name="close" size={17} /></button></header>
       {selectorOpen && <div className="assistant-conversation-picker"><div className="assistant-picker-search"><Icon name="search" size={14} /><input autoFocus value={search} placeholder="搜索本地对话" onChange={(event) => setSearch(event.target.value)} /></div><div className="assistant-picker-toolbar"><button type="button" onClick={() => void newConversation()}><Icon name="plus" size={13} />新建</button><button type="button" aria-pressed={showArchived} onClick={() => setShowArchived((value) => !value)}>{showArchived ? "隐藏归档" : "查看归档"}</button></div><div className="assistant-picker-list">{conversationGroups.length ? conversationGroups.map((group) => <section className="assistant-conversation-group" key={group.label} aria-label={group.label}><strong>{group.label}</strong>{group.items.map((conversation) => <div key={conversation.id} className={conversation.id === conversationId ? "active" : ""}><button type="button" onClick={() => void selectConversation(conversation.id)}><span>{conversation.title}</span><small>{conversation.status === "archived" ? "已归档" : `${conversation.message_count} 条消息`}{conversation.draft_count ? ` · ${conversation.draft_count} 条草稿` : ""}</small></button>{conversation.id === conversationId && <Icon name="check" size={14} />}</div>)}</section>) : <p>没有匹配的本地对话。</p>}</div></div>}
       {currentConversation && <div className="assistant-conversation-actions">{renameValue === null ? <><button type="button" onClick={() => setRenameValue(currentConversation.title)}>重命名</button><button type="button" disabled={Boolean(runId)} onClick={() => void toggleCurrentArchive()}>{currentConversation.status === "archived" ? "恢复" : "归档"}</button>{currentConversation.status === "archived" && <button type="button" className="assistant-delete-conversation" disabled={Boolean(runId)} onClick={() => setPendingConversationDelete(true)}>永久删除</button>}{currentConversation.draft_count > 0 && <button type="button" className="assistant-view-drafts" onClick={() => onNavigate("草稿")}>查看草稿 · {currentConversation.draft_count}</button>}</> : <><input value={renameValue} maxLength={80} aria-label="新对话名称" onChange={(event) => setRenameValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void renameCurrent(); if (event.key === "Escape") setRenameValue(null); }} /><button type="button" onClick={() => void renameCurrent()}>保存名称</button><button type="button" onClick={() => setRenameValue(null)}>取消</button></>}</div>}
-      <div className="assistant-conversation" aria-live="polite">{loading ? <div className="assistant-processing"><span className="processing-dot" />正在读取本地对话…</div> : messages.length ? <div className="assistant-message-list">{messages.map((message) => <article key={message.id} className={`assistant-message ${message.role}`}><span>{message.role === "user" ? "你" : "今序"}</span><p>{message.content}</p></article>)}{proposals.map((proposal) => <article className="assistant-proposal" key={proposal.ai_run_id}><span>待确认操作</span><strong>{proposalLabel(proposal)}</strong><small>确认前不会修改 SQLite；提交时会重新校验当前状态。</small><button type="button" disabled={Boolean(runId)} onClick={() => void confirmProposal(proposal)}>确认操作</button></article>)}{runId && <div className="assistant-processing"><span className="processing-dot" />正在整理结构化草稿…</div>}</div> : <div className="assistant-welcome"><strong>想从哪里开始？</strong><p>我会通过当前对话整理草稿。所有关键改动仍要由你逐条确认。</p><div className="assistant-shortcuts"><button type="button" onClick={() => setInput("帮我整理一项新任务：")}><Icon name="plus" size={15} />创建任务</button><button type="button" onClick={() => setInput("帮我梳理接下来要调整的任务：")}><Icon name="tasks" size={15} />调整任务</button><button type="button" onClick={() => setInput("请为今天安排日计划：")}><Icon name="calendar" size={15} />安排计划</button></div></div>}{notice && <p className="assistant-notice" role="status">{notice}{!configured && <button type="button" onClick={() => onNavigate("设置")}>前往设置</button>}</p>}</div>
-      <form onSubmit={(event) => void submitMessage(event)}><textarea value={input} maxLength={8000} disabled={Boolean(runId) || currentConversation?.status === "archived"} onChange={(event) => setInput(event.target.value)} placeholder={currentConversation?.status === "archived" ? "恢复对话后才能继续" : "说说你想完成什么…"} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /><div><span>{runId ? "停止后迟到结果会作废" : "确认前不会成为正式任务"}</span>{runId ? <button type="button" className="assistant-stop" aria-label="停止分析" title="停止分析" onClick={() => void stopAnalysis()}><Icon name="close" size={15} /></button> : <button type="submit" aria-label="发送消息" disabled={!input.trim() || currentConversation?.status === "archived"}><Icon name="send" size={16} /></button>}</div></form>
+      <div className="assistant-conversation" aria-live="polite">{loading ? <div className="assistant-processing"><span className="processing-dot" />正在载入对话…</div> : messages.length ? <div className="assistant-message-list">{messages.map((message) => <article key={message.id} className={`assistant-message ${message.role}`}><span>{message.role === "user" ? "你" : "今序"}</span><p>{message.content}</p></article>)}{proposals.map((proposal) => <article className="assistant-proposal" key={proposal.ai_run_id}><span>待确认操作</span><strong>{proposalLabel(proposal)}</strong><small>确认后才会更改任务或日计划；如果内容已经变化，今序会请你重新确认。</small><button type="button" disabled={Boolean(runId)} onClick={() => void confirmProposal(proposal)}>确认操作</button></article>)}{runId && <div className="assistant-processing"><span className="processing-dot" />正在整理草稿…</div>}</div> : <div className="assistant-welcome"><strong>想从哪里开始？</strong><p>我会通过当前对话整理草稿。所有关键改动仍要由你逐条确认。</p><div className="assistant-shortcuts"><button type="button" onClick={() => setInput("帮我整理一项新任务：")}><Icon name="plus" size={15} />创建任务</button><button type="button" onClick={() => setInput("帮我梳理接下来要调整的任务：")}><Icon name="tasks" size={15} />调整任务</button><button type="button" onClick={() => setInput("请为今天安排日计划：")}><Icon name="calendar" size={15} />安排计划</button></div></div>}{notice && <p className="assistant-notice" role="status">{notice}{!configured && <button type="button" onClick={() => onNavigate("设置")}>前往设置</button>}</p>}</div>
+      <form onSubmit={(event) => void submitMessage(event)}><textarea value={input} maxLength={8000} disabled={Boolean(runId) || currentConversation?.status === "archived"} onChange={(event) => setInput(event.target.value)} placeholder={currentConversation?.status === "archived" ? "恢复对话后才能继续" : "说说你想完成什么…"} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /><div><span>{runId ? "停止后，本次未完成的结果不会保留" : "确认前不会成为正式任务"}</span>{runId ? <button type="button" className="assistant-stop" aria-label="停止分析" title="停止分析" onClick={() => void stopAnalysis()}><Icon name="close" size={15} /></button> : <button type="submit" aria-label="发送消息" disabled={!input.trim() || currentConversation?.status === "archived"}><Icon name="send" size={16} /></button>}</div></form>
     </section>}
     {open && pendingConversationDelete && currentConversation && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPendingConversationDelete(false); }}><section className="unsaved-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-conversation-title"><h2 id="delete-conversation-title">永久删除对话？</h2><p>“{currentConversation.title}”的本地消息历史将无法恢复；有关联草稿时系统会拒绝删除。</p><div className="dialog-actions"><button type="button" autoFocus onClick={() => setPendingConversationDelete(false)}>取消</button><button type="button" className="dialog-discard" onClick={() => void deleteCurrentConversation()}>永久删除</button></div></section></div>}
-    {open && pendingDestructiveProposal && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPendingDestructiveProposal(null); }}><section className="unsaved-dialog task-trash-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ai-delete-title"><div className="dialog-icon trash"><Icon name="trash" size={19} /></div><h2 id="ai-delete-title">确认移入回收站？</h2><p>AI 提议删除 {pendingDestructiveProposal.proposal.operation.type === "proposed_task_soft_delete" && "task_ids" in pendingDestructiveProposal.proposal.operation ? pendingDestructiveProposal.proposal.operation.task_ids.length : 0} 项任务。任务会停止后续安排，但仍可从回收站恢复。</p><div className="dialog-actions"><button type="button" autoFocus onClick={() => setPendingDestructiveProposal(null)}>取消</button><button type="button" className="dialog-discard" onClick={() => void confirmProposal(pendingDestructiveProposal, true)}>确认移入回收站</button></div></section></div>}
+    {open && pendingDestructiveProposal && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPendingDestructiveProposal(null); }}><section className="unsaved-dialog task-trash-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ai-delete-title"><div className="dialog-icon trash"><Icon name="trash" size={19} /></div><h2 id="ai-delete-title">确认移入回收站？</h2><p>今序建议将 {pendingDestructiveProposal.proposal.operation.type === "proposed_task_soft_delete" && "task_ids" in pendingDestructiveProposal.proposal.operation ? pendingDestructiveProposal.proposal.operation.task_ids.length : 0} 项任务移入回收站。它们不会再被安排，但仍可恢复。</p><div className="dialog-actions"><button type="button" autoFocus onClick={() => setPendingDestructiveProposal(null)}>取消</button><button type="button" className="dialog-discard" onClick={() => void confirmProposal(pendingDestructiveProposal, true)}>确认移入回收站</button></div></section></div>}
     <button type="button" className="assistant-orb" aria-expanded={open} aria-label={open ? "收起今序 AI 助手" : "打开今序 AI 助手"} title={open ? "收起今序 AI" : "打开今序 AI"} onClick={onToggle}><span aria-hidden="true">今</span></button>
   </div>;
 }
@@ -3861,6 +4795,7 @@ export default function App() {
   const [availability, setAvailability] = useState<AvailabilitySettings | null>(null);
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
   const [requestedTaskView, setRequestedTaskView] = useState<TaskViewRequest | null>(null);
+  const [timelineReturnContext, setTimelineReturnContext] = useState<TimelineReturnContext | null>(null);
   const shellRef = useRef<HTMLElement>(null);
   const shellResizeSession = useRef<ShellResizeSession | null>(null);
   const shellResizeFrame = useRef<number | null>(null);
@@ -3870,7 +4805,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarAnimating, setSidebarAnimating] = useState(false);
   const [resizingShell, setResizingShell] = useState(false);
-  const activeTasks = tasks.filter((task) => ["inbox", "open", "scheduled"].includes(task.status));
+  const activeTasks = tasks.filter((task) => ["open", "scheduled"].includes(task.status));
   const plannedTaskCount = daySchedule?.task_blocks.length ?? 0;
   const completedPlannedTaskCount = daySchedule?.task_blocks.filter((block) => block.execution_status === "completed").length ?? 0;
   const plannedMinutes = daySchedule?.task_blocks.reduce((total, block) => total + Math.round((new Date(block.ends_at).getTime() - new Date(block.starts_at).getTime()) / 60000), 0) ?? 0;
@@ -3884,7 +4819,7 @@ export default function App() {
       setTasks(nextTasks);
       setRecurringItems(nextRecurringItems);
     }
-    catch (reason) { setTasksError(String(reason)); }
+    catch (reason) { setTasksError(uiErrorMessage(reason)); }
     finally { if (showLoading) setTasksLoading(false); }
   }
 
@@ -3899,7 +4834,7 @@ export default function App() {
       setPlanPreview(draft);
       setRecurringOccurrences(occurrences);
     }
-    catch (reason) { setDaySchedule(null); setRecurringOccurrences([]); setScheduleError(String(reason)); }
+    catch (reason) { setDaySchedule(null); setRecurringOccurrences([]); setScheduleError(uiErrorMessage(reason)); }
     finally { if (showLoading) setScheduleLoading(false); }
   }
 
@@ -3910,7 +4845,7 @@ export default function App() {
       setAvailabilityError(null);
     } catch (reason) {
       setAvailability(null);
-      setAvailabilityError(String(reason));
+      setAvailabilityError(uiErrorMessage(reason));
     }
   }
 
@@ -3933,7 +4868,7 @@ export default function App() {
     setPlanRegenerationOpen(false);
     setPlanToast(null);
     setMessage("");
-    void refreshSchedule(selectedDate);
+    void Promise.all([refreshTasks(false), refreshSchedule(selectedDate)]);
   }, [selectedDate]);
 
   useEffect(() => {
@@ -3998,12 +4933,8 @@ export default function App() {
       setMessage("历史日期不能生成新的计划草案，只能查看已有计划和执行记录。");
       return;
     }
-    const regeneratingAdjustment = Boolean(daySchedule?.plan_id && planPreview?.base_plan_id);
-    if (daySchedule?.plan_id && !regeneratingAdjustment) {
-      setMessage("这一天已有确认计划，不能重复生成计划草案。");
-      return;
-    }
-    if (planPreview && !replaceCurrent) {
+    const regeneratingConfirmedPlan = Boolean(daySchedule?.plan_id);
+    if ((planPreview || regeneratingConfirmedPlan) && !replaceCurrent) {
       setPlanRegenerationOpen(true);
       return;
     }
@@ -4011,19 +4942,21 @@ export default function App() {
     setPlanBusy(true);
     setPlanToast(null);
     try {
-      const preview = regeneratingAdjustment
+      const preview = regeneratingConfirmedPlan
         ? await regenerateConfirmedPlanAdjustment(selectedDate)
         : await previewRuleBasedPlan(selectedDate);
       if (preview.blocks.length === 0 && preview.unscheduled.length === 0) {
         await discardRulePlanDraft(preview.preview_id, preview.version);
         setPlanPreview(null);
+        if (regeneratingConfirmedPlan) await refreshTasks(false);
         setMessage("");
-        setPlanToast({ id: Date.now(), label: "未生成计划", message: "暂无待安排任务", icon: "calendar" });
+        setPlanToast({ id: Date.now(), label: regeneratingConfirmedPlan ? "没有需要重新安排的任务" : "未生成计划", message: "暂无待安排任务", icon: "calendar" });
         return;
       }
       setPlanPreview(preview);
+      if (regeneratingConfirmedPlan) await refreshTasks(false);
       setMessage(preview.blocks.length ? "" : "没有生成可保存时间块，请检查未排入原因、任务截止时间和可用时间。");
-    } catch (reason) { setMessage(`计划草案未生成：${String(reason)}`); }
+    } catch (reason) { setMessage(`计划草案未生成：${uiErrorMessage(reason)}`); }
     finally { setPlanBusy(false); }
   }
 
@@ -4034,6 +4967,7 @@ export default function App() {
     try {
       const saved = await updateRulePlanDraft(nextPreview);
       setPlanPreview(saved);
+      await refreshTasks(false);
       setMessage("");
       return saved;
     } catch (reason) {
@@ -4057,7 +4991,7 @@ export default function App() {
       setPlanToast({
         id: Date.now(),
         label: "暂时不能调整计划",
-        message: String(reason),
+        message: uiErrorMessage(reason),
         icon: "review"
       });
       return null;
@@ -4071,18 +5005,25 @@ export default function App() {
     const wasAdjustment = Boolean(planPreview.base_plan_id);
     setPlanBusy(true);
     try {
-      await discardRulePlanDraft(planPreview.preview_id, planPreview.version);
+      const result = await discardRulePlanDraft(planPreview.preview_id, planPreview.version);
       setPlanPreview(null);
       setMessage("");
+      await refreshTasks(false);
+      const restoredMessage = result.restored_task_count > 0
+        ? `，草案调整的 ${result.restored_task_count} 项任务时间已恢复`
+        : "";
+      const conflictMessage = result.conflicted_task_titles.length > 0
+        ? `；${result.conflicted_task_titles.map((title) => `“${title}”`).join("、")}后来单独修改过，已保留当前时间`
+        : "";
       setPlanToast({
         id: Date.now(),
         label: wasAdjustment ? "调整草案已放弃" : "计划草案已放弃",
-        message: wasAdjustment ? "已确认计划保持不变" : "正式日历没有发生变化",
-        icon: "check"
+        message: `${wasAdjustment ? "已确认计划保持不变" : "正式日历没有发生变化"}${restoredMessage}${conflictMessage}`,
+        icon: result.conflicted_task_titles.length > 0 ? "review" : "check"
       });
       return true;
     } catch (reason) {
-      setMessage(`草案未能放弃：${String(reason)}`);
+      setMessage(`草案未能放弃：${uiErrorMessage(reason)}`);
       return false;
     } finally {
       setPlanBusy(false);
@@ -4093,7 +5034,7 @@ export default function App() {
     if (!planPreview || planBusy) return;
     if (planPreview.plan_date < today) {
       setPlanPreview(null);
-      setMessage("该计划草案对应的日期已经过去，未写入 SQLite。");
+      setMessage("这份计划草案对应的日期已经过去，无法再保存。");
       return;
     }
     const wasAdjustment = Boolean(planPreview.base_plan_id);
@@ -4107,11 +5048,11 @@ export default function App() {
       setPlanToast({
         id: Date.now(),
         label: wasAdjustment ? "计划调整已确认" : "日计划已确认",
-        message: "已写入 SQLite；10 秒内可安全撤销",
+        message: "已保存，10 秒内可以撤销",
         icon: "check",
         undoId: undo?.target_type === "daily_plan" ? undo.id : undefined
       });
-    } catch (reason) { setMessage(`计划未写入：${String(reason)}`); }
+    } catch (reason) { setMessage(`计划没有保存：${uiErrorMessage(reason)}`); }
     finally { setPlanBusy(false); }
   }
 
@@ -4122,10 +5063,16 @@ export default function App() {
       await applyUndo(undoId);
       setPlanToast(null);
       await Promise.all([refreshTasks(false), refreshSchedule(selectedDate, false)]);
-      setMessage("已通过新的 SQLite 事务撤销计划确认。");
+      setMessage("");
+      setPlanToast({
+        id: Date.now(),
+        label: "已撤销这次确认",
+        message: "任务和时间安排已恢复到确认前",
+        icon: "check"
+      });
     } catch (reason) {
       setPlanToast(null);
-      setMessage(`无法撤销计划：${String(reason)}`);
+      setMessage(`无法撤销计划：${uiErrorMessage(reason)}`);
     } finally { setPlanBusy(false); }
   }
 
@@ -4133,6 +5080,7 @@ export default function App() {
     setRequestedTaskView(intent.taskView || intent.createTask || intent.taskId
       ? { view: intent.taskView, createTask: intent.createTask, taskId: intent.taskId }
       : null);
+    setTimelineReturnContext(intent.timelineReturnContext ?? null);
     setActive(intent.active);
     if (intent.createTask) setAssistantOpen(false);
     setMobileNavOpen(false);
@@ -4160,6 +5108,7 @@ export default function App() {
       setPendingPlanLeave({ kind: "date", date });
       return false;
     }
+    setScheduleLoading(true);
     setSelectedDate(date);
     return true;
   }
@@ -4200,7 +5149,7 @@ export default function App() {
 
   function persistSidebarWidth(width: number) {
     void setUiSetting(SHELL_SIDEBAR_WIDTH_SETTING, String(width))
-      .catch((reason) => setMessage(`导航宽度未保存：${String(reason)}`));
+      .catch((reason) => setMessage(`导航宽度未保存：${uiErrorMessage(reason)}`));
   }
 
   function startShellResize(event: ReactPointerEvent<HTMLDivElement>) {
@@ -4264,7 +5213,7 @@ export default function App() {
       setSidebarAnimating(false);
     }, 220);
     void setUiSetting(SHELL_SIDEBAR_COLLAPSED_SETTING, String(nextCollapsed))
-      .catch((reason) => setMessage(`侧边栏状态未保存：${String(reason)}`));
+      .catch((reason) => setMessage(`侧边栏状态未保存：${uiErrorMessage(reason)}`));
   }
 
   const renderedSidebarWidth = sidebarCollapsed ? SHELL_SIDEBAR_COLLAPSED_WIDTH : sidebarWidth;
@@ -4273,22 +5222,22 @@ export default function App() {
     <div className="toast-viewport" aria-live="polite" aria-atomic="true">
       {planToast && <div key={planToast.id} className={`plan-toast${planToast.icon === "check" ? " success" : planToast.icon === "review" ? " error" : ""}`} role={planToast.icon === "review" ? "alert" : "status"}><span className="plan-toast-icon"><Icon name={planToast.icon ?? "calendar"} size={15} /></span><span><strong>{planToast.label}</strong><small>{planToast.message}</small></span>{planToast.undoId && <button type="button" onClick={() => void undoConfirmedPlan(planToast.undoId!)}>撤销</button>}</div>}
     </div>
-    {pendingPlanLeave && planPreview && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !planBusy) void resolvePendingPlanLeave(false); }}><section className="unsaved-dialog leave-dialog" role="alertdialog" aria-modal="true" aria-labelledby="plan-leave-dialog-title" aria-describedby="plan-leave-dialog-description" onKeyDown={(event) => { if (event.key === "Escape" && !planBusy) void resolvePendingPlanLeave(false); }}><header><h2 id="plan-leave-dialog-title">日计划草案尚未确认</h2><button type="button" aria-label="继续编辑" disabled={planBusy} onClick={() => void resolvePendingPlanLeave(false)}><Icon name="close" size={16} /></button></header><p id="plan-leave-dialog-description">{planPreview.plan_date} 的草案只保存在本机，尚未写入正式日历。{pendingPlanLeave.kind === "date" ? "切换日期" : "离开今日页"}前需要先丢弃草案，或留在这里继续编辑并确认。</p><div className="dialog-actions"><button type="button" autoFocus disabled={planBusy} onClick={() => void resolvePendingPlanLeave(false)}>继续编辑</button><button type="button" className="dialog-discard" disabled={planBusy} onClick={() => void resolvePendingPlanLeave(true)}>{planBusy ? "正在丢弃…" : pendingPlanLeave.kind === "date" ? "丢弃并切换日期" : "丢弃并离开"}</button></div></section></div>}
-    {active === "设置" && settingsEditorDirty && pendingNavigation && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) resolvePendingNavigation(false); }}><section className="unsaved-dialog leave-dialog" role="alertdialog" aria-modal="true" aria-labelledby="settings-leave-dialog-title" aria-describedby="settings-leave-dialog-description" onKeyDown={(event) => { if (event.key === "Escape") resolvePendingNavigation(false); }}><header><h2 id="settings-leave-dialog-title">放弃未保存修改？</h2><button type="button" aria-label="继续编辑" onClick={() => resolvePendingNavigation(false)}><Icon name="close" size={16} /></button></header><p id="settings-leave-dialog-description">设置中还有未保存内容。离开后会恢复为 SQLite 中当前保存的日计划、提醒、外观与 Windows 偏好。</p><div className="dialog-actions"><button type="button" autoFocus onClick={() => resolvePendingNavigation(false)}>继续编辑</button><button type="button" className="dialog-discard" onClick={() => resolvePendingNavigation(true)}>放弃修改</button></div></section></div>}
-    {planRegenerationOpen && <div className="dialog-backdrop plan-regeneration-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !planBusy) setPlanRegenerationOpen(false); }}><section className="unsaved-dialog plan-regeneration-dialog" role="alertdialog" aria-modal="true" aria-labelledby="plan-regeneration-title" aria-describedby="plan-regeneration-description" onKeyDown={(event) => { if (event.key === "Escape" && !planBusy) setPlanRegenerationOpen(false); }}><div className="dialog-icon"><Icon name="restore" size={19} /></div><h2 id="plan-regeneration-title">重新生成这份草案？</h2><p id="plan-regeneration-description">{planPreview?.base_plan_id ? "将保留已有执行与复盘记录，按当前任务边界重新安排其余时间块；保存前正式计划不会变化。" : "重新生成会替换你对当前草案时间块的手动调整；正式日历不会发生变化。"}</p><div className="dialog-actions"><button type="button" autoFocus disabled={planBusy} onClick={() => setPlanRegenerationOpen(false)}>保留当前草案</button><button type="button" className="dialog-save" disabled={planBusy} onClick={() => void generateRulePlan(true)}>{planBusy ? "正在生成…" : "替换并重新生成"}</button></div></section></div>}
+    {pendingPlanLeave && planPreview && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !planBusy) void resolvePendingPlanLeave(false); }}><section className="unsaved-dialog leave-dialog" role="alertdialog" aria-modal="true" aria-labelledby="plan-leave-dialog-title" aria-describedby="plan-leave-dialog-description" onKeyDown={(event) => { if (event.key === "Escape" && !planBusy) void resolvePendingPlanLeave(false); }}><header><h2 id="plan-leave-dialog-title">日计划草案尚未确认</h2><button type="button" aria-label="继续编辑" disabled={planBusy} onClick={() => void resolvePendingPlanLeave(false)}><Icon name="close" size={16} /></button></header><p id="plan-leave-dialog-description">{planPreview.plan_date} 的草案还没有加入正式日历。丢弃草案时，由这份草案调整的任务时间也会恢复。{pendingPlanLeave.kind === "date" ? "切换日期" : "离开今日页"}前需要先丢弃草案，或留在这里继续编辑并确认。</p><div className="dialog-actions"><button type="button" autoFocus disabled={planBusy} onClick={() => void resolvePendingPlanLeave(false)}>继续编辑</button><button type="button" className="dialog-discard" disabled={planBusy} onClick={() => void resolvePendingPlanLeave(true)}>{planBusy ? "正在丢弃…" : pendingPlanLeave.kind === "date" ? "丢弃并切换日期" : "丢弃并离开"}</button></div></section></div>}
+    {active === "设置" && settingsEditorDirty && pendingNavigation && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) resolvePendingNavigation(false); }}><section className="unsaved-dialog leave-dialog" role="alertdialog" aria-modal="true" aria-labelledby="settings-leave-dialog-title" aria-describedby="settings-leave-dialog-description" onKeyDown={(event) => { if (event.key === "Escape") resolvePendingNavigation(false); }}><header><h2 id="settings-leave-dialog-title">放弃未保存修改？</h2><button type="button" aria-label="继续编辑" onClick={() => resolvePendingNavigation(false)}><Icon name="close" size={16} /></button></header><p id="settings-leave-dialog-description">设置中还有未保存内容。离开后会恢复为上次保存的日计划、提醒、外观和 Windows 偏好。</p><div className="dialog-actions"><button type="button" autoFocus onClick={() => resolvePendingNavigation(false)}>继续编辑</button><button type="button" className="dialog-discard" onClick={() => resolvePendingNavigation(true)}>放弃修改</button></div></section></div>}
+    {planRegenerationOpen && <div className="dialog-backdrop plan-regeneration-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !planBusy) setPlanRegenerationOpen(false); }}><section className="unsaved-dialog plan-regeneration-dialog" role="alertdialog" aria-modal="true" aria-labelledby="plan-regeneration-title" aria-describedby="plan-regeneration-description" onKeyDown={(event) => { if (event.key === "Escape" && !planBusy) setPlanRegenerationOpen(false); }}><div className="dialog-icon"><Icon name="restore" size={19} /></div><h2 id="plan-regeneration-title">{daySchedule?.plan_id ? "重新安排未执行任务？" : "重新生成计划草案？"}</h2><p id="plan-regeneration-description">{daySchedule?.plan_id ? "今序会保留执行和复盘记录，重新安排尚未执行的任务，并替换本轮未保存的时间修改和新加入任务；结果仍需保存调整。" : "重新生成会替换当前草案中的手动调整；正式日历不会变化。"}</p><div className="dialog-actions"><button type="button" autoFocus disabled={planBusy} onClick={() => setPlanRegenerationOpen(false)}>{daySchedule?.plan_id ? "保留当前修改" : "保留当前草案"}</button><button type="button" className="dialog-save" disabled={planBusy} onClick={() => void generateRulePlan(true)}>{planBusy ? "正在生成…" : daySchedule?.plan_id ? "重新安排" : "重新生成"}</button></div></section></div>}
     <aside id="main-sidebar" className={`next-sidebar${mobileNavOpen ? " mobile-open" : ""}`} aria-label="主导航">
       <div className="next-brand"><div className="brand-mark"><span>今</span></div><div><strong>今序</strong><span>JinXu · 本地优先</span></div></div>
       <button className="next-create" type="button" aria-label={sidebarCollapsed ? "记一件事" : undefined} aria-describedby={sidebarCollapsed ? "sidebar-tip-create" : undefined} onClick={() => requestNavigation({ active: "任务", createTask: true })}><Icon name="plus" size={16} /><span className="next-create-label">记一件事</span><span className="sidebar-tooltip" id="sidebar-tip-create" role="tooltip" aria-hidden="true"><strong>记一件事</strong><small>创建普通任务或重复事项</small></span></button>
       <nav>{navigation.map((item) => <button key={item.label} type="button" className={active === item.label ? "active" : ""} aria-current={active === item.label ? "page" : undefined} aria-label={sidebarCollapsed ? item.label : undefined} aria-describedby={sidebarCollapsed ? `sidebar-tip-${item.icon}` : undefined} onClick={() => requestNavigation({ active: item.label })}><span className="nav-asset-icon" style={{ "--nav-icon": `url("${item.asset}")` } as CSSProperties} aria-hidden="true" /><span className="nav-copy"><strong>{item.label}</strong><small>{item.description}</small></span>{item.label === "任务" && activeTasks.length > 0 && <em>{activeTasks.length}</em>}<span className="sidebar-tooltip" id={`sidebar-tip-${item.icon}`} role="tooltip" aria-hidden="true"><strong>{item.label}</strong><small>{item.description}</small></span></button>)}</nav>
-      <footer><div><span>今日计划</span><strong>{plannedTaskCount ? `${completedPlannedTaskCount}/${plannedTaskCount}` : "未生成"}</strong></div><div className="progress-track"><span style={{ width: `${planProgress}%` }} /></div>{plannedTaskCount > 0 && <p>{plannedMinutes} 分钟已安排，完成 {planProgress}%</p>}<span className={`database-state${tasksError ? " unavailable" : ""}`}><i />{tasksLoading ? "SQLite 连接中" : tasksError ? "SQLite 未连接" : "SQLite 已连接"}</span></footer>
+      <footer><div><span>今日计划</span><strong>{plannedTaskCount ? `${completedPlannedTaskCount}/${plannedTaskCount}` : "未生成"}</strong></div><div className="progress-track"><span style={{ width: `${planProgress}%` }} /></div>{plannedTaskCount > 0 && <p>{plannedMinutes} 分钟已安排，完成 {planProgress}%</p>}<span className={`database-state${tasksError ? " unavailable" : ""}`}><i />{tasksLoading ? "正在载入本地数据" : tasksError ? "本地数据暂时不可用" : "本地数据可用"}</span></footer>
     </aside>
     <div className="shell-resize-handle" role="separator" aria-label="调整导航与主功能区宽度；双击恢复默认宽度" aria-orientation="vertical" aria-valuemin={SHELL_SIDEBAR_MIN_WIDTH} aria-valuemax={SHELL_SIDEBAR_MAX_WIDTH} aria-valuenow={sidebarWidth} aria-disabled={sidebarCollapsed || undefined} tabIndex={sidebarCollapsed ? -1 : 0} onDoubleClick={resetSidebarWidth} onPointerDown={startShellResize} onPointerMove={moveShellResize} onPointerUp={endShellResize} onPointerCancel={endShellResize} onKeyDown={resizeShellWithKeyboard} />
     <button className="shell-collapse-button" type="button" aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"} title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"} aria-controls="main-sidebar" aria-expanded={!sidebarCollapsed} onClick={toggleSidebarCollapsed}><Icon name={sidebarCollapsed ? "chevron-right" : "chevron-left"} size={16} /></button>
     {mobileNavOpen && <button type="button" className="nav-backdrop" aria-label="关闭导航" onClick={() => setMobileNavOpen(false)} />}
     <section className="next-workspace">
       <button type="button" className="mobile-nav-button" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen((value) => !value)}><Icon name="more" size={18} />菜单</button>
-      {active === "今日" && <TodayPage today={today} selectedDate={selectedDate} onSelectDate={requestDateSelection} tasks={tasks} recurringItems={recurringItems} recurringOccurrences={recurringOccurrences} schedule={daySchedule} availability={availability} loading={scheduleLoading} error={scheduleError} preview={planPreview} busy={planBusy} onGeneratePlan={() => void generateRulePlan()} onAdjustPlan={startPlanAdjustment} onUpdatePlan={updatePlanDraft} onConfirmPlan={() => void confirmRulePlan()} onCancelPlan={discardPlanDraft} onOpenTasks={(taskId) => requestNavigation({ active: "任务", taskId })} onFactsChanged={async (date = selectedDate) => { await Promise.all([refreshTasks(false), refreshSchedule(date, false)]); }} onNotify={(label, toastMessage, icon) => setPlanToast({ id: Date.now(), label, message: toastMessage, icon })} message={message} />}
-      {active === "任务" && <TaskWorkspace tasks={tasks} recurringItems={recurringItems} loading={tasksLoading} error={tasksError} onReload={refreshTasks} onTaskCommitted={taskCommitted} onRecurringChanged={async () => { await Promise.all([refreshTasks(false), refreshSchedule(selectedDate, false)]); }} today={today} onDirtyChange={setTaskEditorDirty} externalNavigationRequest={pendingNavigation} onExternalNavigationResolved={resolvePendingNavigation} requestedView={requestedTaskView} />}
+      {active === "今日" && <TodayPage today={today} selectedDate={selectedDate} onSelectDate={requestDateSelection} tasks={tasks} recurringItems={recurringItems} recurringOccurrences={recurringOccurrences} schedule={daySchedule} availability={availability} loading={scheduleLoading} error={scheduleError} preview={planPreview} busy={planBusy} onGeneratePlan={() => void generateRulePlan()} onAdjustPlan={startPlanAdjustment} onUpdatePlan={updatePlanDraft} onConfirmPlan={() => void confirmRulePlan()} onCancelPlan={discardPlanDraft} onOpenTasks={(taskId, returnContext) => requestNavigation({ active: "任务", taskId, timelineReturnContext: returnContext })} onFactsChanged={async (date = selectedDate) => { await Promise.all([refreshTasks(false), refreshSchedule(date, false)]); }} onNotify={(label, toastMessage, icon) => setPlanToast({ id: Date.now(), label, message: toastMessage, icon })} message={message} timelineReturnContext={timelineReturnContext} onTimelineReturnHandled={() => setTimelineReturnContext(null)} />}
+      {active === "任务" && <TaskWorkspace tasks={tasks} recurringItems={recurringItems} loading={tasksLoading} error={tasksError} onReload={refreshTasks} onTaskCommitted={taskCommitted} onRecurringChanged={async () => { await Promise.all([refreshTasks(false), refreshSchedule(selectedDate, false)]); }} today={today} onDirtyChange={setTaskEditorDirty} externalNavigationRequest={pendingNavigation} onExternalNavigationResolved={resolvePendingNavigation} requestedView={requestedTaskView} timelineReturnContext={timelineReturnContext} onReturnToTimeline={(returnContext) => requestNavigation({ active: "今日", timelineReturnContext: returnContext })} />}
       {active === "复盘" && <ReviewPage today={today} onFactsChanged={(date) => {
         void refreshTasks(false);
         if (selectedDate === date) void refreshSchedule(date, false);

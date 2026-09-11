@@ -43,28 +43,6 @@ fn with_database<T>(state: &State<'_, AppState>, operation: impl FnOnce(&mut Dat
 }
 
 #[tauri::command]
-fn create_manual_task(state: State<'_, AppState>, title: String) -> Result<String, String> {
-    with_database(&state, |database| database.create_manual_task(title))
-}
-
-#[tauri::command]
-fn debug_timeline_fixtures_available() -> bool {
-    cfg!(debug_assertions)
-}
-
-#[tauri::command]
-fn seed_debug_timeline_layout_fixtures(state: State<'_, AppState>) -> Result<String, String> {
-    if !cfg!(debug_assertions) { return Err("布局样例仅在 debug 包中可用".into()); }
-    with_database(&state, |database| database.seed_debug_timeline_layout_fixtures())
-}
-
-#[tauri::command]
-fn clear_debug_timeline_layout_fixtures(state: State<'_, AppState>) -> Result<(), String> {
-    if !cfg!(debug_assertions) { return Err("布局样例仅在 debug 包中可用".into()); }
-    with_database(&state, |database| database.clear_debug_timeline_layout_fixtures())
-}
-
-#[tauri::command]
 fn create_manual_task_draft(
     state: State<'_, AppState>,
     input: TaskDraftInput,
@@ -677,7 +655,7 @@ fn discard_rule_plan_draft(
     state: State<'_, AppState>,
     preview_id: String,
     expected_version: i64,
-) -> Result<(), String> {
+) -> Result<database::RulePlanDraftDiscardResult, String> {
     with_database(&state, |database| database.discard_rule_plan_draft(&preview_id, expected_version))
 }
 
@@ -791,10 +769,6 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            create_manual_task,
-            debug_timeline_fixtures_available,
-            seed_debug_timeline_layout_fixtures,
-            clear_debug_timeline_layout_fixtures,
             create_manual_task_draft,
             save_task_draft,
             list_task_drafts,

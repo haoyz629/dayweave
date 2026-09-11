@@ -31,12 +31,12 @@ web
 ## Capabilities and Constraints
 
 - 技术栈：Tauri v2、React、TypeScript、Rust、SQLite。
-- 首发主导航为今日、任务、复盘、设置；Inbox 是任务页筛选，固定日程由今日页日期详情维护，工作时间偏好位于设置。
+- 首发主导航为今日、任务、复盘、设置；任务页只区分草案、待处理、已安排、完成和回收站，固定日程由今日页日期详情维护，工作时间偏好位于设置。
 - 首发包含持久化手动/AI 任务草案、多对话、月历与本地节假日信息、固定日程、工作时间偏好、计划草案与确认、固定表单复盘、长期任务工作量、独立重复事项与发生记录、回收站、本地 AI 审计和设置。
 - AI 支持用户配置的 Chat Completions 兼容与 Responses API 兼容连接，不预置服务商或模型。
 - AI 快捷操作首版只包含创建任务、调整任务和安排计划；文本可流式显示，但结构化结果必须完整校验后一次进入草案。
 - AI 只能输出受本地 typed schema 约束的拟议操作；创建、修改、安排、延期和估时变更须经过逐条确认与事务，不提供“全部创建”。
-- 日期可以独立于具体时刻存在；任务日期不等于已经安排，执行块完成不等于长期任务完成。
+- 正式任务必须具备完整的开始与结束日期时间；信息不完整时只能保存为草案。任务时间边界不等于已经安排，执行块完成不等于长期任务完成。
 - 日计划时间线允许任务、固定日程和重复事项重叠；工作日与工作时间只作为安排偏好和视觉参照，不构成硬限制。
 - 手动能力必须在网络、模型或配置失败时完整可用。
 - 首发不做账号、同步、外部日历、网页搜索、附件、语音文件、本地模型、数据库加密、遥测或自动更新。
@@ -53,7 +53,7 @@ web
 
 - 已确认实施规格：`ai-todolist-implementation-spec.md`。
 - 冻结方案与后续实施顺序：`docs/product-decision-baseline-2026-08-21.md`。
-- 统一领域语言：`CONTEXT.md`；关键边界：`docs/adr/0001-persist-drafts-before-confirmed-writes.md`、`docs/adr/0002-separate-tasks-from-daily-execution.md` 与 `docs/adr/0003-adopt-non-exclusive-daily-timeline.md`。
+- 统一领域语言：`CONTEXT.md`；关键边界：`docs/adr/0004-require-complete-task-time-and-remove-inbox.md`、`docs/adr/0002-separate-tasks-from-daily-execution.md` 与 `docs/adr/0003-adopt-non-exclusive-daily-timeline.md`。
 - 产品定位与用户场景：`jinxu-product-overview.md`。
 - 当前可运行的桌面骨架、SQLite 迁移、任务状态机与离线确定性测试。
 - 没有用户评价、商业数据、公开发布证明或外部集成能力；后续界面不得虚构这些证据。

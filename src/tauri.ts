@@ -1,13 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 
-const desktopRuntimeMessage = "请在今序桌面应用中打开；浏览器预览不能访问本地数据库。";
+const desktopRuntimeMessage = "请在今序桌面应用中打开；网页预览无法使用保存在这台电脑上的数据。";
 
 function invokeDesktop<T>(command: string, args?: Record<string, unknown>) {
   if (!("__TAURI_INTERNALS__" in window)) return Promise.reject(desktopRuntimeMessage);
   return invoke<T>(command, args);
 }
 
-export type TaskStatus = "inbox" | "open" | "scheduled" | "done" | "cancelled" | "deleted";
+export type TaskStatus = "open" | "scheduled" | "done" | "deleted";
 export type Priority = "low" | "medium" | "high";
 export type ReviewOutcome = "completed" | "partial" | "not_started" | "cancelled" | "blocked";
 export type RecurrenceFrequency = "daily" | "weekdays" | "weekly" | "monthly";
@@ -192,6 +192,11 @@ export type RulePlanPreview = {
   confirmation_token: string;
 };
 
+export type RulePlanDraftDiscardResult = {
+  restored_task_count: number;
+  conflicted_task_titles: string[];
+};
+
 export type PlanBlock = {
   id: string;
   daily_plan_id: string;
@@ -297,22 +302,6 @@ export type AiRun = {
   stopped_at: string | null;
 };
 export type AiAssistantResult = { run: AiRun; drafts: TaskDraft[]; proposal: ProposalPreview | null };
-
-export function createManualTask(title: string) {
-  return invokeDesktop<string>("create_manual_task", { title });
-}
-
-export function debugTimelineFixturesAvailable() {
-  return invokeDesktop<boolean>("debug_timeline_fixtures_available");
-}
-
-export function seedDebugTimelineLayoutFixtures() {
-  return invokeDesktop<string>("seed_debug_timeline_layout_fixtures");
-}
-
-export function clearDebugTimelineLayoutFixtures() {
-  return invokeDesktop<void>("clear_debug_timeline_layout_fixtures");
-}
 
 export function createManualTaskDraft(input: TaskDraftInput) {
   return invokeDesktop<TaskDraft>("create_manual_task_draft", { input });
@@ -568,7 +557,7 @@ export function updateRulePlanDraft(preview: RulePlanPreview) {
 }
 
 export function discardRulePlanDraft(previewId: string, expectedVersion: number) {
-  return invokeDesktop<void>("discard_rule_plan_draft", { previewId, expectedVersion });
+  return invokeDesktop<RulePlanDraftDiscardResult>("discard_rule_plan_draft", { previewId, expectedVersion });
 }
 
 export function confirmRuleBasedPlan(preview: RulePlanPreview) {

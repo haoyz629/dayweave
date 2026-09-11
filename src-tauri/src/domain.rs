@@ -4,49 +4,50 @@ use serde::{Deserialize, Serialize};
 use crate::error::{AppError, AppResult};
 
 pub const SHANGHAI_OFFSET_SECONDS: i32 = 8 * 60 * 60;
+pub const MIN_TASK_BLOCK_MINUTES: i64 = 15;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
-    Inbox,
     Open,
     Scheduled,
     Done,
-    Cancelled,
     Deleted,
 }
 
 impl TaskStatus {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Inbox => "inbox",
             Self::Open => "open",
             Self::Scheduled => "scheduled",
             Self::Done => "done",
-            Self::Cancelled => "cancelled",
             Self::Deleted => "deleted",
         }
     }
 
     pub fn parse(value: &str) -> AppResult<Self> {
         match value {
-            "inbox" => Ok(Self::Inbox),
             "open" => Ok(Self::Open),
             "scheduled" => Ok(Self::Scheduled),
             "done" => Ok(Self::Done),
-            "cancelled" => Ok(Self::Cancelled),
             "deleted" => Ok(Self::Deleted),
             _ => Err(AppError::Domain(format!("未知任务状态：{value}"))),
+        }
+    }
+
+    pub fn ensure_editable(self) -> AppResult<()> {
+        match self {
+            Self::Open | Self::Scheduled => Ok(()),
+            Self::Done => Err(AppError::Domain("任务已完成，请先取消完成再修改".into())),
+            Self::Deleted => Err(AppError::Domain("回收站任务必须先恢复才能编辑".into())),
         }
     }
 
     pub fn can_transition_to(self, target: Self) -> bool {
         matches!(
             (self, target),
-            (Self::Inbox, Self::Open | Self::Deleted)
-                | (Self::Open, Self::Scheduled | Self::Done | Self::Cancelled | Self::Deleted)
-                | (Self::Scheduled, Self::Open | Self::Done | Self::Cancelled | Self::Deleted)
-                | (Self::Cancelled, Self::Open | Self::Deleted)
+            (Self::Open, Self::Scheduled | Self::Done | Self::Deleted)
+                | (Self::Scheduled, Self::Open | Self::Done | Self::Deleted)
                 | (Self::Done, Self::Open | Self::Scheduled | Self::Deleted)
         )
     }
@@ -231,6 +232,11 @@ impl AiProposal {
                     if ends_at <= starts_at {
                         return Err(AppError::Schema("时间块结束时间必须晚于开始时间".into()));
                     }
+                    if (ends_at - starts_at).num_minutes() < MIN_TASK_BLOCK_MINUTES {
+                        return Err(AppError::Schema(format!(
+                            "普通任务块至少需要 {MIN_TASK_BLOCK_MINUTES} 分钟"
+                        )));
+                    }
                 }
             }
         }
@@ -315,11 +321,43 @@ pub fn validate_date_constraints(
             if let (Some(earliest_time), Some(due_time)) = (earliest_time, due_time) {
                 let earliest = NaiveTime::parse_from_str(earliest_time, "%H:%M").expect("validated time");
                 let due = NaiveTime::parse_from_str(due_time, "%H:%M").expect("validated time");
-                if earliest > due {
-                    return Err(AppError::Domain("同一天的最早开始时刻不能晚于截止时刻".into()));
+                if (due - earliest).num_minutes() < MIN_TASK_BLOCK_MINUTES {
+                    return Err(AppError::Domain(format!("同日任务至少需要 {MIN_TASK_BLOCK_MINUTES} 分钟")));
                 }
             }
         }
+    }
+    Ok(())
+}
+
+pub fn validate_complete_task_schedule(
+    earliest_date: &Option<String>,
+    earliest_time: &Option<String>,
+    due_date: &Option<String>,
+    due_time: &Option<String>,
+) -> AppResult<()> {
+    validate_date_constraints(earliest_date, earliest_time, due_date, due_time)?;
+    if earliest_date.is_none() || earliest_time.is_none() || due_date.is_none() || due_time.is_none() {
+        return Err(AppError::Domain("任务开始和结束时间都必须填写；信息不完整时只能保存为草稿".into()));
+    }
+    Ok(())
+}
+
+pub fn validate_complete_task_timestamps(
+    earliest_start_at: &Option<String>,
+    due_at: &Option<String>,
+) -> AppResult<()> {
+    let earliest = earliest_start_at.as_deref()
+        .ok_or_else(|| AppError::Domain("任务开始和结束时间都必须填写".into()))?;
+    let due = due_at.as_deref()
+        .ok_or_else(|| AppError::Domain("任务开始和结束时间都必须填写".into()))?;
+    let earliest = parse_shanghai_timestamp(earliest)?;
+    let due = parse_shanghai_timestamp(due)?;
+    if due <= earliest {
+        return Err(AppError::Domain("任务结束时间必须晚于开始时间".into()));
+    }
+    if earliest.date_naive() == due.date_naive() && (due - earliest).num_minutes() < MIN_TASK_BLOCK_MINUTES {
+        return Err(AppError::Domain(format!("同日任务至少需要 {MIN_TASK_BLOCK_MINUTES} 分钟")));
     }
     Ok(())
 }
@@ -336,4 +374,35 @@ pub fn parse_shanghai_timestamp(value: &str) -> AppResult<DateTime<FixedOffset>>
         return Err(AppError::Schema("v1 仅接受 Asia/Shanghai（+08:00）时间".into()));
     }
     Ok(timestamp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AiProposal;
+    use serde_json::json;
+
+    fn proposed_plan(ends_at: &str) -> String {
+        json!({
+            "proposal_id": "minimum-task-block",
+            "operation": {
+                "type": "proposed_plan",
+                "plan_date": "2026-09-08",
+                "blocks": [{
+                    "task_id": "task-1",
+                    "starts_at": "2026-09-08T09:00:00+08:00",
+                    "ends_at": ends_at,
+                    "source": "ai"
+                }]
+            }
+        }).to_string()
+    }
+
+    #[test]
+    fn proposed_plan_enforces_fifteen_minute_task_block_minimum() {
+        let too_short = AiProposal::parse_and_validate(&proposed_plan("2026-09-08T09:10:00+08:00"));
+        assert!(too_short.unwrap_err().to_string().contains("至少需要 15 分钟"));
+
+        AiProposal::parse_and_validate(&proposed_plan("2026-09-08T09:15:00+08:00"))
+            .expect("15 分钟普通任务块应通过结构校验");
+    }
 }

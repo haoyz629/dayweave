@@ -5,7 +5,7 @@ Windows 本地优先的任务、日计划与复盘应用。技术栈为 Tauri v2
 ## 当前能力
 
 - 今日：月历与完整 24 小时时间线、可重叠的固定日程/任务块/重复事项、工作时间偏好、规则式日计划草案、确认与调整、执行记录和 10 秒计划撤销。
-- 任务：持久化手动/AI 草案、Inbox 与状态队列、全文及标签搜索、正式任务标签、长期工作量、回收站、10 秒创建/修改撤销。
+- 任务：持久化手动/AI 草案与状态队列；正式任务必须填写完整开始和结束时间，信息不完整时只保存为草稿；支持全文搜索、长期工作量、回收站和 10 秒创建/修改撤销。
 - 重复：每天、工作日、每周和每月的独立规则与按日发生记录；不生成普通任务批次，规则修改不会覆盖历史复盘事实。
 - 复盘：本次结果、实际耗时、延期原因、备注与剩余工作量持久化；完成执行块不会自动完成整个任务。
 - AI：用户自备 Chat Completions 或 Responses 兼容连接；多对话、搜索、重命名、归档、恢复、停止分析；创建/修改任务只生成草案，安排/完成/软删除只生成待确认提议。
@@ -48,6 +48,7 @@ Rust 测试以临时 SQLite 的最终状态断言业务结果，不以 Toast、R
 - [前端需求与验收](docs/frontend-requirements.md)
 - [设计规范](DESIGN.md)
 - [草案确认 ADR](docs/adr/0001-persist-drafts-before-confirmed-writes.md)
+- [完整任务时间与移除 Inbox ADR](docs/adr/0004-require-complete-task-time-and-remove-inbox.md)
 - [任务与每日执行 ADR](docs/adr/0002-separate-tasks-from-daily-execution.md)
 - [非独占日程时间线 ADR](docs/adr/0003-adopt-non-exclusive-daily-timeline.md)
 - [非独占时间线验收基线](docs/acceptance-non-exclusive-daily-timeline-2026-09-03.md)

@@ -37,6 +37,7 @@ export type RecurringItemInput = {
 
 export type RecurringItem = RecurringItemInput & {
   id: string;
+  source_type: "manual" | "ai_assistant";
   status: RecurringItemStatus;
   created_at: string;
   updated_at: string;
@@ -88,6 +89,8 @@ export type Task = {
 };
 
 export type TaskDraftInput = {
+  item_type?: "task" | "recurring";
+  recurring_settings?: Omit<RecurringItemInput, "title" | "notes" | "tags"> | null;
   title: string;
   notes: string | null;
   priority: Priority | null;
@@ -305,6 +308,16 @@ export type AiAssistantResult = { run: AiRun; drafts: TaskDraft[]; proposal: Pro
 
 export function createManualTaskDraft(input: TaskDraftInput) {
   return invokeDesktop<TaskDraft>("create_manual_task_draft", { input });
+}
+
+export function importLegacyRecurringDraft(input: TaskDraftInput) {
+  return invokeDesktop<TaskDraft>("import_legacy_recurring_draft", { input });
+}
+
+export function confirmCreationDraft(draft: TaskDraft) {
+  return invokeDesktop<{ item_type: "task"; item: Task } | { item_type: "recurring"; item: RecurringItem }>("confirm_creation_draft", {
+    draftId: draft.id, confirmationToken: draft.confirmation_token
+  });
 }
 
 export function saveTaskDraft(draftId: string, expectedVersion: number, input: TaskDraftInput) {

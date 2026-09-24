@@ -9,8 +9,123 @@ export type FocusedTimeRangePresentation =
   | { kind: "continuous"; window: MinuteRange }
   | { kind: "collapsed"; startWindow: MinuteRange; endWindow: MinuteRange; omittedMinutes: number };
 
+export type ContinuousTimeScaleMark = {
+  key: string;
+  minute: number;
+  tone: "boundary" | "context" | "range" | "range-start" | "range-end";
+};
+
+export type ContinuousTimeRangeGeometry = {
+  startPosition: number;
+  endPosition: number;
+  midpointPosition: number;
+};
+
+export function timeRangePresentationContains(
+  presentation: FocusedTimeRangePresentation,
+  range: MinuteRange
+) {
+  return presentation.kind === "continuous"
+    ? range.start >= presentation.window.start && range.end <= presentation.window.end
+    : range.start >= presentation.startWindow.start
+      && range.start <= presentation.startWindow.end
+      && range.end >= presentation.endWindow.start
+      && range.end <= presentation.endWindow.end;
+}
+
+export function timeRangePresentationCanReuse(
+  presentation: FocusedTimeRangePresentation,
+  range: MinuteRange,
+  collapseThreshold = 4 * 60
+) {
+  const shouldCollapse = range.end - range.start > collapseThreshold;
+  const presentationKindMatches = shouldCollapse
+    ? presentation.kind === "collapsed"
+    : presentation.kind === "continuous";
+  return presentationKindMatches && timeRangePresentationContains(presentation, range);
+}
+
+export function continuousTimeRangeGeometry(
+  presentation: FocusedTimeRangePresentation,
+  range: MinuteRange
+): ContinuousTimeRangeGeometry | null {
+  if (presentation.kind !== "continuous") return null;
+  const span = Math.max(1, presentation.window.end - presentation.window.start);
+  const position = (minute: number) => clamp((minute - presentation.window.start) / span * 100, 0, 100);
+  const startPosition = position(range.start);
+  const endPosition = position(range.end);
+  return {
+    startPosition,
+    endPosition,
+    midpointPosition: (startPosition + endPosition) / 2
+  };
+}
+
+export function continuousTimeScaleMarks(window: MinuteRange, range: MinuteRange): ContinuousTimeScaleMark[] {
+  const span = Math.max(1, window.end - window.start);
+  const duration = Math.max(0, range.end - range.start);
+  const position = (minute: number) => (minute - window.start) / span * 100;
+  const primary = duration <= 30
+    ? [{ key: "range", minute: Math.round((range.start + range.end) / 2), tone: "range" as const, clearance: 18 }]
+    : [
+      { key: "range-start", minute: range.start, tone: "range-start" as const, clearance: 9 },
+      { key: "range-end", minute: range.end, tone: "range-end" as const, clearance: 9 }
+    ];
+  const collides = (minute: number, marks: Array<{ minute: number; clearance: number }>, ownClearance = 9) => marks.some((mark) => (
+    Math.abs(position(minute) - position(mark.minute)) < Math.max(ownClearance, mark.clearance)
+  ));
+  const reserved: Array<ContinuousTimeScaleMark & { clearance: number }> = [...primary];
+  const boundaryCandidates = [
+    { key: "window-start", minute: window.start, tone: "boundary" as const, clearance: 9 },
+    { key: "window-end", minute: window.end, tone: "boundary" as const, clearance: 9 }
+  ];
+  const boundaries = boundaryCandidates.filter((mark) => !collides(mark.minute, primary, mark.clearance));
+  reserved.push(...boundaries);
+
+  const hourly: Array<ContinuousTimeScaleMark & { clearance: number }> = [];
+  for (let minute = Math.ceil(window.start / 60) * 60; minute <= window.end; minute += 60) {
+    if (reserved.some((mark) => mark.minute === minute) || collides(minute, reserved)) continue;
+    hourly.push({ key: `hour-${minute}`, minute, tone: "context", clearance: 9 });
+  }
+
+  return [...boundaries, ...hourly, ...primary]
+    .sort((first, second) => first.minute - second.minute)
+    .map(({ key, minute, tone }) => ({ key, minute, tone }));
+}
+
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
+}
+
+export function sanitizeTimeInput(raw: string): string {
+  const normalized = raw.replace(/[：.。]/g, ":");
+  let result = "";
+  let hasColon = false;
+  let digitsBeforeColon = 0;
+  let digitsAfterColon = 0;
+
+  for (const ch of normalized) {
+    if (ch === ":") {
+      if (!hasColon && digitsBeforeColon > 0 && digitsBeforeColon <= 2) {
+        hasColon = true;
+        result += ":";
+      }
+    } else if (/\d/.test(ch)) {
+      if (!hasColon) {
+        if (digitsBeforeColon < 4) {
+          digitsBeforeColon++;
+          result += ch;
+        }
+      } else {
+        if (digitsAfterColon < 2 && digitsBeforeColon + digitsAfterColon < 4) {
+          digitsAfterColon++;
+          result += ch;
+        }
+      }
+    }
+  }
+
+  return result;
 }
 
 export function normalizeClockInput(value: string) {
@@ -42,13 +157,13 @@ export function constrainTimeRange(
   const snapped = Math.round(requestedMinute / safeStep) * safeStep;
   if (edge === "start") {
     return {
-      start: clamp(snapped, minimumMinute, current.end - safeDuration),
+      start: clamp(snapped, minimumMinute, Math.min(maximumMinute, current.end - safeDuration)),
       end: current.end
     };
   }
   return {
     start: current.start,
-    end: clamp(snapped, current.start + safeDuration, maximumMinute)
+    end: clamp(snapped, Math.max(minimumMinute, current.start + safeDuration), maximumMinute)
   };
 }
 
@@ -128,7 +243,7 @@ export function focusedTimeRangePresentation(
   current: MinuteRange,
   minimumMinute = 0,
   maximumMinute = 23 * 60 + 45,
-  collapseThreshold = 6 * 60,
+  collapseThreshold = 4 * 60,
   step = 5
 ): FocusedTimeRangePresentation {
   const safeStep = Math.max(1, step);

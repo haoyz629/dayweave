@@ -131,9 +131,10 @@ export function preferredDailyAllocationMinutes(task: StoredTaskWorkload | undef
 }
 
 export function formatWorkloadMinutes(minutes: number) {
+  if (minutes <= 0) return "0 m";
   const hours = Math.floor(minutes / 60);
   const remainder = minutes % 60;
-  if (!hours) return `${minutes} 分钟`;
-  if (!remainder) return `${hours} 小时`;
-  return `${hours} 小时 ${remainder} 分钟`;
+  if (!hours) return `${minutes} m`;
+  if (!remainder) return `${hours} h`;
+  return `${hours} h ${remainder} m`;
 }

@@ -59,6 +59,10 @@ pub struct TaskDto {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskDraftInput {
+    #[serde(default = "default_draft_item_type")]
+    pub item_type: String,
+    #[serde(default)]
+    pub recurring_settings: Option<RecurringDraftSettings>,
     pub title: String,
     pub notes: Option<String>,
     pub priority: Option<Priority>,
@@ -73,6 +77,30 @@ pub struct TaskDraftInput {
     pub tags: Vec<String>,
     #[serde(default)]
     pub recurrence: Option<RecurrenceInput>,
+}
+
+fn default_draft_item_type() -> String { "task".into() }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecurringDraftSettings {
+    pub frequency: String,
+    pub interval_value: i64,
+    pub weekdays: Vec<u32>,
+    pub month_day: Option<u32>,
+    pub starts_on: String,
+    pub ends_on: Option<String>,
+    pub display_time: Option<String>,
+    pub display_duration_minutes: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "item_type", content = "item")]
+pub enum ConfirmedCreation {
+    #[serde(rename = "task")]
+    Task(TaskDto),
+    #[serde(rename = "recurring")]
+    Recurring(RecurringItemDto),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -108,6 +136,7 @@ pub struct RecurringItemInput {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RecurringItemDto {
     pub id: String,
+    pub source_type: String,
     pub title: String,
     pub notes: Option<String>,
     pub frequency: String,
@@ -292,6 +321,9 @@ pub struct AiDraftCreationInput {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TaskDraftDto {
+    pub item_type: String,
+    pub recurring_settings: Option<RecurringDraftSettings>,
+    pub confirmed_recurring_item_id: Option<String>,
     pub id: String,
     pub draft_kind: String,
     pub target_task_id: Option<String>,
@@ -672,24 +704,36 @@ impl Database {
     }
 
     pub fn create_manual_task_draft(&mut self, input: TaskDraftInput) -> AppResult<TaskDraftDto> {
+        self.create_task_draft_with_id(input, Uuid::new_v4().to_string())
+    }
+
+    pub fn import_legacy_recurring_draft(&mut self, input: TaskDraftInput) -> AppResult<TaskDraftDto> {
+        if input.item_type != "recurring" { return Err(AppError::Schema("旧草稿类型无效".into())); }
+        self.create_task_draft_with_id(input, "legacy-local-recurring-draft".into())
+    }
+
+    fn create_task_draft_with_id(&mut self, input: TaskDraftInput, id: String) -> AppResult<TaskDraftDto> {
         validate_task_draft_input(&input, false)?;
         let tags_json = serde_json::to_string(&normalize_tags(&input.tags)?)?;
         let recurrence_json = input.recurrence.as_ref().map(serde_json::to_string).transpose()?;
-        let id = Uuid::new_v4().to_string();
+        let recurring_settings_json = input.recurring_settings.as_ref().map(serde_json::to_string).transpose()?;
         let confirmation_token = Uuid::new_v4().to_string();
         let timestamp = now();
         let validation_status = draft_validation_status(&input);
         let transaction = self.connection.transaction()?;
+        if transaction.query_row("SELECT EXISTS(SELECT 1 FROM task_drafts WHERE id = ?1)", [&id], |row| row.get::<_, bool>(0))? {
+            return load_task_draft_in_transaction(&transaction, &id);
+        }
         transaction.execute(
             "INSERT INTO task_drafts (
                 id, draft_kind, source_type, title, notes, priority,
                 earliest_start_date, earliest_start_time, due_date, due_time,
                 total_workload_minutes, remaining_workload_minutes, splittable,
                 field_states_json, validation_status, version, confirmation_token,
-                status, created_at, updated_at, tags_json, recurrence_json
+                status, created_at, updated_at, tags_json, recurrence_json, item_type, recurring_settings_json
              ) VALUES (
                 ?1, 'create', 'manual', ?2, ?3, ?4, ?5, ?6, ?7, ?8,
-                ?9, ?10, ?11, ?12, ?13, 1, ?14, 'active', ?15, ?15, ?16, ?17
+                ?9, ?10, ?11, ?12, ?13, 1, ?14, 'active', ?15, ?15, ?16, ?17, ?18, ?19
              )",
             params![
                 id,
@@ -709,6 +753,8 @@ impl Database {
                 timestamp,
                 tags_json,
                 recurrence_json,
+                input.item_type,
+                recurring_settings_json,
             ],
         )?;
         let draft = load_task_draft_in_transaction(&transaction, &id)?;
@@ -728,9 +774,14 @@ impl Database {
         validate_task_draft_input(&input, false)?;
         let tags_json = serde_json::to_string(&normalize_tags(&input.tags)?)?;
         let recurrence_json = input.recurrence.as_ref().map(serde_json::to_string).transpose()?;
+        let recurring_settings_json = input.recurring_settings.as_ref().map(serde_json::to_string).transpose()?;
         let next_confirmation_token = Uuid::new_v4().to_string();
         let validation_status = draft_validation_status(&input);
         let transaction = self.connection.transaction()?;
+        let existing = load_task_draft_in_transaction(&transaction, draft_id)?;
+        if existing.draft_kind == "update" && input.item_type != "task" {
+            return Err(AppError::Domain("修改已有任务的草稿不能切换类型".into()));
+        }
         let changed = transaction.execute(
             "UPDATE task_drafts
              SET title = ?3, notes = ?4, priority = ?5,
@@ -740,7 +791,7 @@ impl Database {
                  splittable = ?12, field_states_json = ?13,
                  validation_status = ?14, version = version + 1,
                  confirmation_token = ?15, updated_at = ?16,
-                 tags_json = ?17, recurrence_json = ?18
+                 tags_json = ?17, recurrence_json = ?18, item_type = ?19, recurring_settings_json = ?20
              WHERE id = ?1 AND version = ?2 AND status = 'active'",
             params![
                 draft_id,
@@ -761,6 +812,8 @@ impl Database {
                 now(),
                 tags_json,
                 recurrence_json,
+                input.item_type,
+                recurring_settings_json,
             ],
         )?;
         if changed != 1 {
@@ -778,7 +831,7 @@ impl Database {
                     due_date, due_time, total_workload_minutes, remaining_workload_minutes,
                     splittable, field_states_json, validation_status, version,
                     confirmation_token, status, confirmed_task_id, created_at, updated_at, confirmed_at,
-                    tags_json, recurrence_json
+                    tags_json, recurrence_json, item_type, recurring_settings_json, confirmed_recurring_item_id
              FROM task_drafts
              WHERE status = 'active' OR (?1 = 1 AND status = 'discarded')
              ORDER BY updated_at DESC",
@@ -797,6 +850,7 @@ impl Database {
         if draft.confirmation_token != confirmation_token {
             return Err(AppError::InvalidConfirmation);
         }
+        if draft.item_type != "task" { return Err(AppError::Domain("请按草稿所选类型确认创建".into())); }
         if draft.status == "confirmed" {
             let task_id = draft.confirmed_task_id.ok_or(AppError::InvalidConfirmation)?;
             let task = load_task_dto_in_transaction(&transaction, &task_id)?;
@@ -807,6 +861,8 @@ impl Database {
             return Err(AppError::Domain("已放弃的草稿不能确认".into()));
         }
         let input = TaskDraftInput {
+            item_type: draft.item_type.clone(),
+            recurring_settings: draft.recurring_settings.clone(),
             title: draft.title.clone(),
             notes: draft.notes.clone(),
             priority: draft.priority.as_deref().map(parse_priority).transpose()?,
@@ -939,6 +995,32 @@ impl Database {
         Ok(task)
     }
 
+    pub fn confirm_creation_draft(&mut self, draft_id: &str, confirmation_token: &str) -> AppResult<ConfirmedCreation> {
+        let transaction = self.connection.transaction()?;
+        let draft = load_task_draft_in_transaction(&transaction, draft_id)?;
+        if draft.confirmation_token != confirmation_token { return Err(AppError::InvalidConfirmation); }
+        if draft.item_type == "task" {
+            transaction.commit()?;
+            return self.confirm_task_draft(draft_id, confirmation_token).map(ConfirmedCreation::Task);
+        }
+        if draft.draft_kind != "create" { return Err(AppError::Domain("修改已有任务的草稿不能创建重复事项".into())); }
+        if draft.status == "confirmed" {
+            let id = draft.confirmed_recurring_item_id.ok_or(AppError::InvalidConfirmation)?;
+            let item = load_recurring_item_in_transaction(&transaction, &id)?;
+            transaction.commit()?;
+            return Ok(ConfirmedCreation::Recurring(item));
+        }
+        if draft.status != "active" { return Err(AppError::Domain("已放弃的草稿不能确认".into())); }
+        let input = normalize_recurring_item_input(recurring_input_for_draft(&draft.title, &draft.notes, &draft.tags, draft.recurring_settings.as_ref())?)?;
+        let item = insert_recurring_item(&transaction, &input, &draft.source_type)?;
+        transaction.execute(
+            "UPDATE task_drafts SET status = 'confirmed', confirmed_recurring_item_id = ?2, confirmed_at = ?3, updated_at = ?3 WHERE id = ?1 AND status = 'active'",
+            params![draft_id, item.id, now()],
+        )?;
+        transaction.commit()?;
+        Ok(ConfirmedCreation::Recurring(item))
+    }
+
     pub fn discard_task_draft(&mut self, draft_id: &str, expected_version: i64) -> AppResult<()> {
         let transaction = self.connection.transaction()?;
         let changed = transaction.execute(
@@ -1006,20 +1088,7 @@ impl Database {
     pub fn create_recurring_item(&mut self, input: RecurringItemInput) -> AppResult<RecurringItemDto> {
         let input = normalize_recurring_item_input(input)?;
         let transaction = self.connection.transaction()?;
-        let id = Uuid::new_v4().to_string();
-        let timestamp = now();
-        transaction.execute(
-            "INSERT INTO recurring_items (
-                id, title, notes, frequency, interval_value, weekdays_json, month_day,
-                starts_on, ends_on, display_time, display_duration_minutes, tags_json, status, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'active', ?13, ?13)",
-            params![
-                id, input.title, input.notes, input.frequency, input.interval_value,
-                serde_json::to_string(&input.weekdays)?, input.month_day, input.starts_on,
-                input.ends_on, input.display_time, input.display_duration_minutes, serde_json::to_string(&input.tags)?, timestamp,
-            ],
-        )?;
-        let item = load_recurring_item_in_transaction(&transaction, &id)?;
+        let item = insert_recurring_item(&transaction, &input, TaskSource::Manual.as_str())?;
         transaction.commit()?;
         Ok(item)
     }
@@ -1031,7 +1100,7 @@ impl Database {
     ) -> AppResult<Vec<RecurringItemDto>> {
         let mut statement = self.connection.prepare(
             "SELECT id, title, notes, frequency, interval_value, weekdays_json, month_day,
-                    starts_on, ends_on, display_time, display_duration_minutes, tags_json, status, created_at, updated_at, deleted_at
+                    starts_on, ends_on, display_time, display_duration_minutes, tags_json, status, created_at, updated_at, deleted_at, source_type
              FROM recurring_items
              WHERE (?1 = 1 OR status <> 'ended')
                AND (?2 = 1 OR deleted_at IS NULL)
@@ -1159,7 +1228,7 @@ impl Database {
         let active_items = if occurrence_date == shanghai_today() {
             let mut statement = transaction.prepare(
                 "SELECT id, title, notes, frequency, interval_value, weekdays_json, month_day,
-                        starts_on, ends_on, display_time, display_duration_minutes, tags_json, status, created_at, updated_at, deleted_at
+                        starts_on, ends_on, display_time, display_duration_minutes, tags_json, status, created_at, updated_at, deleted_at, source_type
                  FROM recurring_items WHERE status = 'active' AND deleted_at IS NULL",
             )?;
             let rows = statement.query_map([], recurring_item_dto_from_row)?;
@@ -1868,6 +1937,9 @@ impl Database {
             if draft.draft_kind == "update" && draft.target_task_id.as_deref().is_none_or(str::is_empty) {
                 return Err(AppError::Schema("修改草稿必须绑定目标任务".into()));
             }
+            if draft.draft_kind == "update" && draft.input.item_type != "task" {
+                return Err(AppError::Domain("修改已有任务的草稿不能切换类型".into()));
+            }
             validate_task_draft_input(&draft.input, false)?;
         }
         let transaction = self.connection.transaction()?;
@@ -1882,6 +1954,7 @@ impl Database {
             let draft_id = Uuid::new_v4().to_string();
             let tags_json = serde_json::to_string(&normalize_tags(&input.tags)?)?;
             let recurrence_json = input.recurrence.as_ref().map(serde_json::to_string).transpose()?;
+            let recurring_settings_json = input.recurring_settings.as_ref().map(serde_json::to_string).transpose()?;
             let confirmation_token = Uuid::new_v4().to_string();
             transaction.execute(
                 "INSERT INTO task_drafts (
@@ -1889,10 +1962,10 @@ impl Database {
                     earliest_start_date, earliest_start_time, due_date, due_time,
                     total_workload_minutes, remaining_workload_minutes, splittable,
                     field_states_json, validation_status, version, confirmation_token,
-                    status, created_at, updated_at, tags_json, recurrence_json
+                    status, created_at, updated_at, tags_json, recurrence_json, item_type, recurring_settings_json
                  ) VALUES (
                     ?1, ?2, ?3, 'ai_assistant', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                    ?13, ?14, 1, ?15, ?16, 1, ?17, 'active', ?18, ?18, ?19, ?20
+                    ?13, ?14, 1, ?15, ?16, 1, ?17, 'active', ?18, ?18, ?19, ?20, ?21, ?22
                  )",
                 params![
                     draft_id, draft.draft_kind, draft.target_task_id, run.conversation_id, run_id, input.title, input.notes,
@@ -1900,7 +1973,7 @@ impl Database {
                     input.earliest_start_time, input.due_date, input.due_time,
                     input.total_workload_minutes, input.remaining_workload_minutes,
                     input.field_states_json, draft_validation_status(&input), confirmation_token,
-                    timestamp, tags_json, recurrence_json,
+                    timestamp, tags_json, recurrence_json, input.item_type, recurring_settings_json,
                 ],
             )?;
             created_drafts.push(load_task_draft_in_transaction(&transaction, &draft_id)?);
@@ -3688,6 +3761,12 @@ fn load_task_in_transaction(transaction: &Transaction<'_>, id: &str) -> AppResul
 }
 
 fn validate_task_draft_input(input: &TaskDraftInput, require_title: bool) -> AppResult<()> {
+    if !matches!(input.item_type.as_str(), "task" | "recurring") {
+        return Err(AppError::Schema("任务类型无效".into()));
+    }
+    if input.item_type == "recurring" && input.recurring_settings.is_none() {
+        return Err(AppError::Schema("重复事项草稿缺少重复设置".into()));
+    }
     if input.title.chars().count() > 300 {
         return Err(AppError::Schema("任务标题不能超过 300 个字符".into()));
     }
@@ -3775,6 +3854,35 @@ fn validate_recurrence(input: &RecurrenceInput) -> AppResult<()> {
     Ok(())
 }
 
+fn insert_recurring_item(transaction: &Transaction<'_>, input: &RecurringItemInput, source_type: &str) -> AppResult<RecurringItemDto> {
+    let id = Uuid::new_v4().to_string();
+    let timestamp = now();
+    transaction.execute(
+        "INSERT INTO recurring_items (
+            id, title, notes, frequency, interval_value, weekdays_json, month_day,
+            starts_on, ends_on, display_time, display_duration_minutes, tags_json, status, created_at, updated_at, source_type
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'active', ?13, ?13, ?14)",
+        params![
+            id, input.title, input.notes, input.frequency, input.interval_value,
+            serde_json::to_string(&input.weekdays)?, input.month_day, input.starts_on,
+            input.ends_on, input.display_time, input.display_duration_minutes, serde_json::to_string(&input.tags)?, timestamp, source_type,
+        ],
+    )?;
+    let item = load_recurring_item_in_transaction(transaction, &id)?;
+    Ok(item)
+}
+
+fn recurring_input_for_draft(title: &str, notes: &Option<String>, tags: &[String], settings: Option<&RecurringDraftSettings>) -> AppResult<RecurringItemInput> {
+    let settings = settings.ok_or_else(|| AppError::Schema("重复事项草稿缺少重复设置".into()))?;
+    Ok(RecurringItemInput {
+        title: title.into(), notes: notes.clone(), tags: tags.to_vec(),
+        frequency: settings.frequency.clone(), interval_value: settings.interval_value,
+        weekdays: settings.weekdays.clone(), month_day: settings.month_day,
+        starts_on: settings.starts_on.clone(), ends_on: settings.ends_on.clone(),
+        display_time: settings.display_time.clone(), display_duration_minutes: settings.display_duration_minutes,
+    })
+}
+
 fn normalize_recurring_item_input(mut input: RecurringItemInput) -> AppResult<RecurringItemInput> {
     input.title = input.title.trim().to_owned();
     if input.title.is_empty() {
@@ -3842,6 +3950,7 @@ fn recurring_item_dto_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Recu
         created_at: row.get(13)?,
         updated_at: row.get(14)?,
         deleted_at: row.get(15)?,
+        source_type: row.get(16)?,
     })
 }
 
@@ -3869,7 +3978,7 @@ fn recurring_occurrence_dto_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Resul
 fn load_recurring_item_in_transaction(transaction: &Transaction<'_>, item_id: &str) -> AppResult<RecurringItemDto> {
     transaction.query_row(
         "SELECT id, title, notes, frequency, interval_value, weekdays_json, month_day,
-                starts_on, ends_on, display_time, display_duration_minutes, tags_json, status, created_at, updated_at, deleted_at
+                starts_on, ends_on, display_time, display_duration_minutes, tags_json, status, created_at, updated_at, deleted_at, source_type
          FROM recurring_items WHERE id = ?1",
         [item_id],
         recurring_item_dto_from_row,
@@ -3897,6 +4006,9 @@ fn recurring_item_occurs_on(item: &RecurringItemDto, date: NaiveDate) -> AppResu
 }
 
 fn draft_validation_status(input: &TaskDraftInput) -> &'static str {
+    if input.item_type == "recurring" {
+        return if recurring_input_for_draft(&input.title, &input.notes, &input.tags, input.recurring_settings.as_ref()).and_then(normalize_recurring_item_input).is_ok() { "valid" } else { "needs_confirmation" };
+    }
     if input.title.trim().is_empty()
         || input.earliest_start_date.is_none()
         || input.earliest_start_time.is_none()
@@ -3940,7 +4052,7 @@ fn load_task_draft_in_transaction(transaction: &Transaction<'_>, id: &str) -> Ap
                     due_date, due_time, total_workload_minutes, remaining_workload_minutes,
                     splittable, field_states_json, validation_status, version,
                     confirmation_token, status, confirmed_task_id, created_at, updated_at, confirmed_at,
-                    tags_json, recurrence_json
+                    tags_json, recurrence_json, item_type, recurring_settings_json, confirmed_recurring_item_id
              FROM task_drafts WHERE id = ?1",
             [id],
             task_draft_dto_from_row,
@@ -3952,7 +4064,13 @@ fn load_task_draft_in_transaction(transaction: &Transaction<'_>, id: &str) -> Ap
 fn task_draft_dto_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskDraftDto> {
     let tags_json: String = row.get(24)?;
     let recurrence_json: Option<String> = row.get(25)?;
+    let recurring_settings_json: Option<String> = row.get(27)?;
     Ok(TaskDraftDto {
+        item_type: row.get(26)?,
+        recurring_settings: recurring_settings_json.map(|value| serde_json::from_str(&value)).transpose().map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(27, rusqlite::types::Type::Text, Box::new(error))
+        })?,
+        confirmed_recurring_item_id: row.get(28)?,
         id: row.get(0)?,
         draft_kind: row.get(1)?,
         target_task_id: row.get(2)?,
@@ -4937,6 +5055,19 @@ const MIGRATIONS: &[(i64, &str)] = &[
         SET value = 'open', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE key = 'ui.task_queue_view' AND value = 'inbox';
     "#),
+    (19, r#"
+        ALTER TABLE task_drafts ADD COLUMN item_type TEXT NOT NULL DEFAULT 'task' CHECK (item_type IN ('task', 'recurring'));
+        ALTER TABLE task_drafts ADD COLUMN recurring_settings_json TEXT;
+        ALTER TABLE task_drafts ADD COLUMN confirmed_recurring_item_id TEXT REFERENCES recurring_items(id) ON DELETE SET NULL;
+    "#),
+    (20, r#"
+        ALTER TABLE recurring_items ADD COLUMN source_type TEXT NOT NULL DEFAULT 'manual' CHECK(source_type IN ('manual','ai_assistant'));
+        UPDATE recurring_items SET source_type = 'ai_assistant'
+        WHERE id IN (
+            SELECT confirmed_recurring_item_id FROM task_drafts
+            WHERE source_type = 'ai_assistant' AND confirmed_recurring_item_id IS NOT NULL
+        );
+    "#),
 ];
 
 #[cfg(test)]
@@ -4955,6 +5086,8 @@ mod tests {
 
     fn manual_draft(title: &str, due_date: Option<&str>) -> TaskDraftInput {
         TaskDraftInput {
+            item_type: "task".into(),
+            recurring_settings: None,
             title: title.into(),
             notes: None,
             priority: Some(Priority::Medium),
@@ -4968,6 +5101,130 @@ mod tests {
             tags: Vec::new(),
             recurrence: None,
         }
+    }
+
+    fn recurring_draft(title: &str) -> TaskDraftInput {
+        let mut input = manual_draft(title, None);
+        input.item_type = "recurring".into();
+        input.recurring_settings = Some(RecurringDraftSettings {
+            frequency: "weekly".into(), interval_value: 1, weekdays: vec![1, 3],
+            month_day: None, starts_on: "2026-09-23".into(), ends_on: None,
+            display_time: Some("09:00".into()), display_duration_minutes: Some(30),
+        });
+        input
+    }
+
+    #[test]
+    fn creation_drafts_preserve_identity_and_both_settings_across_type_switches_and_reopen() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("creation.sqlite");
+        let mut database = Database::open(&path).unwrap();
+        let mut input = recurring_draft("周会");
+        input.item_type = "task".into();
+        input.earliest_start_date = Some("2026-09-25".into());
+        input.earliest_start_time = Some("10:00".into());
+        let first = database.create_manual_task_draft(input.clone()).unwrap();
+        let mut current = first.clone();
+        for item_type in ["recurring", "task", "recurring"] {
+            input.item_type = item_type.into();
+            current = database.save_task_draft(&current.id, current.version, input.clone()).unwrap();
+            assert_eq!(current.id, first.id);
+            assert_eq!(database.list_task_drafts(false).unwrap().len(), 1);
+        }
+        let other = database.create_manual_task_draft(recurring_draft("另一份重复任务")).unwrap();
+        assert_ne!(current.id, other.id);
+        drop(database);
+        let mut database = Database::open(&path).unwrap();
+        let drafts = database.list_task_drafts(false).unwrap();
+        assert_eq!(drafts.len(), 2);
+        let restored = drafts.iter().find(|draft| draft.id == first.id).unwrap();
+        assert_eq!(restored.item_type, "recurring");
+        assert_eq!(restored.earliest_start_time.as_deref(), Some("10:00"));
+        assert_eq!(restored.recurring_settings.as_ref().unwrap().weekdays, vec![1, 3]);
+        assert!(database.confirm_creation_draft(&first.id, &first.confirmation_token).is_err());
+        assert!(database.save_task_draft(&first.id, first.version, input).is_err());
+        drop(database);
+    }
+
+    #[test]
+    fn recurring_draft_confirmation_is_atomic_idempotent_and_creates_only_selected_type() {
+        let mut database = Database::in_memory().unwrap();
+        let draft = database.create_manual_task_draft(recurring_draft("周会")).unwrap();
+        assert!(database.confirm_task_draft(&draft.id, &draft.confirmation_token).is_err());
+        database.connection.execute_batch("CREATE TRIGGER fail_draft_confirmation BEFORE UPDATE OF status ON task_drafts WHEN NEW.status = 'confirmed' BEGIN SELECT RAISE(ABORT, 'test failure'); END;").unwrap();
+        assert!(database.confirm_creation_draft(&draft.id, &draft.confirmation_token).is_err());
+        assert_eq!(database.list_task_drafts(false).unwrap().len(), 1);
+        assert_eq!(database.list_recurring_items(true, true).unwrap().len(), 0);
+        database.connection.execute_batch("DROP TRIGGER fail_draft_confirmation;").unwrap();
+        let first = database.confirm_creation_draft(&draft.id, &draft.confirmation_token).unwrap();
+        let retry = database.confirm_creation_draft(&draft.id, &draft.confirmation_token).unwrap();
+        match (first, retry) {
+            (ConfirmedCreation::Recurring(first), ConfirmedCreation::Recurring(retry)) => assert_eq!(first.id, retry.id),
+            _ => panic!("wrong creation type"),
+        }
+        assert!(database.list_task_drafts(false).unwrap().is_empty());
+        assert_eq!(database.list_recurring_items(true, true).unwrap().len(), 1);
+        assert_eq!(database.connection.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        let item = &database.list_recurring_items(true, true).unwrap()[0];
+        database.set_recurring_item_status(&item.id, "ended").unwrap();
+        database.soft_delete_recurring_item(&item.id, true).unwrap();
+        database.permanently_delete_recurring_item(&item.id, true).unwrap();
+        assert!(database.list_recurring_items(true, true).unwrap().is_empty());
+    }
+
+    #[test]
+    fn recurring_item_keeps_the_creation_drafts_source() {
+        let mut database = Database::in_memory().unwrap();
+        let draft = database.create_manual_task_draft(recurring_draft("AI 建议的周会")).unwrap();
+        database.connection.execute(
+            "UPDATE task_drafts SET source_type = 'ai_assistant' WHERE id = ?1",
+            [&draft.id],
+        ).unwrap();
+        let created = database.confirm_creation_draft(&draft.id, &draft.confirmation_token).unwrap();
+        let ConfirmedCreation::Recurring(item) = created else { panic!("wrong creation type") };
+        assert_eq!(item.source_type, "ai_assistant");
+        assert_eq!(database.list_recurring_items(true, true).unwrap()[0].source_type, "ai_assistant");
+
+        let manual = database.create_recurring_item(recurring_item("手动周会", "2026-09-23")).unwrap();
+        assert_eq!(manual.source_type, "manual");
+    }
+
+    #[test]
+    fn incomplete_recurring_drafts_and_discard_use_the_shared_draft_lifecycle() {
+        let mut database = Database::in_memory().unwrap();
+        let mut input = recurring_draft("");
+        input.recurring_settings.as_mut().unwrap().weekdays.clear();
+        let first = database.create_manual_task_draft(input).unwrap();
+        let second = database.create_manual_task_draft(recurring_draft("另一份")).unwrap();
+        assert_eq!(first.validation_status, "needs_confirmation");
+        assert!(database.confirm_creation_draft(&first.id, &first.confirmation_token).is_err());
+        database.discard_task_draft(&first.id, first.version).unwrap();
+        assert!(database.confirm_creation_draft(&first.id, &first.confirmation_token).is_err());
+        assert_eq!(database.list_task_drafts(false).unwrap()[0].id, second.id);
+    }
+
+    #[test]
+    fn ordinary_confirmation_ignores_inactive_recurring_settings() {
+        let mut database = Database::in_memory().unwrap();
+        let mut input = manual_draft("普通任务", Some("2026-09-25"));
+        input.recurring_settings = recurring_draft("").recurring_settings;
+        input.recurring_settings.as_mut().unwrap().weekdays.clear();
+        let draft = database.create_manual_task_draft(input).unwrap();
+        assert!(matches!(database.confirm_creation_draft(&draft.id, &draft.confirmation_token).unwrap(), ConfirmedCreation::Task(_)));
+        assert!(database.list_recurring_items(true, true).unwrap().is_empty());
+    }
+
+    #[test]
+    fn legacy_recurring_draft_import_is_retry_safe_even_after_confirmation() {
+        let mut database = Database::in_memory().unwrap();
+        let first = database.import_legacy_recurring_draft(recurring_draft("旧草稿")).unwrap();
+        let retry = database.import_legacy_recurring_draft(recurring_draft("旧草稿")).unwrap();
+        assert_eq!(first.id, retry.id);
+        assert_eq!(database.list_task_drafts(false).unwrap().len(), 1);
+        database.confirm_creation_draft(&first.id, &first.confirmation_token).unwrap();
+        database.import_legacy_recurring_draft(recurring_draft("旧草稿")).unwrap();
+        assert!(database.list_task_drafts(false).unwrap().is_empty());
+        assert_eq!(database.list_recurring_items(true, true).unwrap().len(), 1);
     }
 
     fn recurring_item(title: &str, starts_on: &str) -> RecurringItemInput {

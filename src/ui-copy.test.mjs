@@ -65,18 +65,111 @@ test("plan draft time editor stays compact and supports focused manual adjustmen
   assert.match(stylesSource, /\.timeline-floating-layer\.is-time-editor, \.timeline-floating-layer\.is-block-editor \{ position: fixed;/);
   assert.match(stylesSource, /\.time-rail-endpoint-cards \{[^}]*grid-template-columns: 31fr 38fr 31fr/);
   assert.match(appSource, /highlightedEdge === "start" \? "is-active"/);
-  assert.match(appSource, /className="time-rail-duration-badge"/);
-  assert.match(appSource, /className="time-rail-break"[^>]*><span>\{durationText\}<\/span>/);
+  assert.doesNotMatch(appSource, /continuousRailInset/);
+  assert.doesNotMatch(appSource, /continuousRailWidth/);
+  assert.match(appSource, /className="time-rail-continuous-selection"/);
+  assert.match(appSource, /className="time-rail-selected-fill" style=\{\{ left: selectionFillLeft, right: selectionFillRight \}\}/);
+  assert.match(appSource, /renderTrackWindow\(visibleWindow!, 0, 100\)/);
+  assert.match(appSource, /visibleWindow!\.start \+ ratio \* continuousSpan/);
+  assert.match(appSource, /className="time-rail-interval-badge"/);
+  assert.match(appSource, /当前时间间隔为 \{durationLabel\}/);
+  assert.match(appSource, /className="time-rail-break" aria-hidden="true" \/>/);
+  assert.match(appSource, /className="time-rail-collapsed-duration"[^>]*>\{durationText\}<\/span>/);
+  assert.match(appSource, /拖动两侧端点 · 中间不可拖动/);
+  assert.doesNotMatch(appSource, /总间隔 \{durationLabel\}/);
+  assert.doesNotMatch(appSource, /omittedDurationText/);
+  assert.match(appSource, /<em>开始<\/em><strong>\{displayClock\(safeStartMinute\)\}<\/strong>/);
+  assert.match(appSource, /<em>结束<\/em><strong>\{displayClock\(safeEndMinute\)\}<\/strong>/);
+  assert.match(appSource, /className="time-rail-endpoint-selection start"/);
+  assert.match(appSource, /className="time-rail-endpoint-pin end"/);
+  assert.match(appSource, /\.filter\(Boolean\)\.join\(" "\)/);
   assert.doesNotMatch(appSource, /durationMinutes >= 45/);
   assert.match(appSource, /original_starts_at: startsAt/);
   assert.match(appSource, /className="timeline-time-reset"/);
   assert.match(appSource, /onClick=\{resetPlanDraftTime\}/);
   assert.match(stylesSource, /\.time-rail-scale\.continuous/);
+  assert.match(stylesSource, /\.time-range-rail\.block-editor \{ --time-rail-arc-inset: 20px; \}/);
+  assert.match(stylesSource, /\.time-rail-continuous-selection \{[^}]*top: 7px;[^}]*right: var\(--time-rail-arc-inset\);[^}]*bottom: 7px;[^}]*left: var\(--time-rail-arc-inset\);/);
+  assert.match(stylesSource, /\.time-range-rail\.block-editor \.time-rail-handles \{[^}]*top: 20px;[^}]*right: var\(--time-rail-arc-inset\);[^}]*left: var\(--time-rail-arc-inset\);/);
+  assert.match(stylesSource, /\.time-rail-scale\.continuous \{[^}]*margin: 0 var\(--time-rail-arc-inset\) 7px !important;/);
+  assert.match(stylesSource, /\.time-range-rail\.block-editor \{ --time-rail-arc-inset: 22px; \}/);
+  assert.match(stylesSource, /\.time-rail-continuous-selection::before \{[^}]*z-index: 0;[^}]*height: 8px;[^}]*background: #d1d2cb;/);
+  assert.match(stylesSource, /\.time-rail-selected-fill \{[^}]*z-index: 1;[^}]*display: block;[^}]*inset-block: 0;[^}]*background: #315cea;/);
+  assert.match(stylesSource, /\.time-rail-interval-badge \{[^}]*z-index: 2;/);
+  assert.match(stylesSource, /\.is-continuous \.time-rail-track \{[^}]*top: 16px;[^}]*height: 8px;[^}]*background: #d9e2ee/);
+  assert.match(stylesSource, /\.time-rail-track-wrap\.is-collapsed \{[^}]*border: 1px solid #cbd7e6;[^}]*background: #eef3f8;[^}]*box-shadow: none/);
+  assert.match(stylesSource, /\.time-rail-break \{[^}]*background: #e3eaf2/);
+  assert.match(stylesSource, /\.time-rail-break::before, \.time-rail-break::after \{[^}]*border-top: 1px dashed #9cacc0/);
+  assert.match(stylesSource, /\.is-continuous \.time-rail-handle \{[^}]*width: 18px;[^}]*height: 18px;[^}]*border: 2px solid #fff/);
+  assert.match(stylesSource, /\.is-continuous \.time-rail-handle\.start \{[^}]*background: #fff/);
+  assert.match(stylesSource, /\.is-continuous \.time-rail-handle\.end \{[^}]*background: #315cea/);
+  assert.match(stylesSource, /html\[data-mode="dark"\] \.time-range-rail\.block-editor \.time-rail-selected-fill \{ background: #6075ff;/);
+  assert.match(stylesSource, /html\[data-mode="dark"\] \.time-range-rail\.block-editor \.time-rail-continuous-selection::before \{ background: #555850;/);
+  assert.match(stylesSource, /html\[data-mode="dark"\] \.time-range-rail\.block-editor \.time-rail-track-wrap\.is-collapsed \{[^}]*border-color: #4b586b;[^}]*background: #293241;[^}]*box-shadow: none/);
+  assert.match(stylesSource, /html\[data-mode="dark"\] \.time-range-rail\.block-editor \.is-continuous \.time-rail-track-piece \{ background: #46546a;/);
+  assert.match(stylesSource, /html\[data-mode="dark"\] \.time-range-rail\.block-editor \.is-continuous \.time-rail-handle\.start \{[^}]*background: #202731/);
+  assert.match(stylesSource, /html\[data-mode="dark"\] \.time-range-rail\.block-editor \.is-continuous \.time-rail-handle\.end \{[^}]*background: #7185ff/);
+  assert.match(stylesSource, /\.time-rail-collapsed-duration \{[^}]*box-shadow: none/);
+  assert.match(stylesSource, /\.time-rail-track-wrap\.active-end \.time-rail-endpoint-card\.end \{[^}]*box-shadow: none/);
+  assert.doesNotMatch(appSource, /key: "range-gap"/);
+  assert.doesNotMatch(appSource, /refreshPresentation/);
+  assert.match(appSource, /timeRangePresentationCanReuse\(/);
+  assert.match(appSource, /continuousTimeRangeGeometry\(presentation, safeRange\)/);
+  assert.doesNotMatch(appSource, /const separatedHandleGap = 48/);
+  assert.match(appSource, /const endpointWrapPadding = 13/);
+  assert.match(appSource, /const selectionFillLeft = continuousGeometry \? `calc\(\$\{continuousGeometry\.startPosition\}% - \$\{endpointWrapPadding\}px\)`/);
+  assert.match(appSource, /const selectionFillRight = continuousGeometry \? `calc\(\$\{100 - continuousGeometry\.endPosition\}% - \$\{endpointWrapPadding\}px\)`/);
+  assert.match(appSource, /const intervalBadgeLeft = continuousGeometry/);
+  assert.match(appSource, /className="time-rail-handle start" style=\{\{ left: startHandleLeft \}\}/);
+  assert.match(appSource, /className="time-rail-handle end" style=\{\{ left: endHandleLeft \}\}/);
+  assert.match(appSource, /className="time-rail-interval-badge" style=\{\{ left: intervalBadgeLeft \}\}/);
+  assert.match(appSource, /continuousTimeScaleMarks\(visibleWindow/);
+  assert.match(appSource, /const edgeThreshold = mark\.tone === "range" \? 15 : 6/);
+  assert.match(stylesSource, /\.time-rail-handle \{[^}]*transition: left \.12s ease-out/);
+  assert.match(stylesSource, /\.time-rail-selected-fill \{[^}]*transition: right \.12s ease-out, left \.12s ease-out/);
+  assert.match(stylesSource, /\.time-rail-collapsed-duration \{[^}]*z-index: 8;[^}]*top: 50%;[^}]*left: 50%;/);
+  assert.match(stylesSource, /\.time-rail-endpoint-card \{[^}]*cursor: grab/);
+  assert.match(stylesSource, /\.time-rail-track-wrap\.is-collapsed:is\(\.dragging-start, \.dragging-end\) \{ cursor: grabbing; \}/);
+  assert.match(stylesSource, /\.time-rail-track-wrap\.is-collapsed:is\(\.dragging-start, \.dragging-end\) :is\(\.time-rail-endpoint-cards, \.time-rail-endpoint-card\) \{ cursor: grabbing; \}/);
+  assert.doesNotMatch(stylesSource, /--handle-shift/);
   assert.match(stylesSource, /\.time-rail-track-wrap\.active-start \.time-rail-endpoint-card\.start/);
   assert.match(appSource, /\{ minutes: 120, label: "2 小时" \}/);
   assert.match(appSource, /busy \? "正在保存…" : "保存调整"/);
   assert.doesNotMatch(appSource, /plan-draft-time-summary/);
   assert.doesNotMatch(appSource, /输入开始时间会按原时长同步结束时间/);
+});
+
+test("task schedule picker edits the full range with the shared timeline rail", () => {
+  assert.match(appSource, /type TaskSchedulePicker = \{[\s\S]*?activeField: "start" \| "end";[\s\S]*?earliest_start_date: string;[\s\S]*?due_time: string;/);
+  assert.match(appSource, /className="schedule-picker-boundaries"/);
+  assert.match(appSource, /renderBoundaryCard\("start", "开始"/);
+  assert.match(appSource, /renderBoundaryCard\("end", "结束"/);
+  assert.match(appSource, /className="schedule-picker-range-panel"/);
+  assert.match(appSource, /const \[pickerTimeInputs, setPickerTimeInputs\] = useState/);
+  assert.match(appSource, /function updatePickerTimeInput\(/);
+  assert.match(appSource, /function commitPickerTimeInput\(/);
+  assert.match(appSource, /className="schedule-boundary-time-control"/);
+  assert.match(appSource, /aria-label=\{`输入\$\{label\}时间`\}/);
+  assert.match(appSource, /aria-invalid=\{!inputValid\}/);
+  assert.match(appSource, /可输入 9、930 或 09:30，精确到 1 分钟/);
+  assert.match(appSource, /请输入有效时间（00:00–23:59）/);
+  assert.match(appSource, /target\?\.closest\("\.schedule-boundary-time-control"\)/);
+  assert.match(appSource, /const pickerError = !pickerTimeInputsValid/);
+  assert.match(appSource, /startMinuteOffset=\{0\}/);
+  assert.match(appSource, /endMinuteOffset=\{pickerEndMinuteOffset\}/);
+  assert.match(appSource, /showPresets=\{pickerSpanDays === 1\}/);
+  assert.match(appSource, /const endMinute = endMinuteOffset \+ clockMinutes\(end\)/);
+  assert.match(appSource, /const displayClock = \(minute: number\) => minutesClock/);
+  assert.match(appSource, /className="schedule-picker-summary"/);
+  assert.doesNotMatch(appSource, /schedule-timeline-list/);
+  assert.doesNotMatch(stylesSource, /schedule-timeline-list/);
+  assert.match(stylesSource, /\.schedule-picker-dialog \{[^}]*width: min\(920px, calc\(100vw - 48px\)\)/);
+  assert.match(stylesSource, /\.schedule-picker-body \{[^}]*grid-template-columns: minmax\(360px, \.95fr\) minmax\(410px, 1\.05fr\)/);
+  assert.match(stylesSource, /\.schedule-picker-range-panel \.time-range-rail\.block-editor \.time-rail-surface/);
+  assert.match(stylesSource, /\.schedule-boundary-time-control:focus-within/);
+  assert.match(stylesSource, /\.schedule-boundary-field\.time\.is-invalid \.schedule-boundary-time-control/);
+  assert.match(stylesSource, /\.schedule-picker-footer-error/);
+  assert.match(stylesSource, /@media \(max-width: 760px\) \{[\s\S]*?\.schedule-picker-body \{ grid-template-columns: minmax\(0, 1fr\); \}/);
 });
 
 test("task capsule hover actions do not stay open after a pointer click", () => {
@@ -91,11 +184,11 @@ test("task capsule selection is visually distinct in light and dark modes", () =
   assert.match(stylesSource, /html\[data-mode="dark"\] \.next-workspace \.ledger-row\.task-capsule-row\.selected/);
 });
 
-test("task inspector expands into a wide desktop workspace", () => {
+test("task inspector keeps a single column and centers in wide desktop workspace", () => {
   assert.match(stylesSource, /\.task-form, \.deleted-inspector \{ width: min\(100%, 1280px\); max-width: none; margin-inline: auto;/);
-  assert.match(stylesSource, /@container inspector \(min-width: 960px\) \{[\s\S]*?\.create-task-form \{ display: grid; grid-template-columns: minmax\(0, 5fr\) minmax\(0, 6fr\);/);
-  assert.match(stylesSource, /\.create-task-form > \.task-content-region \{ grid-column: 1; \}/);
-  assert.match(stylesSource, /\.create-task-form > \.task-planning-section \{ grid-column: 2; \}/);
+  assert.match(stylesSource, /@container inspector \(min-width: 680px\) \{[\s\S]*?\.task-compact-body > \* \{[\s\S]*?max-width: 660px;/);
+  assert.doesNotMatch(stylesSource, /\.task-compact-body > \.task-form-region:first-of-type \{ grid-column: 1; \}/);
+  assert.doesNotMatch(stylesSource, /\.task-compact-body > \.task-form-region:last-of-type \{ grid-column: 2; \}/);
 });
 
 test("ordinary tasks use one recycle-bin path instead of a cancellation state", () => {
@@ -104,7 +197,7 @@ test("ordinary tasks use one recycle-bin path instead of a cancellation state", 
   assert.equal(appSource.includes("不再进行"), false);
   assert.equal(appSource.includes("task-more-actions"), false);
   assert.match(appSource, /\{ label: "历史", items: \["done", "deleted"\] \}/);
-  assert.match(appSource, /className="text-danger" disabled=\{busy\} onClick=\{\(\) => requestTaskChange\(\{ kind: "trash" \}\)\}/);
+  assert.match(appSource, /className="task-compact-trash" disabled=\{busy\} onClick=\{\(\) => requestTaskChange\(\{ kind: "trash" \}\)\}/);
   assert.equal(stylesSource.includes("status-row-cancelled"), false);
   assert.equal(stylesSource.includes("terminal-task-status.cancelled"), false);
 });
@@ -167,11 +260,24 @@ test("time range handles use a hollow start and solid end", () => {
 });
 
 test("task workload copy follows same-day and cross-day scheduling semantics", () => {
-  assert.match(appSource, /随时间自动调整/);
+  assert.match(appSource, /className="apple-schedule-workload"/);
+  assert.match(appSource, /className="apple-schedule-workload-icon"/);
+  assert.match(appSource, /sameDayMinutes === null \? "待计算" : <WorkloadTimeDigits minutes=\{sameDayMinutes\}/);
+  assert.match(appSource, /sameDayMinutes === null \? "补全有效时间" : "自动计算"/);
+  assert.match(appSource, /crossDay && \(/);
+  assert.doesNotMatch(appSource, /workload-auto-field/);
+  assert.doesNotMatch(stylesSource, /\.workload-auto-field/);
   assert.match(appSource, /平均每日投入/);
-  assert.match(appSource, /总投入 \{formatWorkloadMinutes\(form\.estimated_minutes\)\}/);
+  assert.match(appSource, /<span>预估总投入<\/span><strong><WorkloadTimeDigits minutes=\{form\.estimated_minutes\}/);
   assert.doesNotMatch(appSource, /按时间重算/);
   assert.doesNotMatch(appSource, /使用手动值，不会被时间调整覆盖/);
+});
+
+test("clearing and restoring task time keeps the attribute grid dimensions stable", () => {
+  assert.match(stylesSource, /\.task-attribute-grid\.same-day \{ grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\); \}/);
+  assert.match(stylesSource, /\.task-compact-body \.task-attribute-grid,\s*\.task-compact-body \.task-attribute-grid\.same-day \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+  assert.doesNotMatch(stylesSource, /\.task-attribute-grid\.same-day \{[^}]*260px/);
+  assert.match(stylesSource, /@container inspector \(max-width: 560px\) \{[\s\S]*?\.task-compact-body \.task-attribute-grid \{ grid-template-columns: minmax\(0, 1fr\); \}/);
 });
 
 test("timeline notes appear only after an execution result is selected", () => {
@@ -214,4 +320,244 @@ test("timeline task blocks use the centered editor without changing checkbox beh
   assert.match(stylesSource, /\.timeline-floating-layer\.is-block-editor \.timeline-floating-panel\.task-block-editor/);
   assert.match(stylesSource, /\.timeline-floating-panel \{ position: fixed;/);
   assert.match(stylesSource, /\.timeline-floating-panel, \.timeline-floating-panel\.plan-draft-editor, \.timeline-floating-panel\.task-block-editor \{ top: auto; right: 14px; bottom: 14px;/);
+});
+
+test("task selection stays inline and the inspector adapts to its available width", () => {
+  assert.match(appSource, /kind: "close-compact-editor"/);
+  assert.match(appSource, /const \[compactTaskEditorDismissed, setCompactTaskEditorDismissed\] = useState\(false\)/);
+  assert.match(appSource, /className=\{`task-ledger\$\{resizingLedger \? " is-resizing" : ""\}`} /);
+  assert.match(appSource, /className="task-form create-task-form edit-task-form task-compact-form"/);
+  assert.match(appSource, /className="task-compact-header"/);
+  assert.match(appSource, /className="task-compact-body"/);
+  assert.match(appSource, /className="task-compact-actions"/);
+  assert.doesNotMatch(appSource, /task-compact-close|aria-label="关闭任务编辑"/);
+  assert.match(appSource, /idPrefix="edit-task" compact onChange=/);
+  assert.match(appSource, /compact \? "任务标题" : "标题"/);
+  assert.match(appSource, /compact \? "备注说明" : "备注"/);
+  assert.match(appSource, /<strong id=\{attributesTitleId\}>安排与时限<\/strong>/);
+  assert.match(appSource, /补充说明、清单或背景链接（可选）…/);
+  assert.doesNotMatch(appSource, /taskEditorOpen|fullScreenTaskEditor|open-editor|全屏编辑/);
+  assert.doesNotMatch(stylesSource, /task-editor-workspace|is-task-editor-open|task-fullscreen/);
+  assert.match(stylesSource, /\.task-compact-form \{[\s\S]*?width: 100%;[\s\S]*?height: 100%;[\s\S]*?border: 0;[\s\S]*?box-shadow: none;/);
+  assert.match(stylesSource, /\.task-compact-body \{[\s\S]*?overflow-y: auto;/);
+  assert.match(stylesSource, /\.task-compact-body \.apple-schedule-rows \{[\s\S]*?flex-direction: column;/);
+  assert.match(stylesSource, /\.task-compact-actions \{[\s\S]*?justify-content: space-between;/);
+  assert.match(stylesSource, /@container inspector \(min-width: 680px\) \{[\s\S]*?\.task-compact-body > \* \{[\s\S]*?max-width: 660px;/);
+  assert.match(stylesSource, /@container inspector \(max-width: 560px\) \{[\s\S]*?\.task-compact-body \.apple-schedule-rows \{ display: flex; flex-direction: column;/);
+  assert.match(stylesSource, /html\[data-mode="dark"\] \.task-compact-form/);
+  assert.match(stylesSource, /@media \(prefers-reduced-motion: reduce\) \{\s*\.task-compact-form \{ animation: none; \}/);
+});
+
+test("task editor uses shared semantic colors and keeps recycle actions in place", () => {
+  assert.match(appSource, /className="task-region-title-row"/);
+  assert.doesNotMatch(appSource, /className="task-region-workload"/);
+  assert.match(appSource, /className=\{compact \? "apple-schedule-toolbar" : undefined\}/);
+  assert.match(appSource, /sameDay \? <output className="apple-schedule-workload"/);
+  assert.match(appSource, /className=\{`priority-select-control priority-tone-\$\{form\.priority \?\? "unset"\}`\}/);
+  assert.match(appSource, /<option value="low">低优先级<\/option><option value="medium">中优先级<\/option><option value="high">高优先级<\/option>/);
+  assert.match(appSource, /status=\{statusCopy\[task\.status\]\} statusTone=\{task\.status\}/);
+  assert.match(appSource, /status="待确认" statusTone="draft"/);
+  assert.match(stylesSource, /--task-state-draft:/);
+  assert.match(stylesSource, /--task-state-open:/);
+  assert.match(stylesSource, /--task-state-scheduled:/);
+  assert.match(stylesSource, /--task-state-done:/);
+  assert.match(stylesSource, /--task-state-deleted:/);
+  assert.match(stylesSource, /--priority-low:/);
+  assert.match(stylesSource, /--priority-medium:/);
+  assert.match(stylesSource, /--priority-high:/);
+  assert.match(stylesSource, /\.task-capsule-status\.status-scheduled \{ color: var\(--task-state-scheduled\); border-color: var\(--task-state-scheduled-border\); background: var\(--task-state-scheduled-surface\); \}/);
+  assert.match(stylesSource, /\.priority-select-control > select,[\s\S]*?background: var\(--priority-surface\);/);
+  assert.match(stylesSource, /\.priority-select-control::after \{[^}]*rotate\(45deg\);/);
+  assert.match(stylesSource, /\.priority-select-control > select,[\s\S]*?appearance: none;/);
+  assert.match(stylesSource, /\.task-compact-body \.task-planning-section \.apple-schedule-editor > header \{[\s\S]*?position: static;[\s\S]*?justify-content: space-between;/);
+  assert.match(stylesSource, /\.task-compact-trash \{ color: var\(--task-state-deleted\);/);
+  assert.doesNotMatch(appSource, /setView\(["']deleted["']\)/);
+});
+
+test("task capsule titles stay on one line and schedule capsules keep their content visible", () => {
+  assert.match(appSource, /<strong title=\{title\}>\{title\}<\/strong>/);
+  assert.match(stylesSource, /\.task-capsule-heading > strong \{[^}]*display: block;[^}]*flex: 1 1 auto;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
+  assert.doesNotMatch(stylesSource, /\.task-capsule-heading > strong \{[^}]*-webkit-line-clamp:/);
+  assert.match(stylesSource, /\.timeline-lanes \.task-capsule-content\.compact \{[^}]*height: auto;[^}]*min-height: 76px;/);
+  assert.match(stylesSource, /\.timeline-execution-content \{[^}]*display: grid;[^}]*height: 100%;[^}]*overflow: hidden;/);
+  assert.match(stylesSource, /\.timeline-event-body \{[^}]*min-width: 0;[^}]*width: 100%;[^}]*overflow: hidden;/);
+});
+
+test("cross-day daily workload input resets focus styles and recurring items use apple-style schedule picker", () => {
+  assert.match(stylesSource, /:is\(\.apple-schedule-workload-control, \.task-compact-body \.apple-schedule-workload-control\) input:focus/);
+  assert.match(stylesSource, /box-shadow: none !important;/);
+  assert.match(stylesSource, /background: transparent !important;/);
+
+  assert.match(appSource, /function RecurringValidityPicker/);
+  assert.match(appSource, /有效日期范围/);
+  assert.match(appSource, /设为长期有效/);
+  assert.match(appSource, /recurring-validity-card/);
+  assert.match(appSource, /className="recurring-schedule-grid"/);
+  assert.match(appSource, /recurring-presets-chips/);
+  assert.match(appSource, /recurring-display-time-control/);
+  assert.match(appSource, /preset-duration-chip/);
+  assert.match(appSource, /starts_on:\s*draftStartsOn,\s*ends_on:\s*draftEndsOn/);
+});
+test("switching between task and recurring tabs preserves inputs without modal prompt", () => {
+  assert.doesNotMatch(appSource, /pendingCreateType/);
+  assert.match(appSource, /syncFormCommonFields/);
+  assert.match(appSource, /applyCreateItemType/);
+});
+
+test("ordinary and recurring task time inputs enforce 4-digit limit and preserve typing flow", () => {
+  assert.match(appSource, /sanitizeTimeInput/);
+  assert.match(appSource, /function updatePickerTimeInput\(field: TaskSchedulePicker\["activeField"\], value: string\) \{[\s\S]*?sanitizeTimeInput\(value\)/);
+  assert.match(appSource, /function commitPickerTimeInput\(field: TaskSchedulePicker\["activeField"\], value: string\) \{[\s\S]*?sanitizeTimeInput\(value\)/);
+  assert.match(appSource, /<input type="text" inputMode="numeric" autoComplete="off" spellCheck=\{false\} maxLength=\{5\} value=\{inputValue\}/);
+  assert.match(appSource, /isDisplayTimeFocusedRef/);
+  assert.match(appSource, /function updateDisplayTimeInput\(value: string\)/);
+  assert.match(appSource, /function commitDisplayTimeInput\(value: string\)/);
+  assert.match(appSource, /function handleDisplayTimeKeyDown\(event: KeyboardEvent<HTMLInputElement>\)/);
+});
+
+test("recurring item editor converges display time and duration into date picker and shows preview inline with title", () => {
+  // Title wrap contains both label and inline recent occurrences preview
+  assert.match(appSource, /recurring-validity-title-wrap/);
+  assert.match(appSource, /recurring-inline-preview/);
+  assert.match(appSource, /最近发生：/);
+
+  // Schedule rows display date + time on row 1, date + duration on row 2
+  assert.match(appSource, /form\.starts_on[\s\S]*?form\.display_time[\s\S]*?form\.ends_on[\s\S]*?form\.display_duration_minutes/);
+
+  // Standalone recurring-display-group removed from editor
+  assert.doesNotMatch(appSource, /<div className="recurring-display-group">/);
+  assert.doesNotMatch(appSource, /<div className="recurring-preview" role="status"/);
+
+  // RecurringValidityPicker houses both boundary time and duration editing controls
+  assert.match(appSource, /schedule-boundary-duration-control/);
+  assert.match(stylesSource, /\.recurring-validity-title-wrap/);
+  assert.match(stylesSource, /\.recurring-inline-preview/);
+  assert.match(stylesSource, /\.schedule-boundary-duration-control/);
+});
+
+test("draft capsule keeps layout stable during autosave and active editing", () => {
+  // Capsule status badge has fixed min-width and alignment to prevent width-shift jitter
+  assert.match(stylesSource, /\.task-capsule-status\s*\{[\s\S]*?min-width:\s*48px;[\s\S]*?justify-content:\s*center;[\s\S]*?box-sizing:\s*border-box;/);
+
+  // Both unpersisted and persisted draft capsules use stable "待确认" status
+  assert.match(appSource, /status="待确认"\s+statusTone="draft"/);
+
+  // Draft capsules do not toggle raw "保存中" or "草稿已保存" inside the capsule status pill
+  assert.doesNotMatch(appSource, /status=\{draftSaving \? "保存中"/);
+
+  // Active editing draft capsule is bound to live form data
+  assert.match(appSource, /isEditingActiveDraft/);
+  assert.match(appSource, /const common = isEditingActiveDraft[\s\S]*?const draftTitle = common\.title/);
+  assert.match(appSource, /taskDraftTimingFact/);
+
+  // Saving existing draft preserves position in draft list
+  assert.match(appSource, /current\.map\(\(item\) => \(item\.id === saved\.id \? saved : item\)\)/);
+});
+
+test("recurring validity picker modal matches Stitch layout structure and components", () => {
+  // Modal container and header
+  assert.match(appSource, /recurring-validity-dialog/);
+  assert.match(appSource, /recurring-modal-header/);
+  assert.match(appSource, /recurring-cycle-badge/);
+  assert.match(appSource, /周期循环/);
+
+  // Symmetrical 2x2 panel with row connectors
+  assert.match(appSource, /recurring-symmetrical-panel/);
+  assert.match(appSource, /recurring-form-row/);
+  assert.match(appSource, /recurring-status-card/);
+  assert.match(appSource, /recurring-connector-badge/);
+  assert.match(appSource, /开始日期/);
+  assert.match(appSource, /截止日期/);
+
+  // 5:7 workarea with calendar and shortcuts
+  assert.match(appSource, /recurring-workarea-grid/);
+  assert.match(appSource, /recurring-calendar-container/);
+  assert.match(appSource, /recurring-target-tabs/);
+  assert.match(appSource, /recurring-shortcuts-panel/);
+  assert.match(appSource, /recurring-chips-grid cols-6/);
+  assert.match(appSource, /recurring-occurrence-cards/);
+
+  // Footer summary
+  assert.match(appSource, /recurring-summary-box/);
+  assert.match(appSource, /recurring-btn-confirm/);
+
+  // Validity shortcuts switch active tab to end date
+  assert.match(appSource, /applyValidityPreset\(action: "open" \| "days" \| "year_end"/);
+  assert.match(appSource, /function applyValidityPreset[\s\S]*?setActiveField\("end"\)/);
+
+  // CSS verification
+  assert.match(stylesSource, /\.recurring-validity-dialog\s*\{/);
+  assert.match(stylesSource, /\.recurring-symmetrical-panel\s*\{/);
+  assert.match(stylesSource, /\.recurring-workarea-grid\s*\{/);
+  assert.match(stylesSource, /\.recurring-occurrence-cards\s*\{/);
+  assert.match(stylesSource, /\.schedule-picker-backdrop:has\(\.recurring-validity-dialog\)/);
+  assert.match(stylesSource, /\.recurring-validity-dialog \.schedule-boundary-duration-control input[\s\S]*?border:\s*0/);
+
+  // Frequency excludes weekdays and monthly expands into 3-column single row
+  assert.doesNotMatch(appSource, /<option value="weekdays">/);
+  assert.match(appSource, /recurring-rule-grid\$\{form\.frequency === "monthly" \? " is-monthly" : ""\}/);
+  assert.match(stylesSource, /\.recurring-rule-grid\.is-monthly\s*\{\s*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);?\s*\}/);
+  assert.match(stylesSource, /\.task-compact-body \.recurring-rule-grid\.is-monthly\s*\{\s*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);?\s*\}/);
+});
+
+test("task draft autosave starts after editing and flushes on task switch", () => {
+  // Fresh version tracking with ref
+  assert.match(appSource, /const persistedNewTaskDraftRef = useRef<TaskDraft \| null>\(null\);/);
+  assert.match(appSource, /persistedNewTaskDraftRef\.current \?\? persistedNewTaskDraft/);
+
+  // Auto-flush during task switch without discarding
+  assert.match(appSource, /async function requestTaskChange[\s\S]*?if \(creating\) \{[\s\S]*?if \(!await saveNewTaskBeforeLeaving\(\)\) return;/);
+
+  // Switching drafts auto-flushes instead of showing blocking modal
+  assert.match(appSource, /async function selectPersistedTaskDraft\(item: TaskDraft\)[\s\S]*?await saveNewTaskBeforeLeaving\(\)[\s\S]*?await openPersistedTaskDraft\(item\);/);
+
+  // discardAndContinue clears new task form instead of deleting saved drafts
+  const discardAndContinueBody = appSource.match(/async function discardAndContinue\(\) \{[\s\S]*?\n  \}/)?.[0] ?? "";
+  assert.match(discardAndContinueBody, /clearNewTaskForm\(\);/);
+  assert.doesNotMatch(discardAndContinueBody, /cancelNewTask/);
+
+  // Draft save status checks dirty state before checking persisted draft
+  assert.match(appSource, /newTaskIsDirty && \(persistedNewTaskDraft \|\| newTaskFieldsAreDirty\)[\s\S]*?newTaskAutosaveArmed \? "将在停止输入后自动保存" : "离开当前任务前保存"/);
+});
+
+test("recurring task draft autosave, draft list presentation, and label unification", () => {
+  // Label unification: 生效开始日期 -> 开始日期
+  assert.match(appSource, /<label className="recurring-card-label">开始日期<\/label>/);
+  assert.match(appSource, /<span className="apple-schedule-label">开始日期<\/span>/);
+  assert.doesNotMatch(appSource, /生效开始/);
+
+  // Type is a property of each persisted draft; both variants share one list and save flow.
+  assert.match(appSource, /draft: taskDrafts\.length/);
+  assert.match(appSource, /visibleTaskDrafts\.map/);
+  assert.match(appSource, /const itemType = isEditingActiveDraft \? createItemType : item.item_type/);
+  assert.match(appSource, /confirmCreationDraft\(persisted\)/);
+  assert.doesNotMatch(appSource, /hasRecurringDraft|storedRecurringDraft|persistRecurringDraft|saveStoredRecurringDraft/);
+  assert.match(appSource, /await importLegacyRecurringDraft/);
+
+});
+
+test("recurring task page synchronizes with new Stitch prototypes (daily convention, weekly pills, monthly banner, 2x2 grid)", () => {
+  // Daily convention radio group
+  assert.match(appSource, /日常规约：/);
+  assert.match(appSource, /所有自然日/);
+  assert.match(appSource, /仅工作日/);
+  assert.match(stylesSource, /\.recurring-daily-bar\s*\{/);
+
+  // Weekly 7-button weekday selector
+  assert.match(appSource, /recurring-weekday-grid/);
+  assert.match(appSource, /recurring-weekday-btn/);
+  assert.match(stylesSource, /\.recurring-weekday-btn\.is-active\s*\{/);
+
+  // Monthly 3-column inline grid & info banner
+  assert.match(appSource, /每月日期/);
+  assert.match(appSource, /若当月没有所选日期，将跳过该月。/);
+  assert.doesNotMatch(appSource, /自动适配到当月最后一天/);
+  // User explicitly discarded the switch to weekly shortcut button
+  assert.doesNotMatch(appSource, /切换为每周重复/);
+
+  // 2x2 schedule grid with individual labels and triggers
+  assert.match(appSource, /recurring-schedule-grid/);
+  assert.match(appSource, /recurring-schedule-field/);
+  assert.match(stylesSource, /\.recurring-schedule-grid\s*\{/);
+  assert.match(stylesSource, /\.recurring-schedule-btn\s*\{/);
 });

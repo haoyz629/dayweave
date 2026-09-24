@@ -78,6 +78,16 @@ fn confirm_task_draft(
 }
 
 #[tauri::command]
+fn confirm_creation_draft(state: State<'_, AppState>, draft_id: String, confirmation_token: String) -> Result<database::ConfirmedCreation, String> {
+    with_database(&state, |database| database.confirm_creation_draft(&draft_id, &confirmation_token))
+}
+
+#[tauri::command]
+fn import_legacy_recurring_draft(state: State<'_, AppState>, input: TaskDraftInput) -> Result<TaskDraftDto, String> {
+    with_database(&state, |database| database.import_legacy_recurring_draft(input))
+}
+
+#[tauri::command]
 fn discard_task_draft(
     state: State<'_, AppState>,
     draft_id: String,
@@ -773,6 +783,8 @@ pub fn run() {
             save_task_draft,
             list_task_drafts,
             confirm_task_draft,
+            confirm_creation_draft,
+            import_legacy_recurring_draft,
             discard_task_draft,
             list_tasks,
             create_recurring_item,

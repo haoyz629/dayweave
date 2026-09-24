@@ -42,6 +42,8 @@ impl AiGeneratedTaskDraft {
             draft_kind: self.draft_kind,
             target_task_id: self.target_task_id,
             input: TaskDraftInput {
+            item_type: "task".into(),
+            recurring_settings: None,
             title: self.title,
             notes: self.notes,
             priority: self.priority,

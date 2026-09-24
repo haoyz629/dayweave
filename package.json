@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "test:create-type-switch": "node --experimental-strip-types --test src/create-type-switch.test.mjs",
     "test:recycle-retention": "node --experimental-strip-types --test src/recycle-retention.test.mjs",
     "test:task-workload": "node --test src/task-workload.test.mjs",
     "test:ui-copy": "node --test src/ui-copy.test.mjs",

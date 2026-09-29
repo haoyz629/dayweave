@@ -9,10 +9,23 @@ import {
   focusedTimeRangeWindow,
   normalizeClockInput,
   sanitizeTimeInput,
+  selectDateBoundary,
   shiftTimeRangeFromStart,
   timeRangePresentationCanReuse,
   timeRangePresentationContains
 } from "./time-range-control.ts";
+
+test("date boundaries alternate and keep a valid date order", () => {
+  assert.deepEqual(selectDateBoundary("2026-09-10", "2026-09-12", "start", "2026-09-15"), {
+    start: "2026-09-15", end: "2026-09-15", activeField: "end"
+  });
+  assert.deepEqual(selectDateBoundary("2026-09-10", "2026-09-12", "end", "2026-09-08"), {
+    start: "2026-09-08", end: "2026-09-08", activeField: "start"
+  });
+  assert.deepEqual(selectDateBoundary("2026-09-10", "", "start", "2026-09-11"), {
+    start: "2026-09-11", end: "", activeField: "end"
+  });
+});
 
 test("manual clock input accepts short forms without losing minute precision", () => {
   assert.equal(normalizeClockInput("1"), "01:00");

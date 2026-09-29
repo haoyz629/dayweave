@@ -66,3 +66,26 @@ test("monthly recurring items honor their month interval", () => {
   assert.equal(recurringItemAppearsOnDate(item, "2026-10-01"), false);
   assert.equal(recurringItemAppearsOnDate(item, "2026-11-01"), true);
 });
+
+test("three legal workdays count National Day leave and makeup workdays", () => {
+  const item = { ...weeklyRecurringItem, frequency: "weekdays", interval_value: 3, starts_on: "2026-09-28" };
+  for (const [date, expected] of [
+    ["2026-09-28", true],
+    ["2026-09-30", false],
+    ["2026-10-01", false],
+    ["2026-10-07", false],
+    ["2026-10-08", true],
+    ["2026-10-10", false],
+    ["2026-10-12", true]
+  ]) {
+    assert.equal(recurringItemAppearsOnDate(item, date), expected, date);
+  }
+});
+
+test("legal holiday starts on the first workday and unknown years do not use weekday guesses", () => {
+  const item = { ...weeklyRecurringItem, frequency: "weekdays", interval_value: 1, starts_on: "2026-10-01" };
+  assert.equal(recurringItemAppearsOnDate(item, "2026-10-08"), true);
+  assert.equal(recurringItemAppearsOnDate(item, "2026-10-10"), true);
+  assert.equal(recurringItemAppearsOnDate(item, "2027-01-04"), false);
+  assert.equal(recurringItemAppearsOnDate({ ...item, starts_on: "2025-12-31" }, "2026-01-04"), false);
+});

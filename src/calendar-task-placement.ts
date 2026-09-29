@@ -1,18 +1,23 @@
+import officialWorkdays2026 from "./official-workdays-2026.json" with { type: "json" };
+
 export type CalendarTaskPlacement = {
   scheduled_dates: readonly string[];
   due_date: string | null;
   due_at: string | null;
 };
 
-export type CalendarRecurringPlacement = {
-  status: "active" | "paused" | "ended";
-  deleted_at: string | null;
+export type CalendarRecurrenceRule = {
   frequency: "daily" | "weekdays" | "weekly" | "monthly";
   interval_value: number;
   weekdays: readonly number[];
   month_day: number | null;
   starts_on: string;
   ends_on: string | null;
+};
+
+export type CalendarRecurringPlacement = CalendarRecurrenceRule & {
+  status: "active" | "paused" | "ended";
+  deleted_at: string | null;
 };
 
 export function taskAppearsOnDate(task: CalendarTaskPlacement, date: string) {
@@ -27,20 +32,44 @@ function dateParts(value: string) {
   return { year: Number(year), month: Number(month), day: Number(day) };
 }
 
-export function recurringItemAppearsOnDate(item: CalendarRecurringPlacement, date: string) {
-  if (item.deleted_at || item.status !== "active" || date < item.starts_on || item.ends_on && date > item.ends_on) return false;
-  const start = dateParts(item.starts_on);
+const officialHolidays = new Set(officialWorkdays2026.holidays.flatMap((group) => group.dates));
+const makeupWorkdays = new Set(officialWorkdays2026.makeupWorkdays.map(([date]) => date));
+
+function officialWorkdayOn(date: string): boolean | null {
+  if (date < officialWorkdays2026.from || date > officialWorkdays2026.to) return null;
+  if (officialHolidays.has(date)) return false;
+  if (makeupWorkdays.has(date)) return true;
+  const parts = dateParts(date);
+  if (!parts) return null;
+  const weekday = new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay();
+  return weekday !== 0 && weekday !== 6;
+}
+
+export function recurringRuleOccursOn(rule: CalendarRecurrenceRule, date: string) {
+  if (date < rule.starts_on || rule.ends_on && date > rule.ends_on) return false;
+  const start = dateParts(rule.starts_on);
   const target = dateParts(date);
-  if (!start || !target || item.interval_value < 1) return false;
+  if (!start || !target || rule.interval_value < 1) return false;
   const startDay = Date.UTC(start.year, start.month - 1, start.day) / 86_400_000;
   const targetDay = Date.UTC(target.year, target.month - 1, target.day) / 86_400_000;
   const days = targetDay - startDay;
   if (days < 0) return false;
   const weeks = Math.floor(days / 7);
   const weekday = new Date(Date.UTC(target.year, target.month - 1, target.day)).getUTCDay() || 7;
-  if (item.frequency === "daily") return days % item.interval_value === 0;
-  if (item.frequency === "weekdays") return weekday <= 5 && weeks % item.interval_value === 0;
-  if (item.frequency === "weekly") return item.weekdays.includes(weekday) && weeks % item.interval_value === 0;
+  if (rule.frequency === "daily") return days % rule.interval_value === 0;
+  if (rule.frequency === "weekdays") {
+    if (officialWorkdayOn(rule.starts_on) === null || officialWorkdayOn(date) !== true) return false;
+    let workdays = 0;
+    for (let day = startDay; day <= targetDay; day += 1) {
+      if (officialWorkdayOn(new Date(day * 86_400_000).toISOString().slice(0, 10))) workdays += 1;
+    }
+    return (workdays - 1) % rule.interval_value === 0;
+  }
+  if (rule.frequency === "weekly") return rule.weekdays.includes(weekday) && weeks % rule.interval_value === 0;
   const monthDelta = (target.year - start.year) * 12 + target.month - start.month;
-  return target.day === (item.month_day ?? 1) && monthDelta % item.interval_value === 0;
+  return target.day === (rule.month_day ?? 1) && monthDelta % rule.interval_value === 0;
+}
+
+export function recurringItemAppearsOnDate(item: CalendarRecurringPlacement, date: string) {
+  return !item.deleted_at && item.status === "active" && recurringRuleOccursOn(item, date);
 }

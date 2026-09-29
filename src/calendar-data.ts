@@ -1,8 +1,11 @@
+import officialWorkdays2026 from "./official-workdays-2026.json" with { type: "json" };
+
 export type CalendarWorkState = "rest" | "work";
 export type CalendarLabelKind = "holiday" | "festival" | "solar-term";
 
 export type CalendarDayInfo = {
   workState?: CalendarWorkState;
+  solarTerm?: string;
   labels: { text: string; kind: CalendarLabelKind }[];
 };
 
@@ -14,26 +17,11 @@ type OfficialHolidayGroup = {
 
 // 国务院办公厅：国办发明电〔2025〕7号
 // https://www.gov.cn/zhengce/content/202511/content_7047090.htm
-const OFFICIAL_HOLIDAYS_2026: OfficialHolidayGroup[] = [
-  { name: "元旦", dates: ["2026-01-01", "2026-01-02", "2026-01-03"], namedDate: "2026-01-01" },
-  { name: "春节", dates: ["2026-02-15", "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20", "2026-02-21", "2026-02-22", "2026-02-23"] },
-  { name: "清明节", dates: ["2026-04-04", "2026-04-05", "2026-04-06"] },
-  { name: "劳动节", dates: ["2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05"], namedDate: "2026-05-01" },
-  { name: "端午节", dates: ["2026-06-19", "2026-06-20", "2026-06-21"] },
-  { name: "中秋节", dates: ["2026-09-25", "2026-09-26", "2026-09-27"] },
-  { name: "国庆节", dates: ["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06", "2026-10-07"], namedDate: "2026-10-01" }
-];
+const OFFICIAL_HOLIDAYS_2026: OfficialHolidayGroup[] = officialWorkdays2026.holidays;
 
-const MAKEUP_WORKDAYS_2026 = new Map([
-  ["2026-01-04", "元旦"],
-  ["2026-02-14", "春节"],
-  ["2026-02-28", "春节"],
-  ["2026-05-09", "劳动节"],
-  ["2026-09-20", "中秋节"],
-  ["2026-10-10", "国庆节"]
-]);
+const MAKEUP_WORKDAYS_2026 = new Map<string, string>(officialWorkdays2026.makeupWorkdays.map(([date, name]) => [date, name]));
 
-export const OFFICIAL_HOLIDAY_COVERAGE = { from: "2026-01-01", to: "2026-12-31", version: "国务院办公厅 2026 年安排" } as const;
+export const OFFICIAL_HOLIDAY_COVERAGE = { from: officialWorkdays2026.from, to: officialWorkdays2026.to, version: officialWorkdays2026.version } as const;
 
 export function officialHolidayCoverageFor(date: string) {
   return date >= OFFICIAL_HOLIDAY_COVERAGE.from && date <= OFFICIAL_HOLIDAY_COVERAGE.to;
@@ -127,5 +115,5 @@ export function calendarDayInfo(date: string): CalendarDayInfo | null {
     labels.push({ text: solarTerm, kind: "solar-term" });
   }
 
-  return workState || labels.length ? { workState, labels } : null;
+  return workState || labels.length || solarTerm ? { workState, solarTerm, labels } : null;
 }

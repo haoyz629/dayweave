@@ -101,7 +101,7 @@ import {
   setUiSetting
 } from "./tauri";
 import { calendarDayInfo, lunarDayLabel, officialHolidayCoverageFor, OFFICIAL_HOLIDAY_COVERAGE } from "./calendar-data";
-import { recurringItemAppearsOnDate, taskAppearsOnDate } from "./calendar-task-placement";
+import { recurringItemAppearsOnDate, recurringRuleOccursOn, taskAppearsOnDate } from "./calendar-task-placement";
 import { timelineDurationHeight, timelineLaneLayout as calculateTimelineLanes, TimelineLane } from "./timeline-lane-layout";
 import {
   closestTimeRangeEdge,
@@ -112,6 +112,7 @@ import {
   focusedTimeRangeWindow,
   normalizeClockInput,
   sanitizeTimeInput,
+  selectDateBoundary,
   shiftTimeRangeFromStart,
   timeRangePresentationCanReuse,
   timeRangePresentationContains,
@@ -133,6 +134,7 @@ import {
   taskWorkloadIsValid
 } from "./task-workload";
 import { syncFormCommonFields } from "./create-type-switch";
+import { joinTaskNotes, splitTaskNotes } from "./task-notes";
 
 type IconName =
   | "today" | "tasks" | "calendar" | "review" | "settings"
@@ -387,27 +389,13 @@ function recurringFormForDraft(draft: TaskDraft, today: string): RecurringItemFo
   };
 }
 
-function recurringItemOccursOn(form: RecurringItemForm, date: string) {
-  if (!form.starts_on || date < form.starts_on || form.ends_on && date > form.ends_on) return false;
-  const start = new Date(`${form.starts_on}T00:00:00+08:00`);
-  const target = new Date(`${date}T00:00:00+08:00`);
-  const days = Math.round((target.getTime() - start.getTime()) / 86_400_000);
-  const weeks = Math.floor(days / 7);
-  if (form.frequency === "daily") return days % form.interval_value === 0;
-  if (form.frequency === "weekdays") return weekdayNumber(date) <= 5 && weeks % form.interval_value === 0;
-  if (form.frequency === "weekly") return form.weekdays.includes(weekdayNumber(date)) && weeks % form.interval_value === 0;
-  const startMonth = start.getUTCFullYear() * 12 + start.getUTCMonth();
-  const targetMonth = target.getUTCFullYear() * 12 + target.getUTCMonth();
-  return Number(date.slice(8, 10)) === (form.month_day ?? 1) && (targetMonth - startMonth) % form.interval_value === 0;
-}
-
 function recurringItemPreviewDates(form: RecurringItemForm) {
   const dates: string[] = [];
   if (!form.starts_on || form.interval_value < 1 || form.frequency === "weekly" && !form.weekdays.length) return dates;
   for (let offset = 0; offset <= 1100 && dates.length < 3; offset += 1) {
     const date = shiftDateValue(form.starts_on, offset);
     if (form.ends_on && date > form.ends_on) break;
-    if (recurringItemOccursOn(form, date)) dates.push(date);
+    if (recurringRuleOccursOn(form, date)) dates.push(date);
   }
   return dates;
 }
@@ -868,10 +856,16 @@ function TaskScheduleEditor({ form, disabled, compact = false, estimateId, onCha
   }
 
   function updatePickerDate(date: string) {
-    setOpenPicker((current) => current ? {
-      ...current,
-      [current.activeField === "start" ? "earliest_start_date" : "due_date"]: date
-    } : current);
+    setOpenPicker((current) => {
+      if (!current) return current;
+      const next = selectDateBoundary(current.earliest_start_date, current.due_date, current.activeField, date);
+      return {
+        ...current,
+        earliest_start_date: next.start,
+        due_date: next.end,
+        activeField: next.activeField
+      };
+    });
     if (date.slice(0, 7) !== monthKey) setMonthKey(date.slice(0, 7));
   }
 
@@ -1013,7 +1007,13 @@ function TaskScheduleEditor({ form, disabled, compact = false, estimateId, onCha
 
   return <>
   <div className="apple-schedule-editor" role="group" aria-label="任务时间范围">
-      <header className={compact ? "apple-schedule-toolbar" : undefined}>{compact && <span className="apple-schedule-compact-title">安排与时限</span>}<div className="apple-schedule-header-actions">{sameDay ? <output className="apple-schedule-workload" aria-live="polite"><i className="apple-schedule-workload-icon" aria-hidden="true"><Icon name="clock" size={15} /></i><span>预估</span><strong>{sameDayMinutes === null ? "待计算" : <WorkloadTimeDigits minutes={sameDayMinutes} />}</strong><small>{sameDayMinutes === null ? "补全有效时间" : "自动计算"}</small></output> : crossDay ? <output className="apple-schedule-workload" aria-live="polite"><i className="apple-schedule-workload-icon" aria-hidden="true"><Icon name="clock" size={15} /></i><span>预估总投入</span><strong><WorkloadTimeDigits minutes={form.estimated_minutes} /></strong><small>{dailyMinutes !== null && form.estimated_minutes !== null ? `共 ${dayCount} 天 · 自动计算` : form.estimated_minutes !== null ? "原总投入已保留" : "填写后自动计算"}</small></output> : !compact ? <div><strong>时间范围</strong><span>开始和结束时间均为必填；未补完整时只保存草稿。</span></div> : null}{form.earliest_start_date || form.due_date ? <button type="button" disabled={disabled} onClick={() => { handleScheduleChange({ ...form, earliest_start_date: "", earliest_start_time: "", due_date: "", due_time: "" }); setOpenPicker(null); }}>清除时间</button> : <button type="button" disabled={disabled} onClick={() => { const defaults = newTaskDefaultForm(); handleScheduleChange({ ...form, earliest_start_date: defaults.earliest_start_date, earliest_start_time: defaults.earliest_start_time, due_date: defaults.due_date, due_time: defaults.due_time }); }}>恢复推荐</button>}</div></header>
+      <header className={compact ? "apple-schedule-toolbar" : undefined}>
+        {compact && <span className="apple-schedule-compact-title">安排与时限</span>}
+        <div className="apple-schedule-header-actions">
+          {sameDay ? <output className="apple-schedule-workload" aria-live="polite"><i className="apple-schedule-workload-icon" aria-hidden="true"><Icon name="clock" size={15} /></i><span>预估</span><strong>{sameDayMinutes === null ? "待计算" : <WorkloadTimeDigits minutes={sameDayMinutes} />}</strong><small>{sameDayMinutes === null ? "补全有效时间" : "自动计算"}</small></output> : crossDay ? <output className="apple-schedule-workload" aria-live="polite"><i className="apple-schedule-workload-icon" aria-hidden="true"><Icon name="clock" size={15} /></i><span>预估总投入</span><strong><WorkloadTimeDigits minutes={form.estimated_minutes} /></strong><small>{dailyMinutes !== null && form.estimated_minutes !== null ? `共 ${dayCount} 天 · 自动计算` : form.estimated_minutes !== null ? "原总投入已保留" : "填写后自动计算"}</small></output> : !compact ? <div><strong>时间范围</strong><span>开始和结束时间均为必填；未补完整时只保存草稿。</span></div> : null}
+          {form.earliest_start_date || form.due_date ? <button type="button" disabled={disabled} onClick={() => { handleScheduleChange({ ...form, earliest_start_date: "", earliest_start_time: "", due_date: "", due_time: "" }); setOpenPicker(null); }}>清除时间</button> : <button type="button" disabled={disabled} onClick={() => { const defaults = newTaskDefaultForm(); handleScheduleChange({ ...form, earliest_start_date: defaults.earliest_start_date, earliest_start_time: defaults.earliest_start_time, due_date: defaults.due_date, due_time: defaults.due_time }); }}>恢复推荐</button>}
+        </div>
+      </header>
     <div className="apple-schedule-rows">{rows.map((row) => <div className="apple-schedule-row" key={row.field}>
       <span className="apple-schedule-label">{row.label}</span>
       <div className="apple-schedule-values"><button type="button" className={openPicker?.activeField === row.field ? "is-active" : ""} disabled={disabled} aria-haspopup="dialog" aria-expanded={openPicker?.activeField === row.field} onClick={() => openSchedulePicker(row.field)}><Icon name="calendar" size={14} />{pickerDateLabel(row.date)}</button><button type="button" className={openPicker?.activeField === row.field ? "is-active" : ""} disabled={disabled} aria-haspopup="dialog" aria-expanded={openPicker?.activeField === row.field} onClick={() => openSchedulePicker(row.field)}><Icon name="clock" size={14} />{row.time || "选择时间"}</button></div>
@@ -1122,13 +1122,30 @@ function TaskScheduleEditor({ form, disabled, compact = false, estimateId, onCha
   </>;
 }
 
+function TaskNotesInputs({ id, value, disabled = false, maxLength, onChange }: {
+  id: string;
+  value: string;
+  disabled?: boolean;
+  maxLength?: number;
+  onChange: (value: string) => void;
+}) {
+  const { url, body } = splitTaskNotes(value);
+  const urlPrefixLength = url ? 5 + (body ? 2 : 0) : 0;
+  return <div className="task-notes-inputs">
+    <label htmlFor={`${id}-url`} className="sr-only">URL</label>
+    <input id={`${id}-url`} type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} disabled={disabled} value={url} maxLength={maxLength === undefined ? undefined : Math.max(0, maxLength - body.length - 7)} placeholder="URL" onChange={(event) => onChange(joinTaskNotes(event.target.value, body))} />
+    <span className="task-notes-divider" aria-hidden="true" />
+    <label htmlFor={id} className="sr-only">备注</label>
+    <textarea id={id} rows={3} disabled={disabled} value={body} maxLength={maxLength === undefined ? undefined : Math.max(0, maxLength - url.length - urlPrefixLength)} placeholder="备注" onChange={(event) => onChange(joinTaskNotes(url, event.target.value))} />
+  </div>;
+}
+
 function TaskEditorRegions({
   form,
   disabled,
   idPrefix,
   autoFocusTitle = false,
   compact = false,
-  notesAfterSchedule = false,
   onChange,
   onScheduleChange
 }: {
@@ -1137,7 +1154,6 @@ function TaskEditorRegions({
   idPrefix: string;
   autoFocusTitle?: boolean;
   compact?: boolean;
-  notesAfterSchedule?: boolean;
   onChange: (form: NewTaskForm) => void;
   onScheduleChange: (form: NewTaskForm) => void;
 }) {
@@ -1179,14 +1195,15 @@ function TaskEditorRegions({
     medium: { label: "中优先级" },
     low: { label: "低优先级" },
   };
-  const notesField = <label htmlFor={notesId}>{compact ? "备注说明" : "备注"}<textarea id={notesId} value={form.notes} rows={3} placeholder={compact ? "补充说明、清单或背景链接（可选）…" : "补充说明（可选）"} onChange={(event) => onChange({ ...form, notes: event.target.value })} /></label>;
+  const notesField = <TaskNotesInputs id={notesId} value={form.notes} disabled={disabled} onChange={(notes) => onChange({ ...form, notes })} />;
 
   return <>
     <section className="task-form-region task-content-region" aria-labelledby={contentTitleId}>
       <header><div className="task-region-title-row"><strong id={contentTitleId}>任务内容</strong><span>先记下要完成的事，细节可随后补充。</span></div></header>
       <div className="task-content-fields">
         <div className="task-title-heading-row">
-          <label htmlFor={titleId} className="task-title-label">{compact ? "任务标题" : "标题"}</label>
+          <label htmlFor={titleId} className="sr-only">标题</label>
+          <input id={titleId} className="task-title-input" autoFocus={autoFocusTitle} value={form.title} maxLength={300} required placeholder="标题" onChange={(event) => onChange({ ...form, title: event.target.value })} />
           <div ref={priorityDropdownRef} className={`priority-select-control priority-tone-${form.priority ?? "unset"}`}>
             <select id={priorityId} value={form.priority ?? ""} onChange={(event) => onChange({ ...form, priority: (event.target.value || null) as NewTaskForm["priority"] })} className="sr-only" tabIndex={-1} aria-hidden="true">
               <option value="">未设置优先级</option>
@@ -1247,8 +1264,6 @@ function TaskEditorRegions({
             )}
           </div>
         </div>
-        <input id={titleId} autoFocus={autoFocusTitle} value={form.title} maxLength={300} required placeholder="例如：整理项目周报" onChange={(event) => onChange({ ...form, title: event.target.value })} />
-        {!notesAfterSchedule && notesField}
       </div>
     </section>
     <section className="task-form-region task-planning-section" aria-labelledby={attributesTitleId}>
@@ -1262,7 +1277,7 @@ function TaskEditorRegions({
         onScheduleChange={onScheduleChange}
       />
     </section>
-    {notesAfterSchedule && <section className="task-form-region task-notes-region" aria-label="备注"><div className="task-content-fields">{notesField}</div></section>}
+    <section className="task-form-region task-notes-region" aria-label="备注"><div className="task-content-fields">{notesField}</div></section>
   </>;
 }
 
@@ -1413,21 +1428,10 @@ function RecurringValidityPicker({
   }
 
   function handleDateClick(dateKey: string) {
-    if (activeField === "start") {
-      setDraftStartsOn(dateKey);
-      if (draftEndsOn && draftEndsOn < dateKey) {
-        setDraftEndsOn(dateKey);
-      }
-      setActiveField("end");
-    } else {
-      if (dateKey < draftStartsOn) {
-        setDraftStartsOn(dateKey);
-        setDraftEndsOn(dateKey);
-      } else {
-        setDraftEndsOn(dateKey);
-      }
-      setActiveField("start");
-    }
+    const next = selectDateBoundary(draftStartsOn, draftEndsOn, activeField, dateKey);
+    setDraftStartsOn(next.start);
+    setDraftEndsOn(next.end);
+    setActiveField(next.activeField);
   }
 
   function applyValidityPreset(action: "open" | "days" | "year_end", days = 0) {
@@ -1917,14 +1921,30 @@ function RecurringItemEditor({ form, disabled, idPrefix, autoFocusTitle = false,
   const notesId = `${idPrefix}-notes`;
   const [notesExpanded, setNotesExpanded] = useState(() => Boolean(form.notes.trim()));
   const [validityPicker, setValidityPicker] = useState<{ activeField: "start" | "end" | "time" | "duration" } | null>(null);
+  const [intervalNoticeId, setIntervalNoticeId] = useState(0);
+  const intervalShakeRef = useRef<Animation | null>(null);
   useEffect(() => {
-    if (isCreating && form.notes.trim()) setNotesExpanded(true);
-  }, [isCreating, form.notes]);
+    if (form.notes.trim()) setNotesExpanded(true);
+  }, [form.notes]);
+  useEffect(() => {
+    if (!intervalNoticeId) return;
+    const timer = window.setTimeout(() => setIntervalNoticeId(0), 2400);
+    return () => window.clearTimeout(timer);
+  }, [intervalNoticeId]);
+  function showIntervalMinimum(input: HTMLInputElement) {
+    setIntervalNoticeId((current) => current + 1);
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    intervalShakeRef.current?.cancel();
+    intervalShakeRef.current = input.animate(
+      [{ transform: "translateX(0)" }, { transform: "translateX(-4px)" }, { transform: "translateX(4px)" }, { transform: "translateX(-3px)" }, { transform: "translateX(0)" }],
+      { duration: 280, easing: "ease-in-out" }
+    );
+  }
   const today = shanghaiDateValue();
   const previewDates = recurringItemPreviewDates(form);
   const weekdayLabels = ["一", "二", "三", "四", "五", "六", "日"];
   const isDailyLike = form.frequency === "daily" || form.frequency === "weekdays";
-  const intervalUnit = form.frequency === "daily" ? "天" : form.frequency === "monthly" ? "个月" : "周";
+  const intervalUnit = form.frequency === "weekdays" ? "工作日" : form.frequency === "daily" ? "天" : form.frequency === "monthly" ? "个月" : "周";
   const displayHelp = form.display_time && form.display_duration_minutes
     ? `${form.display_time} 开始，在今日时间线上显示 ${form.display_duration_minutes} 分钟。`
     : form.display_time
@@ -1937,9 +1957,7 @@ function RecurringItemEditor({ form, disabled, idPrefix, autoFocusTitle = false,
     {/* BEGIN: EventBasicInfo */}
     <section className="recurring-modal-section recurring-basic-info-card recurring-card" data-purpose="basic-info-form" aria-label="事项内容">
       <div>
-        <label htmlFor={titleId} className="recurring-modal-field-label">
-          {compact ? "事项标题" : "标题"}
-        </label>
+        <label htmlFor={titleId} className="sr-only">标题</label>
         <input
           id={titleId}
           type="text"
@@ -1948,26 +1966,11 @@ function RecurringItemEditor({ form, disabled, idPrefix, autoFocusTitle = false,
           maxLength={300}
           disabled={disabled}
           value={form.title}
-          placeholder="例如：晨间拉伸"
+          placeholder="标题"
           className="recurring-modal-input"
           onChange={(event) => onChange({ ...form, title: event.target.value })}
         />
       </div>
-      {!isCreating && <div>
-        <label htmlFor={notesId} className="recurring-modal-field-label">
-          {compact ? "备注说明" : "备注"}
-        </label>
-        <textarea
-          id={notesId}
-          rows={3}
-          maxLength={2000}
-          disabled={disabled}
-          value={form.notes}
-          placeholder={compact ? "补充说明、清单或背景链接（可选）…" : "补充说明（可选）"}
-          className="recurring-modal-textarea"
-          onChange={(event) => onChange({ ...form, notes: event.target.value })}
-        />
-      </div>}
     </section>
     {/* END: EventBasicInfo */}
 
@@ -2004,7 +2007,7 @@ function RecurringItemEditor({ form, disabled, idPrefix, autoFocusTitle = false,
           </div>
         </div>
         <div className="recurring-field-inline">
-          <label className="recurring-inline-label" htmlFor={`${idPrefix}-interval`}>重复间隔</label>
+          <label className="recurring-inline-label" htmlFor={`${idPrefix}-interval`}>重复周期</label>
           <div className="recurring-input-with-suffix">
             <input
               id={`${idPrefix}-interval`}
@@ -2013,9 +2016,25 @@ function RecurringItemEditor({ form, disabled, idPrefix, autoFocusTitle = false,
               max={365}
               disabled={disabled}
               value={form.interval_value}
-              onChange={(event) => onChange({ ...form, interval_value: Math.max(1, Number(event.target.value) || 1) })}
+              aria-describedby={intervalNoticeId ? `${idPrefix}-interval-popover` : undefined}
+              onKeyDown={(event) => {
+                if (form.interval_value === 1 && (event.key === "Backspace" || event.key === "Delete")) {
+                  event.preventDefault();
+                  showIntervalMinimum(event.currentTarget);
+                }
+              }}
+              onChange={(event) => {
+                const value = Number(event.currentTarget.value);
+                if (!Number.isFinite(value) || value < 1 || !event.currentTarget.value) {
+                  if (form.interval_value === 1) showIntervalMinimum(event.currentTarget);
+                  else onChange({ ...form, interval_value: 1 });
+                  return;
+                }
+                onChange({ ...form, interval_value: value });
+              }}
             />
             <span className="recurring-input-suffix">{intervalUnit}</span>
+            {intervalNoticeId > 0 && <span key={intervalNoticeId} id={`${idPrefix}-interval-popover`} className="recurring-minimum-popover" role="status">周期不能小于 1 {intervalUnit}</span>}
           </div>
         </div>
         {form.frequency === "monthly" && (
@@ -2036,7 +2055,6 @@ function RecurringItemEditor({ form, disabled, idPrefix, autoFocusTitle = false,
           </div>
         )}
       </div>
-
       <div className="recurring-frequency-bar-container">
         {isDailyLike && (
           <div className="recurring-daily-bar">
@@ -2067,7 +2085,7 @@ function RecurringItemEditor({ form, disabled, idPrefix, autoFocusTitle = false,
             </div>
             <span className="recurring-daily-tag">
               {form.frequency === "weekdays"
-                ? (form.interval_value === 1 ? "每个工作日发生" : `每 ${form.interval_value} 周的工作日`)
+                ? `每 ${form.interval_value} 个工作日发生一次`
                 : `每 ${form.interval_value} 天发生一次`}
             </span>
           </div>
@@ -2208,16 +2226,15 @@ function RecurringItemEditor({ form, disabled, idPrefix, autoFocusTitle = false,
     </section>
     {/* END: RepeatScheduleConfiguration */}
 
-    {isCreating && <section className="recurring-optional-notes" aria-label="备注说明">
-      <button type="button" className="recurring-notes-toggle" disabled={disabled} aria-expanded={notesExpanded} aria-controls={`${notesId}-panel`} onClick={() => setNotesExpanded((current) => !current)}>
-        <span className="recurring-notes-toggle-main"><span className="recurring-notes-toggle-icon" aria-hidden="true"><Icon name="plus" size={12} /></span>{form.notes.trim() ? "备注说明" : "添加备注说明（可选）"}</span>
-        <span className="recurring-notes-toggle-hint">{notesExpanded ? "点击收起说明" : form.notes.trim() ? "点击查看说明" : "点击补充说明"}</span>
+    <section className={`recurring-optional-notes${notesExpanded ? " is-expanded" : ""}`} aria-label="备注">
+      <button type="button" className="recurring-notes-toggle" disabled={disabled} aria-label={notesExpanded ? "收起备注" : undefined} aria-expanded={notesExpanded} aria-controls={`${notesId}-panel`} onClick={() => setNotesExpanded((current) => !current)}>
+        <span className="recurring-notes-toggle-main">{notesExpanded ? <span className="sr-only">备注</span> : <><span className="recurring-notes-toggle-icon" aria-hidden="true"><Icon name="plus" size={12} /></span>{form.notes.trim() ? "查看备注" : "添加备注（可选）"}</>}</span>
+        <span className="recurring-notes-toggle-hint">{notesExpanded ? <>收起<Icon name="chevron-down" size={14} /></> : form.notes.trim() ? "点击查看说明" : "点击补充说明"}</span>
       </button>
       <div id={`${notesId}-panel`} className="recurring-notes-panel" hidden={!notesExpanded}>
-        <label htmlFor={notesId} className="recurring-modal-field-label">备注说明</label>
-        <textarea id={notesId} rows={3} maxLength={2000} disabled={disabled} value={form.notes} placeholder="补充说明、清单或背景链接（可选）…" className="recurring-modal-textarea" onChange={(event) => onChange({ ...form, notes: event.target.value })} />
+        <TaskNotesInputs id={notesId} value={form.notes} disabled={disabled} maxLength={2000} onChange={(notes) => onChange({ ...form, notes })} />
       </div>
-    </section>}
+    </section>
 
     {validityPicker && (
       <RecurringValidityPicker
@@ -2419,6 +2436,7 @@ function RecurringModalDialog({
 function TaskCapsuleContent({
   title,
   notes,
+  notesArePlainText = false,
   priority,
   timing,
   minutes,
@@ -2432,6 +2450,7 @@ function TaskCapsuleContent({
 }: {
   title: string;
   notes?: string | null;
+  notesArePlainText?: boolean;
   priority?: Task["priority"];
   timing?: string | null;
   minutes?: number | null;
@@ -2443,6 +2462,7 @@ function TaskCapsuleContent({
   statusTone?: TaskStatus | "draft" | "active" | "paused" | "ended";
   compact?: boolean;
 }) {
+  const visibleNotes = notesArePlainText ? notes : splitTaskNotes(notes ?? "").body;
   return <span className={`task-capsule-content${variant === "recurring" ? " recurring" : ""}${compact ? " compact" : ""}`}>
     <span className="task-capsule-heading">
       <strong title={title}>{title}</strong>
@@ -2452,7 +2472,7 @@ function TaskCapsuleContent({
         {sourceType && <span className={`task-source-icon source-${sourceType}`} role="img" aria-label={sourceType === "ai_assistant" ? "AI 创建" : "手动创建"} title={sourceType === "ai_assistant" ? "AI 创建" : "手动创建"}><Icon name={sourceType === "ai_assistant" ? "sparkle" : "user"} size={13} /></span>}
       </span>
     </span>
-    {notes && <span className="task-capsule-notes" title={notes}>{notes}</span>}
+    {visibleNotes && <span className="task-capsule-notes" title={visibleNotes}>{visibleNotes}</span>}
     <span className="task-capsule-footer">
       <span className="task-capsule-facts">
         {facts.map((fact, index) => <span key={`${fact.icon}-${fact.label}-${index}`}><Icon name={fact.icon} size={13} />{fact.label}</span>)}
@@ -2533,7 +2553,7 @@ function DeletedTaskDetails({ task }: { task: Task }) {
 
 function recurringScheduleLabel(item: RecurringItem) {
   if (item.frequency === "daily") return item.interval_value === 1 ? "每天" : `每 ${item.interval_value} 天`;
-  if (item.frequency === "weekdays") return item.interval_value === 1 ? "每个工作日" : `每 ${item.interval_value} 周的工作日`;
+  if (item.frequency === "weekdays") return `每 ${item.interval_value} 个工作日`;
   if (item.frequency === "monthly") return `${item.interval_value === 1 ? "每月" : `每 ${item.interval_value} 个月`} ${item.month_day ?? 1} 日`;
   const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
   const selectedDays = item.weekdays.map((day) => `周${weekdays[day - 1]}`).join("、") || "未选择星期";
@@ -2544,13 +2564,13 @@ function DeletedRecurringItemDetails({ item }: { item: RecurringItem }) {
   return <section className="terminal-task-detail recycled-task-detail" aria-label="回收站重复事项详情">
     <header><h2>{item.title}</h2><span className="terminal-task-status deleted"><Icon name="trash" size={14} />回收站</span></header>
     <p className="terminal-task-help">该重复事项已结束并移入回收站，过去的记录仍会保留。</p>
-    {item.notes && <p className="terminal-task-notes">{item.notes}</p>}
     <dl className="terminal-task-facts">
       <div><dt>重复规则</dt><dd>{recurringScheduleLabel(item)}</dd></div>
       <div><dt>有效日期</dt><dd>{item.starts_on} 至 {item.ends_on ?? "长期"}</dd></div>
       <div><dt>今日页显示</dt><dd>{item.display_time ?? "不指定时间"}</dd></div>
       <div><dt>显示时长</dt><dd>{item.display_duration_minutes ? `${item.display_duration_minutes} 分钟` : "未设置"}</dd></div>
     </dl>
+    {item.notes && <p className="terminal-task-notes">{item.notes}</p>}
   </section>;
 }
 
@@ -2560,13 +2580,13 @@ function EndedRecurringItemDetails({ item, busy, onTrash }: {
   return <section className="terminal-task-detail" aria-label="已结束重复事项详情">
     <header><h2>{item.title}</h2><span className="terminal-task-status ended"><Icon name="check" size={14} />已结束</span></header>
     <p className="terminal-task-help">该事项不会再出现，过去的记录仍会保留。现在可以将它移入回收站。</p>
-    {item.notes && <p className="terminal-task-notes">{item.notes}</p>}
     <dl className="terminal-task-facts">
       <div><dt>重复规则</dt><dd>{recurringScheduleLabel(item)}</dd></div>
       <div><dt>有效日期</dt><dd>{item.starts_on} 至 {item.ends_on ?? "长期"}</dd></div>
       <div><dt>今日页显示</dt><dd>{item.display_time ?? "不指定时间"}</dd></div>
       <div><dt>显示时长</dt><dd>{item.display_duration_minutes ? `${item.display_duration_minutes} 分钟` : "未设置"}</dd></div>
     </dl>
+    {item.notes && <p className="terminal-task-notes">{item.notes}</p>}
     <footer><button type="button" className="terminal-task-trash" disabled={busy} onClick={onTrash}><Icon name="trash" size={14} />移入回收站</button></footer>
   </section>;
 }
@@ -3815,7 +3835,7 @@ function TaskWorkspace({
                   </div>
                 )}
                 {createItemType === "task" ? (
-                  <TaskEditorRegions form={newTaskForm} disabled={busy} idPrefix="new-task" autoFocusTitle compact notesAfterSchedule onChange={updateNewTaskFields} onScheduleChange={updateNewTaskSchedule} />
+                  <TaskEditorRegions form={newTaskForm} disabled={busy} idPrefix="new-task" autoFocusTitle compact onChange={updateNewTaskFields} onScheduleChange={updateNewTaskSchedule} />
                 ) : (
                   <RecurringItemEditor form={recurringForm} disabled={busy} idPrefix="new-recurring" autoFocusTitle compact isCreating onChange={(next) => { newTaskEditRevision.current += 1; setNewTaskAutosaveArmed(true); setRecurringForm(next); }} />
                 )}
@@ -3894,7 +3914,7 @@ function TaskWorkspace({
                 </div>
               </header>
               <div className="task-compact-body">
-                <RecurringItemEditor form={recurringForm} disabled={busy} idPrefix="edit-recurring" compact onChange={setRecurringForm} />
+                <RecurringItemEditor key={selectedRecurringItem.id} form={recurringForm} disabled={busy} idPrefix="edit-recurring" compact onChange={setRecurringForm} />
               </div>
               <footer className="task-compact-actions">
                 <div className="task-compact-lifecycle">
@@ -5772,7 +5792,8 @@ function TodayPage({
 
         {todayView === "month" ? <main className="today-month-view" aria-label={monthTitle}>
           <section className="month-sheet today-month-sheet">
-            <div className="month-controls"><button type="button" aria-label="上一个月" onClick={() => moveMonth(-1)}><Icon name="chevron-left" size={17} /></button><strong>{monthTitle}</strong><button type="button" aria-label="下一个月" onClick={() => moveMonth(1)}><Icon name="chevron-right" size={17} /></button></div><div className={`holiday-coverage${holidayCoverageAvailable ? " available" : " missing"}`} role="status">{holidayCoverageAvailable ? "已包含 2026 年法定节假日与调休" : "当前月份暂无法定节假日和调休信息；农历与节气仍可显示"}</div>
+            <div className="month-controls"><button type="button" aria-label="上一个月" onClick={() => moveMonth(-1)}><Icon name="chevron-left" size={17} /></button><strong>{monthTitle}</strong><button type="button" aria-label="下一个月" onClick={() => moveMonth(1)}><Icon name="chevron-right" size={17} /></button></div>
+            {!holidayCoverageAvailable && <div className="holiday-coverage missing" role="status">当前月份暂无法定节假日和调休信息；农历与节气仍可显示</div>}
             <div className="weekday-row">{["一", "二", "三", "四", "五", "六", "日"].map((day) => <span key={day}>周{day}</span>)}</div>
             <div className="month-grid" role="grid" aria-label={monthTitle}>{cells.map((cell) => {
               const dayTasks = tasks.filter((task) => task.status !== "deleted" && taskAppearsOnDate(task, cell.key));
@@ -5782,10 +5803,13 @@ function TodayPage({
               const dayInfo = calendarDayInfo(cell.key);
               const lunarLabel = lunarDayLabel(cell.key);
               const workStateLabel = dayInfo?.workState === "rest" ? "休" : dayInfo?.workState === "work" ? "班" : "";
+              const solarTerm = dayInfo?.solarTerm ?? dayInfo?.labels.find((label) => label.kind === "solar-term")?.text;
+              const otherLabels = dayInfo?.labels.filter((label) => label.kind !== "solar-term") ?? [];
               const calendarLabel = dayInfo?.labels.map((label) => label.text).join("、") ?? "";
               return <button key={cell.key} type="button" role="gridcell" aria-selected={selectedDate === cell.key} aria-label={`${cell.key}${lunarLabel ? `，农历${lunarLabel}` : ""}${calendarLabel ? `，${calendarLabel}` : ""}${workStateLabel ? `，${workStateLabel === "休" ? "放假" : "调休上班"}` : ""}${count ? `，${count} 项任务` : ""}${recurringCount ? `，${recurringCount} 项重复事项` : ""}`} className={`${cell.inMonth ? "in-month" : "outside"}${cell.key === today ? " today" : ""}${selectedDate === cell.key ? " selected" : ""}${dayInfo?.workState ? ` ${dayInfo.workState}` : ""}${count ? " has-tasks" : ""}${recurringCount ? " has-recurring-items" : ""}`} onClick={() => selectCalendarDate(cell.key)} onDoubleClick={() => openTimelineDate(cell.key)}>
                 <span className="calendar-day-head"><span className="day-number"><span className="solar-day-number">{cell.day}</span>{lunarLabel && <span className="lunar-day-number">{lunarLabel}</span>}</span>{workStateLabel && <span className={`work-state ${dayInfo?.workState}`}>{workStateLabel}</span>}</span>
-                {dayInfo?.labels.length ? <span className="calendar-labels">{dayInfo.labels.map((label) => <span key={`${label.kind}:${label.text}`} className={`calendar-label ${label.kind}`}>{label.text}</span>)}</span> : null}
+                {solarTerm && <span className="calendar-solar-term">{solarTerm}</span>}
+                {otherLabels.length ? <span className="calendar-labels">{otherLabels.map((label) => <span key={`${label.kind}:${label.text}`} className={`calendar-label ${label.kind}`}>{label.text}</span>)}</span> : null}
                 {count > 0 || recurringCount > 0 ? <span className="calendar-indicators" aria-hidden="true">
                   {count > 0 && <span className={completeOnly ? "task-indicator complete" : "task-indicator"}><i />{count}<span>项</span></span>}
                   {recurringCount > 0 && <span className="task-indicator recurring"><Icon name="restore" size={10} />{recurringCount}<span>项</span></span>}
@@ -5829,11 +5853,11 @@ function TodayPage({
                     detail: waitingTaskTooltipDetail(task, item.reason),
                     tone: "task"
                   })}
-                ><TaskCapsuleContent title={item.task_title} notes={item.reason} priority={task?.priority} timing={task ? taskTimingFact(task, selectedDate) : null} minutes={item.estimated_minutes} status="未排入" sourceType={task?.source_type} compact /><button type="button" className="waiting-task-action" disabled={busy} aria-label={item.estimated_minutes ? `将“${item.task_title}”加入时间线` : `打开“${item.task_title}”并补充预计时长`} onClick={(event) => !item.estimated_minutes ? onOpenTasks(item.task_id) : void includeUnscheduledTask(item, preview, event.currentTarget)}>{actionLabel}</button></div>;
+                ><TaskCapsuleContent title={item.task_title} notes={item.reason} notesArePlainText priority={task?.priority} timing={task ? taskTimingFact(task, selectedDate) : null} minutes={item.estimated_minutes} status="未排入" sourceType={task?.source_type} compact /><button type="button" className="waiting-task-action" disabled={busy} aria-label={item.estimated_minutes ? `将“${item.task_title}”加入时间线` : `打开“${item.task_title}”并补充预计时长`} onClick={(event) => !item.estimated_minutes ? onOpenTasks(item.task_id) : void includeUnscheduledTask(item, preview, event.currentTarget)}>{actionLabel}</button></div>;
               }) : <span className="timeline-lane-empty">所有任务都已排入草案</span> : waitingTasks.length ? waitingTasks.map((task) => {
                 const canInclude = hasConfirmedPlan && !isPastDate;
                 const suggestedMinutes = waitingTaskMinutes(task);
-                const taskContent = <TaskCapsuleContent title={task.title} notes={task.notes || waitingTaskLabel(task)} priority={task.priority} timing={taskTimingFact(task, selectedDate)} minutes={suggestedMinutes} status="待安排" sourceType={task.source_type} compact />;
+                const taskContent = <TaskCapsuleContent title={task.title} notes={task.notes || waitingTaskLabel(task)} notesArePlainText={!task.notes} priority={task.priority} timing={taskTimingFact(task, selectedDate)} minutes={suggestedMinutes} status="待安排" sourceType={task.source_type} compact />;
                 const tooltip = timelineTooltipProps({
                   kind: "待安排任务",
                   title: task.title,

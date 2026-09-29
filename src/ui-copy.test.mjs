@@ -332,10 +332,13 @@ test("task selection stays inline and the inspector adapts to its available widt
   assert.match(appSource, /className="task-compact-actions"/);
   assert.doesNotMatch(appSource, /task-compact-close|aria-label="关闭任务编辑"/);
   assert.match(appSource, /idPrefix="edit-task" compact onChange=/);
-  assert.match(appSource, /compact \? "任务标题" : "标题"/);
-  assert.match(appSource, /compact \? "备注说明" : "备注"/);
+  assert.match(appSource, /<label htmlFor=\{titleId\} className="sr-only">标题<\/label>/);
+  assert.match(appSource, /placeholder="标题"/);
+  assert.doesNotMatch(appSource, /任务标题|事项标题/);
+  assert.match(appSource, /className="task-form-region task-notes-region" aria-label="备注"/);
+  assert.doesNotMatch(appSource, /备注说明/);
   assert.match(appSource, /<strong id=\{attributesTitleId\}>安排与时限<\/strong>/);
-  assert.match(appSource, /补充说明、清单或背景链接（可选）…/);
+  assert.match(appSource, /placeholder="备注"/);
   assert.doesNotMatch(appSource, /taskEditorOpen|fullScreenTaskEditor|open-editor|全屏编辑/);
   assert.doesNotMatch(stylesSource, /task-editor-workspace|is-task-editor-open|task-fullscreen/);
   assert.match(stylesSource, /\.task-compact-form \{[\s\S]*?width: 100%;[\s\S]*?height: 100%;[\s\S]*?border: 0;[\s\S]*?box-shadow: none;/);

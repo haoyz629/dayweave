@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::OnceLock;
 
 use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveTime, TimeZone, Timelike, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -3835,7 +3836,7 @@ fn validate_recurrence(input: &RecurrenceInput) -> AppResult<()> {
         return Err(AppError::Schema("未知重复频率".into()));
     }
     if !(1..=365).contains(&input.interval_value) {
-        return Err(AppError::Schema("重复间隔必须在 1 至 365 之间".into()));
+        return Err(AppError::Schema("重复周期必须在 1 至 365 之间".into()));
     }
     let starts_on = parse_plan_date(&input.starts_on)?;
     if let Some(ends_on) = &input.ends_on {
@@ -3985,6 +3986,61 @@ fn load_recurring_item_in_transaction(transaction: &Transaction<'_>, item_id: &s
     ).optional()?.ok_or_else(|| AppError::NotFound(format!("重复事项 {item_id}")))
 }
 
+#[derive(Deserialize)]
+struct OfficialWorkdaySource {
+    from: String,
+    to: String,
+    holidays: Vec<OfficialHolidaySource>,
+    #[serde(rename = "makeupWorkdays")]
+    makeup_workdays: Vec<(String, String)>,
+}
+
+#[derive(Deserialize)]
+struct OfficialHolidaySource {
+    dates: Vec<String>,
+}
+
+struct OfficialWorkdayCalendar {
+    from: NaiveDate,
+    to: NaiveDate,
+    holidays: HashSet<NaiveDate>,
+    makeup_workdays: HashSet<NaiveDate>,
+}
+
+fn official_workday_calendar() -> &'static OfficialWorkdayCalendar {
+    static CALENDAR: OnceLock<OfficialWorkdayCalendar> = OnceLock::new();
+    CALENDAR.get_or_init(|| {
+        let source: OfficialWorkdaySource = serde_json::from_str(include_str!("../../src/official-workdays-2026.json"))
+            .expect("bundled official workday calendar must be valid");
+        OfficialWorkdayCalendar {
+            from: parse_plan_date(&source.from).expect("valid official calendar start"),
+            to: parse_plan_date(&source.to).expect("valid official calendar end"),
+            holidays: source.holidays.into_iter().flat_map(|group| group.dates)
+                .map(|day| parse_plan_date(&day).expect("valid official holiday date")).collect(),
+            makeup_workdays: source.makeup_workdays.into_iter()
+                .map(|(day, _)| parse_plan_date(&day).expect("valid official makeup date")).collect(),
+        }
+    })
+}
+
+fn official_workday_on(date: NaiveDate) -> Option<bool> {
+    let calendar = official_workday_calendar();
+    if date < calendar.from || date > calendar.to { return None; }
+    if calendar.holidays.contains(&date) { return Some(false); }
+    if calendar.makeup_workdays.contains(&date) { return Some(true); }
+    Some(date.weekday().number_from_monday() <= 5)
+}
+
+fn weekday_interval_matches(start: NaiveDate, date: NaiveDate, interval: i64) -> bool {
+    if interval < 1 || date < start || official_workday_on(start).is_none() || official_workday_on(date) != Some(true) {
+        return false;
+    }
+    let workdays = (0..=(date - start).num_days())
+        .filter(|offset| official_workday_on(start + Duration::days(*offset)) == Some(true))
+        .count() as i64;
+    (workdays - 1) % interval == 0
+}
+
 fn recurring_item_occurs_on(item: &RecurringItemDto, date: NaiveDate) -> AppResult<bool> {
     let start = parse_plan_date(&item.starts_on)?;
     if date < start { return Ok(false); }
@@ -3995,7 +4051,7 @@ fn recurring_item_occurs_on(item: &RecurringItemDto, date: NaiveDate) -> AppResu
     let weeks = days.div_euclid(7);
     let matches = match item.frequency.as_str() {
         "daily" => days % item.interval_value == 0,
-        "weekdays" => date.weekday().number_from_monday() <= 5 && weeks % item.interval_value == 0,
+        "weekdays" => weekday_interval_matches(start, date, item.interval_value),
         "weekly" => item.weekdays.contains(&date.weekday().number_from_monday()) && weeks % item.interval_value == 0,
         "monthly" => date.day() == item.month_day.unwrap_or(1)
             && ((date.year() - start.year()) as i64 * 12 + date.month() as i64 - start.month() as i64)
@@ -4173,7 +4229,7 @@ fn recurrence_dates(input: &RecurrenceInput) -> AppResult<Vec<NaiveDate>> {
         let weeks = days.div_euclid(7);
         let matches = match input.frequency.as_str() {
             "daily" => days % input.interval_value == 0,
-            "weekdays" => date.weekday().number_from_monday() <= 5 && weeks % input.interval_value == 0,
+            "weekdays" => weekday_interval_matches(start, date, input.interval_value),
             "weekly" => selected.contains(&date.weekday().number_from_monday()) && weeks % input.interval_value == 0,
             "monthly" => date.day() == input.month_day.unwrap_or(1)
                 && ((date.year() - start.year()) as i64 * 12 + date.month() as i64 - start.month() as i64) % input.interval_value == 0,
@@ -7067,6 +7123,33 @@ mod tests {
         ).unwrap();
         assert_eq!(saved.outcome.as_deref(), Some("partial"));
         assert_eq!(saved.review_notes.as_deref(), Some("完成了一半"));
+    }
+
+    #[test]
+    fn weekday_recurring_interval_counts_legal_workdays() {
+        let mut database = Database::in_memory().unwrap();
+        let mut input = recurring_item("每三个工作日", "2026-09-28");
+        input.frequency = "weekdays".into();
+        input.interval_value = 3;
+        let item = database.create_recurring_item(input).unwrap();
+        for (date, expected) in [
+            ("2026-09-28", true),
+            ("2026-09-30", false),
+            ("2026-10-01", false),
+            ("2026-10-07", false),
+            ("2026-10-08", true),
+            ("2026-10-10", false),
+            ("2026-10-12", true),
+            ("2027-01-04", false),
+        ] {
+            assert_eq!(recurring_item_occurs_on(&item, parse_plan_date(date).unwrap()).unwrap(), expected, "{date}");
+        }
+
+        let holiday_start = parse_plan_date("2026-10-01").unwrap();
+        assert!(weekday_interval_matches(holiday_start, parse_plan_date("2026-10-08").unwrap(), 2));
+        assert!(!weekday_interval_matches(holiday_start, parse_plan_date("2026-10-09").unwrap(), 2));
+        assert!(weekday_interval_matches(holiday_start, parse_plan_date("2026-10-10").unwrap(), 2));
+        assert!(!weekday_interval_matches(parse_plan_date("2025-12-31").unwrap(), parse_plan_date("2026-01-04").unwrap(), 1));
     }
 
     #[test]

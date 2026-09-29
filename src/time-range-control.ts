@@ -1,5 +1,18 @@
 export type TimeRangeEdge = "start" | "end";
 
+export function selectDateBoundary(start: string, end: string, activeField: TimeRangeEdge, date: string) {
+  if (activeField === "start") return {
+    start: date,
+    end: end && end < date ? date : end,
+    activeField: "end" as const
+  };
+  return {
+    start: date < start ? date : start,
+    end: date,
+    activeField: "start" as const
+  };
+}
+
 export type MinuteRange = {
   start: number;
   end: number;

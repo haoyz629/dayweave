@@ -1,291 +1,388 @@
 ---
-name: 今序 JinXu
-description: 安静、可信、以本地任务状态为中心的桌面工作台
+name: JinXu Paper Ledger
+description: 安静、可信、以物理行政纸面账本为灵感的本地优先桌面工作台
 colors:
-  ink: "#20221f"
-  ink-soft: "#555850"
-  muted: "#686a63"
-  paper: "#f8f8f5"
-  surface: "#fdfdfb"
-  surface-raised: "#ffffff"
-  border: "#deded8"
-  primary: "#536dff"
-  primary-soft: "#ebeefc"
-  danger: "#884d4d"
-  danger-soft: "#fff7f7"
-  success: "#6f9174"
-  timeline-now: "#ff3b30"
-  timeline-fixed: "#756b5d"
-  cancelled: "#8b4d56"
-  execution-partial: "#356d78"
-  execution-blocked: "#8a551f"
-  execution-not-started: "#5f625d"
-  timeline-nonworking: "#f2f2ee"
-  deleted: "#9a6969"
+  surface: '#fdfdfb'
+  surface-dim: '#dadbd2'
+  surface-bright: '#f9faf1'
+  surface-container-lowest: '#ffffff'
+  surface-container-low: '#f4f4eb'
+  surface-container: '#eeefe6'
+  surface-container-high: '#e8e9e0'
+  surface-container-highest: '#e2e3da'
+  on-surface: '#1a1c17'
+  on-surface-variant: '#444655'
+  inverse-surface: '#2f312b'
+  inverse-on-surface: '#f1f1e8'
+  outline: '#757687'
+  outline-variant: '#c5c5d8'
+  surface-tint: '#304ce0'
+  primary: '#2d4add'
+  on-primary: '#ffffff'
+  primary-container: '#4b65f7'
+  on-primary-container: '#fffbff'
+  inverse-primary: '#bbc3ff'
+  secondary: '#5d5f5b'
+  on-secondary: '#ffffff'
+  secondary-container: '#e2e3de'
+  on-secondary-container: '#636561'
+  tertiary: '#436349'
+  on-tertiary: '#ffffff'
+  tertiary-container: '#5b7c61'
+  on-tertiary-container: '#f6fff3'
+  error: '#ba1a1a'
+  on-error: '#ffffff'
+  error-container: '#ffdad6'
+  on-error-container: '#93000a'
+  primary-fixed: '#dee0ff'
+  primary-fixed-dim: '#bbc3ff'
+  on-primary-fixed: '#000f5c'
+  on-primary-fixed-variant: '#042fc9'
+  secondary-fixed: '#e2e3de'
+  secondary-fixed-dim: '#c6c7c2'
+  on-secondary-fixed: '#1a1c19'
+  on-secondary-fixed-variant: '#454744'
+  tertiary-fixed: '#c7ecca'
+  tertiary-fixed-dim: '#abcfaf'
+  on-tertiary-fixed: '#02210d'
+  on-tertiary-fixed-variant: '#2e4e35'
+  background: '#f9faf1'
+  on-background: '#1a1c17'
+  surface-variant: '#e2e3da'
+  ink: '#20221f'
+  ink-soft: '#555850'
+  muted: '#686a63'
+  paper: '#f8f8f5'
+  surface-raised: '#ffffff'
+  border: '#deded8'
+  primary-soft: '#ebeefc'
+  success: '#6f9174'
+  execution-partial: '#356d78'
+  execution-blocked: '#8a551f'
+  execution-not-started: '#5f625d'
+  cancelled: '#8b4d56'
+  danger: '#884d4d'
+  danger-soft: '#fff7f7'
+  deleted: '#9a6969'
+  timeline-now: '#ff3b30'
+  timeline-fixed: '#756b5d'
+  timeline-nonworking: '#f2f2ee'
+  state-recurring: '#c2410c'
+  state-recurring-border: '#fed7aa'
+  state-recurring-surface: '#fff7ed'
 typography:
   display:
-    fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"'
-    fontSize: "31px"
-    fontWeight: 800
-    lineHeight: 1.12
-    letterSpacing: "-0.04em"
+    fontFamily: "'Source Serif 4', Charter, Georgia, 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', SimSun, serif"
+    fontSize: 31px
+    fontWeight: '800'
+    lineHeight: '1.12'
+    letterSpacing: -0.04em
+  display-mobile:
+    fontFamily: "'Source Serif 4', Charter, Georgia, 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', SimSun, serif"
+    fontSize: 24px
+    fontWeight: '800'
+    lineHeight: '1.2'
+    letterSpacing: -0.03em
   title:
-    fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"'
-    fontSize: "20px"
-    fontWeight: 800
-    lineHeight: 1.2
-    letterSpacing: "-0.025em"
+    fontFamily: "'Source Serif 4', Charter, Georgia, 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', SimSun, serif"
+    fontSize: 20px
+    fontWeight: '800'
+    lineHeight: '1.2'
+    letterSpacing: -0.025em
+  headline-sm:
+    fontFamily: "'Source Serif 4', Charter, Georgia, 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', SimSun, serif"
+    fontSize: 16px
+    fontWeight: '700'
+    lineHeight: '1.3'
+    letterSpacing: -0.015em
+  body-editor:
+    fontFamily: "Inter, 'Source Sans 3', 'Segoe UI', -apple-system, 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif"
+    fontSize: 14px
+    fontWeight: '400'
+    lineHeight: '1.5'
+    letterSpacing: 0em
   body:
-    fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"'
-    fontSize: "13px"
-    fontWeight: 400
-    lineHeight: 1.55
+    fontFamily: "Inter, 'Source Sans 3', 'Segoe UI', -apple-system, 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif"
+    fontSize: 13px
+    fontWeight: '400'
+    lineHeight: '1.55'
+    letterSpacing: 0em
   label:
-    fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"'
-    fontSize: "12px"
-    fontWeight: 700
-    lineHeight: 1.3
+    fontFamily: "Inter, 'Source Sans 3', 'Segoe UI', -apple-system, 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif"
+    fontSize: 12px
+    fontWeight: '700'
+    lineHeight: '1.3'
+    letterSpacing: 0.01em
+  label-editor:
+    fontFamily: "Inter, 'Source Sans 3', 'Segoe UI', -apple-system, 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif"
+    fontSize: 14px
+    fontWeight: '600'
+    lineHeight: '1.35'
+    letterSpacing: 0.005em
+  caption:
+    fontFamily: "Inter, 'Source Sans 3', 'Segoe UI', -apple-system, 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif"
+    fontSize: 11px
+    fontWeight: '500'
+    lineHeight: '1.4'
+    letterSpacing: 0.02em
+  code:
+    fontFamily: "'JetBrains Mono', 'Maple Mono', 'Cascadia Code', Consolas, 'Courier New', monospace"
+    fontSize: 12px
+    fontWeight: '500'
+    lineHeight: '1.4'
+    letterSpacing: 0em
 rounded:
-  sm: "8px"
-  md: "10px"
-  lg: "14px"
-  pill: "99px"
+  sm: 0.125rem
+  DEFAULT: 0.25rem
+  md: 0.375rem
+  lg: 0.5rem
+  xl: 0.75rem
+  full: 9999px
 spacing:
-  xs: "7px"
-  sm: "12px"
-  md: "18px"
-  lg: "24px"
-  xl: "38px"
+  gutter: 18px
+  gutter-mobile: 12px
+  margin: 24px
+  margin-mobile: 16px
+  space-xs: 7px
+  space-sm: 12px
+  space-md: 18px
+  space-lg: 24px
+  space-xl: 38px
 components:
   button-primary:
-    backgroundColor: "{colors.ink}"
-    textColor: "{colors.surface-raised}"
-    rounded: "{rounded.md}"
-    padding: "0 15px"
-    height: "40px"
+    backgroundColor: '#20221f'
+    textColor: '#ffffff'
+    rounded: '0.5rem'
+    padding: '0 15px'
+    height: '40px'
   button-secondary:
-    backgroundColor: "{colors.surface-raised}"
-    textColor: "{colors.ink-soft}"
-    rounded: "{rounded.sm}"
-    padding: "0 11px"
-    height: "36px"
+    backgroundColor: '#ffffff'
+    textColor: '#20221f'
+    borderColor: '#deded8'
+    rounded: '0.5rem'
+    padding: '0 11px'
+    height: '36px'
   input:
-    backgroundColor: "{colors.surface-raised}"
-    textColor: "{colors.ink}"
-    rounded: "{rounded.md}"
-    padding: "0 11px"
-    height: "40px"
+    backgroundColor: '#ffffff'
+    textColor: '#20221f'
+    borderColor: '#deded8'
+    rounded: '0.5rem'
+    padding: '0 11px'
+    height: '40px'
   ledger-row:
-    backgroundColor: "{colors.surface}"
-    textColor: "{colors.ink}"
-    padding: "10px 15px"
-    height: "72px"
+    backgroundColor: '#fdfdfb'
+    textColor: '#20221f'
+    padding: '10px 15px'
+    height: '72px'
 ---
 
-# Design System: 今序 JinXu
+# Design System: 今序 JinXu Paper Ledger
 
-## Overview
+## Brand & Style
 
-**Creative North Star: "清晰的任务队列"**
+本设计系统确立了一个安静、可靠、以本地优先为核心的桌面任务工作台，灵感源自物理行政纸面账本（Paper Ledger）与档案登记册。它坚决摒弃短暂的网页视觉流行趋势——如装饰性毛玻璃模糊（backdrop-filter）、多段艳丽渐变以及未经持久化的乐观预测状态（optimistic UI），转而追求结构确定性、使用耐久度与高度自律的版式秩序。用户体验牢牢植根于 SQLite 事务级事实真理：界面上呈现的视觉状态必须真实对应已确认持久化的记录，绝不展示虚假的投机预测。
 
-今序把任务处理为一条可快速扫读、再进入详情处理的任务队列：界面安静、克制，信息的可信度高于装饰感。浅暖灰的工作台承载连续使用，深色文字维持清楚层级，靛蓝只在选中、聚焦和确定状态中出现。
-
-密度服务于操作而不是展示。任务、状态和数据库反馈始终就近可见；视觉不会暗示尚未提交的成功，也不会用动画掩盖真实状态变化。
-
-**Key Characteristics:**
-
-- 浅暖中性色上的清晰深色信息层级
-- 稀少而明确的靛蓝交互信号
-- 月历、日期详情与账本式双栏任务工作区
-- 右下角常驻但不抢占页面结构的 AI 助手
-- 中文优先、紧凑但可点击的桌面控件
-- 成功、错误和危险操作均有耐久文字反馈
+该美学体系将古典实用账本的沉静触感与现代桌面软件的高精度交互相融合。它基于微妙的浅暖灰色纸面基质、严格的墨水密度层次、发丝般纤细（1px）的结构性规则分割线，以及极为克制、稀有的确认靛蓝（Rare Accent），后者严格限制于当前焦点与选定状态。任务状态与执行流以纯正中文字符和语义基色成对出现，保证极佳的阅读舒适度和无可争议的操作确信度。
 
 ## Colors
 
-配色以纸张、墨色和少量状态色组成；颜色首先说明状态，其次才提供气氛。
+调色板在 **“稀有强调色原则（Rare Accent Rule）”** 与 **“纸面基质原则（Paper Substrate Rule）”** 约束下运行：
+- **确认靛蓝（`#536DFF` / `#2D4ADD`）**：严格充当注意力的指针——指示活动光标焦点、主键确认、选中任务与当前筛选状态。严禁大面积铺底作为容器背景。
+- **淡靛蓝纸面（`#EBEEFC`）**：作为选中行或活动卡片的背景过渡，明确选择边界但不打断文本扫读。
 
-### Primary
+### 纸面基质阶层（Surface Roles）
 
-- **确认靛蓝（primary）**：用于当前筛选、焦点、选中任务和确认性的交互线索。不得大面积铺满内容区。
-- **淡靛蓝纸面（primary-soft）**：用于选中行背景，让选择明确但不打断阅读。
+- `paper` (`#F8F8F5`)：主工作台基底与应用外壳底色。
+- `surface` (`#FDFDFB`)：中性容器、侧栏背景、账本列表行底色。
+- `surface-raised` (`#FFFFFF`)：可编辑输入区、抬升检查器卡片与交互弹层。
+- `border` (`#DEDED8`)：通用的 1px 发丝边框与列分割线。
+- Material 3 容器阶层（`surface-dim #DADBD2`, `surface-bright #F9FAF1`, `surface-container-low #F4F4EB`, `surface-container #EEEFE6`, `surface-container-high #E8E9E0` 等）提供系统级微色阶支持。
 
-### Neutral
+### 墨色密度层次（Ink Weights）
 
-- **主墨色（ink）**：标题、品牌标记和最高优先级信息。
-- **柔墨色（ink-soft）**：表单标签、按钮文字和次一级操作信息。
-- **说明灰（muted）**：可读的辅助说明与元数据，不用于关键状态。
-- **工作台纸色（paper）**：应用主背景。
-- **账本纸色（surface）**：侧栏、列表与低层容器。
-- **抬升纸色（surface-raised）**：编辑器、输入和需要聚焦的容器。
-- **铅笔分隔色（border）**：输入框、分隔线和容器边界。
+- `ink` (`#20221F`)：主墨色，用于核心标题、重要数据记录与最高对比度文字。
+- `ink-soft` (`#555850`)：柔墨色，用于表单标签、操作次级说明与按钮外框。
+- `muted` (`#686A63`)：说明灰，用于时间戳、次级辅助说明与上下文线索。
 
-### Tertiary
+### 生命周期与语义状态（Lifecycle & Execution Markers）
 
-- **完成绿（success）**、**部分完成青（execution-partial）**、**阻塞橙棕（execution-blocked）**、**放弃本次安排玫瑰（cancelled）**、**其他未完成灰（execution-not-started）**、**删除红（deleted）**：分别表达任务完成、单次执行结果或回收状态，不复用同一种暖黄色。
-- **非工作时间纸面（timeline-nonworking）**只用于小时网格底层的轻量工作时间参照；它不是事件卡片、错误或禁用状态。
-- **危险墨红（danger）**与**危险浅底（danger-soft）**：只用于删除、读取失败和不可逆风险。
+每一个语义状态均严格配合明确、加粗的中文字符展示：
+- `success` (`#6F9174`)：已完成任务、生效中规则（浅色底 `rgba(111, 145, 116, 0.12)`）。
+- `execution-partial` (`#356D78`)：部分完成执行项（浅色底 `rgba(53, 109, 120, 0.12)`）。
+- `execution-blocked` (`#8A551F`)：阻塞或中断事项（浅色底 `rgba(138, 85, 31, 0.12)`）。
+- `execution-not-started` (`#5F625D`)：排队或未开始项。
+- `cancelled` (`#8B4D56`)：放弃本次安排项。
+- `danger` (`#884D4D`) 与 `danger-soft` (`#FFF7F7`)：不可逆的删除操作与回收站提示。
+- `deleted` (`#9A6969`)：回收站历史标记。
+- `timeline-now` (`#FF3B30`)：贯穿 24 小时时间轴的精确实时红线。
+- `timeline-nonworking` (`#F2F2EE`)：非工作时间网格底纹参照。
 
-**The Rare Accent Rule.** 靛蓝只标识选中、焦点和确定状态；普通结构继续依靠中性色和间距建立层级。
+### 任务状态与优先级规则
 
-**The State Is Text Rule.** 状态颜色必须配合明确中文文字，不能只靠圆点颜色传达。
+- **草稿 / 待确认**：琥珀色（`#7A4300` / `#FFE7B8`），内容尚未具备完整起止时间；
+- **待处理**：蓝色（`#0F5F8F` / `#DDF2FF`），任务已成立、等待排入日计划；
+- **已安排**：靛蓝（`#4937B4` / `#E8E4FF`），任务已被日计划安排；
+- **已完成**：绿色（`#2D693A` / `#DDF3E2`），整件任务或今日执行块完成；
+- **回收站**：玫瑰红（`#A52A3D` / `#FFE0E5`），已软删除，保留 30 天；
+- **重复事项**：暖琥珀 / 陶土色（`#C2410C` / `#FFF7ED`），月历徽标、时间线事件、胶囊状态与侧边强调色统一采用该色系；
+- **优先级**：低（绿 `#047857`）、中（琥珀 `#A16207`）、高（红 `#C2410C`），左侧 4px 彩色色条，并始终包含高/中/低优先级中文文本。
 
-### Task State and Priority Semantics
-
-任务相关颜色按语义角色全局复用，每个角色都包含前景色、细边框和低饱和背景色，并在深色模式中单独映射：
-
-- **草稿 / 未确认：琥珀色**，表达内容尚未成为正式任务；重复事项“已暂停”沿用这一等待语义。
-- **待处理：蓝色**，表达任务已成立、等待推进。
-- **已安排：靛蓝色**，表达任务已进入具体日计划，同时与主要选中态保持色相关联但降低饱和度。
-- **已完成 / 生效中：绿色**，表达已完成结果或当前有效状态。
-- **回收站 / 已结束：玫瑰红色**，表达已退出正常流程；真正的删除操作继续使用危险色文字。
-- **重复事项：紫色**，只表达事项类型，不替代其生效、暂停、结束等生命周期文字。
-- **低 / 中 / 高优先级：蓝 / 琥珀 / 红**，选择器、任务胶囊和列表扫读标记使用同一组颜色；始终同时显示“低优先级 / 中优先级 / 高优先级”文字。
-
-状态徽标使用“文字 + 圆点或图标 + 浅色背景”的组合；列表可增加同色细标记帮助扫读，但不能把颜色作为唯一信息来源。筛选器的选中态仍使用确认靛蓝，因为它表达当前位置而不是任务本身的状态。
+---
 
 ## Typography
 
-**Display Font / Body Font:** 系统无衬线字体栈；Windows 优先 Segoe UI，中文回退为 Microsoft YaHei UI / Microsoft YaHei，其他系统回退为 PingFang SC / Noto Sans CJK SC。
+字体系统采用严谨的三阶字体架构（Three-Tier Typography Architecture），兼顾物理行政账本的庄重质感与现代桌面应用的极限操作清晰度：
 
-**Character:** 单一无衬线字体保持 Windows 原生感；粗字重用于建立方向，正文和操作文字保持克制、清晰、易扫读。
+### 字体栈（Font Stacks）
 
-### Hierarchy
+1. **标题字体（Headings）**：
+   - **首选**：`Source Serif 4`
+   - **回退**：`Charter`, `Georgia`, `'Noto Serif SC'`, `'Source Han Serif SC'`, `'Songti SC'`, `SimSun`, `serif`
+   - **职责与应用**：专用于 Display、Title 与重要模块主标题（如“今日”、“任务队列”、“日计划”、“晚间复盘”）。粗衬线结构配合负字距赋予页面封面级档案权威感与典雅的物理纸张印记。
+2. **正文字体（Body / UI）**：
+   - **首选**：`Inter`
+   - **回退**：`'Source Sans 3'`, `'Segoe UI'`, `-apple-system`, `'PingFang SC'`, `'Microsoft YaHei'`, `sans-serif`
+   - **职责与应用**：专用于日常任务列表、表单输入、字段标签与按钮。保持极高的微字阶（12px~14px）识别度与抗疲劳度。
+3. **代码与时间等宽字体（Code / Monospace）**：
+   - **首选**：`'JetBrains Mono'`
+   - **回退**：`'Maple Mono'`, `'Cascadia Code'`, `Consolas`, `'Courier New'`, `monospace`
+   - **职责与应用**：专用于 24 小时时间刻度、起止时间卡片（如 `09:30 — 11:00`）、双端时间轴时长胶囊与快捷键提示。具备天然的等宽数字（`tabular-nums`）与大 x 轴高度，彻底杜绝时间轴拖动调整时的数字排版抖动。
 
-- **Display**：页面一级标题与今日主句；高字重、紧字距，最多两行。
-- **Title**：检查器标题和重要模块标题。
-- **Body**：任务备注、错误解释、帮助信息；关键操作页面不低于 13px。
-- **Label**：筛选、字段标签、状态和按钮；不以过小字号换取密度。
+### 核心排版原则
 
-**The Operational Text Rule.** 会影响下一步操作的文字必须达到正文或标签层级，禁止退化成装饰性小字。
+1. **紧凑标题，透气数据（Tight Headings, Airy Data）**：
+   大型标题采用衬线重字重（800）和负字距（`-0.04em`），确立鲜明的版面主导力；而日常任务行、表格数据与正文段落则采用开放行高（`1.5` 至 `1.55`），保障长时间视线扫读的舒适感。
+2. **状态即文字原则（The "State Is Text" Rule）**：
+   色彩绝不可作为状态信息的唯一载体。任何状态指示点或色条必须并排渲染明确、粗体的中文说明（如“已完成”、“待处理”、“阻塞”、“草稿”）。状态药丸与小尺寸 Chip **必须使用无衬线体**，以避免衬线字脚在 11~12px 微小尺寸下产生视觉噪点。
+3. **编辑区密度（Editor Density）**：
+   列表扫读区使用紧凑的 `13px` 正文字号以提高信息承载量；而活动输入区与任务属性画布则提升至 `14px`，并配置 `600` 字重的字段标签，提升击键输入时的舒适度。
+4. **操作文字原则（The Operational Text Rule）**：
+   所有影响后续决策的文案必须维持在正文（13px）或标签（12px）以上尺寸，禁止缩减为不可读的装饰性微字。
 
-任务与重复事项编辑器共用两阶文字尺度：字段标签、区块标题和控件内容为 14px（标签 600、标题 700、输入内容 400–500）；辅助说明、状态和操作链接为 12px。星期按钮使用 12px，选中态以 500 字重强调。日期与时间控件沿用同一无衬线字体栈，以表格数字保持对齐。
+---
 
-## Layout
+## Layout & Spacing
 
-桌面壳由可调左侧导航、拖拽柄和主工作区组成，不再保留全局固定“今日计划”栏。今日页默认打开占据完整主区域的日计划时间线，依次显示一周日期、全天事项、待安排任务与完整 24 小时时间轴；月历与日计划属于同一个两级日历工作区，不再用两个模块或顶部分段控件并列呈现。任务页的标题和筛选保持 1120px 的可读宽度；任务账本填满主工作区。账本默认约 34/66，左侧扫读草案或任务，右侧直接编辑当前对象；点击任务不得再跳转独立编辑页，也不设置“全屏编辑”入口。任务列表与详情之间另设拖拽柄，可按内容复杂度调整空间。编辑器根据右侧检查器自身宽度响应：普通宽度使用紧凑单列或局部双列，检查器达到 960px 时内容与安排区按约 7/5 展开，560px 及以下日期卡片、属性与操作改为单列。
+工作台几何遵循不对称的双栏分割账本模型（Two-Pane Split Workbench）：
+- **桌面双栏账本**：默认采用约 `34% / 66%` 的主从分栏（左侧任务队列账本，右侧常驻属性检查器与时间线）。分栏边界设 1px 细线拖拽柄，悬停显式 col-resize 抓手。
+- **光学视线约束（1120px Ceiling）**：任务页搜索框、筛选栏、标题与账本最大宽度约束为 `1120px`，保持自然的视觉扫读锚点。
+- **响应式断点**：
+  - `1180px`：横向留白与间距从 `24px` 紧缩至 `18px`；
+  - `960px`：右侧检查器内部布局根据可用宽度展开为日历安排与属性双栏；
+  - `860px`：侧栏与拖拽柄收起，双栏账本转为垂直折叠流，表单转为单列序列；
+  - `560px`：表格行全面转化为触控友好的独立卡片，主触控目标提升至 44px。
 
-AI 助手固定在应用窗口右下安全区并覆盖在页面之上，不参与页面网格计算。打开浮窗时必须为任务页底部确认操作和今日页日期操作预留可滚动到达的空间，不能永久遮挡主操作。
+### 间距尺度（Spacing Scale）
 
-860px 以下隐藏桌面侧栏和拖拽柄，今日页将日期详情移到月历下方，任务账本改为上下排列。搜索框占满可用宽度，筛选横向滚动，表单改为单列，主要触控目标至少接近 44px。AI 浮窗受视口约束并保留安全边距。1180px 以下先收紧横向留白，再折叠结构。
+- `space-xs` (7px)：致密标签内边距、内联状态圆点间隙。
+- `space-sm` (12px)：常规按钮横向间距、表单字段行隙。
+- `space-md` (18px)：栅格基槽、容器内侧边界边距。
+- `space-lg` (24px)：主要区域分区、主视口边界留白。
+- `space-xl` (38px)：外层工作台外边距、主架构分割留白。
+
+---
 
 ## Elevation & Depth
 
-系统以色阶和分隔线建立深度，默认保持扁平。阴影只出现在品牌标记和助手提示等少量需要与纸面分离的对象上，不用于每一块内容。
+本系统坚持扁平化物理纸面哲学，拒绝拟物化厚重投影、弥散彩色光晕与玻璃拟态。深度完全通过**纸阶微色阶（Tonal Paper Tiering）**与 **1px 发丝边框（Hairline Framing）**来构建。
 
-### Shadow Vocabulary
+- **发丝结构边框**：面板、行、输入框与弹层一律以 `1px solid #DEDED8` 划分。
+- **纸张色阶梯队**：
+  - 底层纸面：`paper` (`#F8F8F5`)
+  - 容器与静止行：`surface` (`#FDFDFB`)
+  - 活动编辑区与抬升面板：`surface-raised` (`#FFFFFF`)
+- **投影例外白名单**：
+  - *浮动 AI 助手窗口*：低对比度环境弥散投影 `box-shadow: 0 8px 32px rgba(32, 34, 31, 0.08)`，仅用于将其与下方账本网格视觉解耦。
+  - *上下文浮层与下拉菜单*：微小发丝阴影 `box-shadow: 0 4px 16px rgba(32, 34, 31, 0.06)` 配套 1px 边框。
+- **Z 轴索引梯队（Z-Index Registry）**：
+  1. `z-index: 0`：工作台纸底与 24 小时小时网格
+  2. `z-index: 10`：日程卡片与已排计划执行块
+  3. `z-index: 20`：实时红色时间指示线（`#FF3B30`）
+  4. `z-index: 40`：未保存更改悬浮栏 / 模态遮罩
+  5. `z-index: 50`：浮动 AI 助手窗口
 
-- **品牌浮起**：小面积、较明显的柔和下落阴影，只用于品牌标记。
-- **助手纸面**：极低对比度的大范围环境阴影，只让助手面板与背景轻微分离。
-
-**The Flat Ledger Rule.** 任务列表、检查器和筛选依靠连续边界与色阶组织，禁止把每一行包装成悬浮卡片。
+---
 
 ## Shapes
 
-控件采用 8–10px 的轻柔圆角，重点容器可到 14px；圆形只用于任务状态点、勾选和进度。边界保持 1px、低对比度，避免粗描边和硬阴影。小型计数与进度轨道可以使用胶囊形，但普通按钮不使用全胶囊。
+采用低曲率剪纸几何风格（Low-Curvature Cut-Paper Geometry）：
+- **基底几何 (`0.25rem` / `4px`)**：优先级标记条、行内代码块、微小标签。
+- **交互控件 (`0.5rem` / `8px`)**：按钮、文本输入框、下拉选择框。
+- **结构容器 (`0.75rem` / `12px` ~ `14px`)**：检查器面板外框、主对话框、浮动 AI 助手窗口。
+- **药丸圆角 (`9999px`)**：状态胶囊、筛选 Chip、数值计数徽标。
+- **圆形 (`50%`)**：执行状态指示点、待办圆环勾选框。
+
+---
 
 ## Components
 
 ### Buttons
+- **Primary**：深墨底 `#20221F`，文字 `#FFFFFF`，高度 `40px`，内边距 `0 15px`，圆角 `8px`。悬停 `#343832`，点击微缩 `scale(0.98)`。
+- **Secondary / Outline**：白底 `#FFFFFF`，文字 `#20221F`，边框 `1px solid #DEDED8`，高度 `36px`，内边距 `0 11px`，圆角 `8px`。悬停 `#F8F8F5`。
+- **Destructive**：底色 `#FFF7F7`，文字 `#884D4D`，边框 `1px solid rgba(136, 77, 77, 0.2)`。悬停底色 `#884D4D`，文字 `#FFFFFF`。
 
-- **Shape:** 常规按钮为轻柔矩形，桌面高度 36–40px，移动端接近 44px。
-- **Primary:** 深墨底、白字，用于提交和创建。
-- **Hover / Focus:** 悬停仅轻微加深或上移；键盘焦点使用可见靛蓝轮廓。
-- **Secondary / Danger:** 白底细边框；危险操作使用墨红文字与浅红悬停底。
+### Inputs & Fields
+- **单行字段**：高度 `40px`，背景 `#FFFFFF`，边框 `1px solid #DEDED8`，圆角 `8px`，字号 `14px`，文字 `#20221F`，占位符 `#686A63`。
+- **聚焦环**：`border-color: #536DFF; box-shadow: 0 0 0 1px #536DFF;`。
+- **自动保存指示**：编辑停止 500ms 后静默暂存草稿，低调展示“已在本地同步”。
 
-### Cards / Containers
+### Chips & Badges
+- **状态药丸（Status Pill）**：高度 `22px`，内边距 `0 8px`，圆角 `9999px`，字号 `12px 粗体`。底色采用该状态语义色的 12% 不透明度浅色底，文字为全饱和语义色。
+- **筛选标签（Filter Tags）**：默认边框 `1px solid #DEDED8`，底色 `#FDFDFB`，文字 `#555850`；选中时底色 `#EBEEFC`，边框 `1px solid #536DFF`，文字 `#536DFF`。
 
-- **Corner Style:** 助手与提示容器使用较大轻柔圆角。
-- **Background:** 纸色和白色层级，不叠加半透明玻璃。
-- **Shadow Strategy:** 默认无阴影，遵循扁平账本规则。
-- **Border:** 单层浅灰边界。
-- **Internal Padding:** 以 18–24px 为主要容器节奏。
+### Ledger Rows & Lists
+- **账本行**：高度约 `72px`，内边距 `10px 15px`，底色 `#FDFDFB`，下划线 `1px solid #DEDED8`。
+- **优先级侧条**：左侧 `4px` 垂直色彩标记条（高红、中黄、低绿）。
+- **选中态**：背景平滑转为 `#EBEEFC`，左侧边缘附带 `#536DFF` 强调。
 
-### Inputs / Fields
+### Checkboxes & Radios
+- **任务完成勾选圈**：定制 `18px` 圆环。未勾选时边框 `1.5px solid #686A63`，透明底；勾选后背景为 `#6F9174`，内嵌纯白 SVG 对勾。零延迟响应并驱动 SQLite 事务。
 
-- **Style:** 白色或近白底、单层细边框、清楚的 13–14px 输入文字；任务与重复事项编辑器使用 14px。
-- **Focus:** 边框转为淡靛蓝，并出现低透明度焦点环。
-- **Error / Disabled:** 错误使用浅红纸面和可执行的中文恢复说明；禁用态降低对比度但仍保持可读。
-
-### Navigation
-
-左侧导航只保留今日、任务、复盘、设置，以图标、13px 文字和可选计数组成；当前项使用浅中性底与更高字重。月历与固定日程属于今日页，不再作为独立导航。页面不再用顶层头部重复展示当前导航项，也不放置只负责跳转的伪搜索入口；复盘页直接以当前日期作为内容标题，设置页直接进入设置分类。任务状态筛选使用 `aria-pressed` 和底部靛蓝线表达当前筛选；真正的任务搜索只保留在任务页内部。
-
-### Task Ledger
-
-任务页以“任务队列”作为唯一列表标题，右上角筛选按钮按需展开搜索。当前可操作筛选为草稿、待处理、已安排、完成和回收；草稿承担所有信息不完整或尚未确认内容的暂存职责。首次进入优先恢复上次非空的常用筛选，否则按待处理、草稿、已安排选择第一个非空队列，并自动打开第一项。筛选使用紧凑胶囊控件，当前项使用靛蓝底与白字；只有非零数量才显示计数，且计数与标签保持同一点击目标。任务行使用无阴影的白色卡片、单层浅边框和 12px 圆角；左侧 4px 的优先级色条是队列中的快速扫读锚点，必须同时显示高/中/低文字。标题固定单行并在空间不足时省略，备注也以单行摘要承接，完整标题通过原生悬停提示和键盘可达详情获得；日期/工作量元数据形成第三级层级。选中行使用淡靛蓝纸面和更清晰边框。正式任务行始终显示状态文字、任务来源，并显示已设置的优先级和工作量。任务标签不在页面中录入、展示或筛选，SQLite 中已有标签数据保持原样。左侧列表宽度支持鼠标拖拽及方向键调节，右侧检查器只显示领域状态机允许的操作，提交后重新读取 SQLite，再显示结果反馈。
-
-正式任务详情继续采用显式提交：表单与 SQLite 一致时不显示保存操作；字段发生变化后，检查器底部才浮出“有未保存的更改”操作层。手动创建和 AI 创建使用持久化任务草稿：手动创建页在用户实际编辑字段后，约在停止输入 500ms 时自动保存；只切换普通任务与重复事项类型不启动自动保存，离开当前任务胶囊前保存已有待保存内容。只有开始日期、开始时间、结束日期和结束时间全部填写且范围有效时，“确认创建任务”才可用；否则只保存草稿并就近说明需要补全时间。一次对话产生多条草稿时逐条确认，不出现“全部创建”。
-
-任务编辑器在当前检查器内由标题区、可滚动正文和固定操作区组成；“任务内容”与“安排与时限”是独立分区标题。正式任务操作区将“完成整个任务”“移入回收站”与“取消”“保存修改”分组，右上角不再提供重复关闭按钮；取消只退出本次编辑状态并留在当前任务列表。移入回收站后留在原筛选上下文，不自动切换到回收站。
-
-侧栏创建入口统一写“记一件事”。创建页先选择“普通任务 / 重复事项”，两种类型共享一份草稿，标题、备注等共有字段随类型切换保留。新建普通任务按“任务标题 → 安排与时限 → 备注”展示；新建重复事项按“事项标题 → 重复安排 → 备注”展示。重复事项备注默认是带加号与补充说明提示的展开按钮，展开后输入，收起时保留内容；编辑既有事项时直接显示备注。重复事项只保存一条规则，不进入普通任务的待处理或已安排状态，不生成普通任务；到期当天生成轻量发生记录。任务队列中的重复事项与普通任务复用同一胶囊骨架、卡片表面、圆角、内边距、标题层级、底部分隔和状态位置，以左侧紫色标识区分类型，不在标题右上角重复显示类型徽标。其事实区首行显示截止日期或长期有效，第二行显示重复频率和可选展示时间，时间值后不附加“时间”二字；“频率”“时长”标签使用正常字距。新建预览、生效、暂停、结束及回收站保持一致。重复安排内的星期、有效日期和可选展示时间就近分组，生命周期操作与内容编辑分开。可选展示时间在今日时间轴形成重复事项块，并与任务、草案和固定日程共同参与重叠分列；无时间时显示在时间轴上方。重复事项在复盘中直接选择“完成 / 部分完成 / 未完成”，不提供“跳过本次”；规则修改不得覆盖历史发生记录。
-
-任务的开始与结束始终表示最早可开始和截止边界，不等于已经进入日计划。两个日期和两个时刻均为正式任务必填字段；历史迁移留下的时间不完整任务可查看和补全，但补全前不得进入日计划。新建任务默认使用下一个整点至一小时后。同日任务的预计投入始终由开始、结束时间差自动计算，只在“安排与时限”标题行显示紧凑结果与“自动计算”提示，不提供独立工作量输入；跨日任务填写平均每日投入，系统按包含首尾日期的自然日数自动计算总投入；时间不完整的草稿保留可手动填写的预计总投入。旧跨日数据若无法由总投入整除天数，则保留原总投入并等待用户明确填写平均值，不猜测历史语义。任务不再暴露“允许拆分”选项：跨日工作由安排器优先按平均每日投入生成当天执行块，用户仍可在日计划中调整该块时长；已确认但尚未复盘的执行块会从该任务待分配工作量中扣除，避免在后续日期重复安排，这项扣除不代表钟表时段被独占。
-
-任务日期时间选择器一次编辑完整的开始与结束边界：顶部边界卡片切换当前日期，月历选择日期，右侧共用双端时间轴。时间输入接受 `1`、`100`、`01:00`、`7:5` 等短格式，规范化后精确到 1 分钟；非法值就近显示 `00:00–23:59` 约束。`Enter` 提交当前输入，输入框内 `Esc` 恢复本次选择器中已保存的值而不关闭整层；取消、遮罩和选择器级 `Esc` 均不提交。只有同日范围显示 15、30、60、120 分钟快捷时长。“清除时间”清空四项边界；新建内容只能继续保存为草稿，既有正式任务则不能提交这份不完整编辑。“恢复推荐”恢复下一整点至一小时后的默认值；两种状态必须占用相同属性网格，不能导致检查器尺寸跳变。
-
-所有双端时间调整共用同一视觉语义：开始柄为空心、结束柄为实心，选中背景连续包裹真实端点，中间显示紧凑时长。15 分钟等短范围保持两个逻辑端点的真实位置，不得在释放后通过弹开或强制错位伪造间隔；视觉包裹、命中距离和最近端点判定共同保证两端仍可独立抓取。任务块调整时间时，开始与结束可独立手写，接受 `1`、`100`、`01:00` 等输入并精确到 1 分钟；时间轴拖动与方向键按 5 分钟调整，同时保持任务块最短 15 分钟。连续时间轴每小时显示刻度，与起止范围文字重叠的刻度暂时隐藏，端点移开后恢复；拖动期间尽量复用当前显示窗口，避免刻度、端点与轨道抖动。15、30、60、120 分钟快捷项只按当前开始时间一次性设置结束时间，不保留选中态，也不约束后续手写。
-
-范围不超过四小时使用连续时间轴；超过四小时使用断轴，左右只显示开始与结束附近窗口，中间显示总时长和省略语义。断轴中部不可拖动，只有端点卡片和相应轨道可抓取；悬停使用 `grab`，拖动期间保持 `grabbing`。连续与断轴切换必须安全重建显示窗口，支持 01:00–23:00 等超长范围且不得崩溃。亮色和深色模式都必须让未选轨道、选中背景、端点及断轴边界具有足够区分度，轨道不使用多余底部阴影。
-
-AI 草案字段可以显示“来自描述”“AI 整理”“需确认”“手动修改”；正式创建后收起字段级来源，只在列表和详情保留“AI 生成 / 手动创建”任务来源。修改草案以差异方式呈现旧值和建议值。表单手动值优先，AI 不得自动覆盖。
-
-任务列表分栏宽度作为 `ui.*` 界面设置持久化到 SQLite，切换页面和重启应用后保持；双击分隔条恢复默认约 34/66。操作结果区域保持固定高度，空状态和成功状态不得推动账本上下移动。
-
-用户可见文案只说明发生了什么、会产生什么影响，以及用户接下来能做什么。普通任务流程不得暴露 SQLite、Rust、事务、写入、结构化数据、重复实例、执行事实或复盘事实等实现语言；统一使用“保存”“记录”“重复任务”“执行记录”“复盘记录”等自然表达。AI 连接设置可以保留接口类型、模型和访问密钥等确实需要用户配置的术语，但必须提供清楚的中文名称与影响说明。底层错误在展示前统一转换为用户能理解、能处理的提示。
-
-今日页不展示最近任务列表或固定 AI 输入区；默认以一周日期和 24 小时时间线建立当天方向，跨周、跨月选择日期时进入完整月历总览。月历只负责选择日期、查看概况和进入该日日计划：单击日期选中，双击日期是快速打开方式，明确的“查看日计划”按钮是主要入口；日计划标题旁的月历图标和 `Esc` 都可返回总览。双击不是唯一入口，整个时间轴也不绑定双击返回，以免和任务块、空白时间操作冲突。生成或调整计划的入口只在日计划层级出现。固定日程、执行块、草案块和有展示时间的重复事项共用同一时间画布：所有类型的纵向位置和高度都严格按照实际起止时间等比例绘制，相同起止时间横向等分，不同但相交的时间段组成完整耦合组并分配稳定基础列；同起点时较长事项位于左侧，没有碰撞的事项可以保持左边界不变并向右扩展到连续空列。时间包含必须表现为并列矩形，不得形成卡片嵌套；事项宽度在自身整个高度内保持不变，不绘制 L 形轮廓。极短事项不得通过最小视觉高度放大，也不得因此把真实相邻事项误判为重叠；空间不足时收起次要文字，完整内容由悬停或键盘聚焦说明提供。普通任务块硬性最短为 15 分钟；计划草案块和已确认执行块在 15–29 分钟时共用单行标题、隐藏时间的紧凑密度，已确认执行块同时缩小勾选，草案仍不提供完成操作；30 分钟及以上使用标准双行信息。完整算法与布局矩阵见 `docs/design-apple-inspired-timeline-lanes-2026-09-04.md`。普通任务块除勾选框外的整个可见区域都打开本次执行详情；勾选框继续只负责快速完成。详情浮层优先显示在所选任务块侧边，空间不足时自动改到另一侧或任务块上方、下方，并始终限制在时间线可视区域内；窄窗口使用底部抽屉。浮层提供“查看任务”入口，完整任务属性仍在任务页编辑。尚未记录执行或复盘的时间块可以直接调整时间，不再要求先进入“调整计划”；用户第一次保存时间修改时才自动创建调整草案，打开后直接取消不得遗留空草案。已有执行或复盘记录的时间块保持锁定。今日首次进入时把当前时间细红线滚动到可视区中央，此后分钟更新不得打断用户浏览。用户滚动后暂停自动跟随；当前时间线处于滚动视口中间 60% 时不显示提示，只在进入顶部或底部 20% 区域或离开视口后显示“回到现在”。没有定时事项时保留干净的 24 小时时间网格，不叠加空状态文案。完成执行块时保留原时间块并明确写“执行块已完成”；除非用户另行确认，不得把整个长期任务显示为完成。
+### 24-Hour Timeline Track
+- **非工作时间网格**：浅暖底色 `#F2F2EE`，搭配清晰小时发丝细线。
+- **工作时间画布**：底色 `#FDFDFB`。
+- **实时指示线**：贯穿画布的 `1px` 细红线 `#FF3B30`，端点附带紧凑分秒徽标。
 
 ### Floating AI Assistant
+- **窗口规格**：右下安全区 `24px`，宽度 `380px`，最大高度 `72vh`。底色 `#FFFFFF`，边框 `1px solid #DEDED8`，圆角 `14px`，环境阴影 `0 8px 32px rgba(32, 34, 31, 0.08)`。
+- **呼吸指示灯**：分析处理过程中，状态指示灯以 `1.8s` 为周期在透明度 `0.4` 至 `1.0` 之间平缓呼吸。
 
-AI 宠物图标固定在应用右下角。空闲时静止，分析中只做轻微呼吸，待回答、草案就绪和失败分别使用文字可解释的橙、蓝、红状态；不随机移动、不自动展开。浮窗宽度约 380px，高度不超过窗口 72%，固定向上展开，用户手动收起。
+---
 
-浮窗顶部提供当前对话标题和切换器；展开列表按“今天 / 更早”分组，支持搜索、当前项勾选、新建对话、重命名、归档与恢复。切换对话不自动跳页；有关联草案时提供“查看草案”。空状态只保留创建任务、调整任务和安排计划三个快捷操作。
+## Domain Architecture & Workflows
 
-输入只支持文字。回复可以流式呈现；分析时右下角发送按钮变为暂停样式，但无障碍名称和提示写“停止分析”。停止后保留部分文字并标注状态，不显示结构化成功。被 AI 锁定的表单采用只读视觉和就近说明，用户尝试操作时 Toast 说明先停止分析；其他数据不受影响。
+### SQLite 事务真理（Transactional Ground Truth）
+今序严格执行“数据库状态为唯一依据”的准则。前端界面绝不提前使用乐观假状态冒充写入成功，表单修改后需经用户显式保存或 500ms 本地草稿暂存，只有经过 Rust 后端校验并提交 SQLite 事务成功后，界面重新读取事实库再刷新为最新状态。
 
-### Calendar, Work Preferences & Daily Plan
+### 两级日历工作区（Two-Level Calendar Workspace）
+“今日”视图将月历与 24 小时日计划深度整合：
+- 月历负责全局日期定位与任务热力感知（含农历、节假日与调休覆盖）；
+- 单击/双击选择某天后，立即展开当日完整的 24 小时非独占日计划时间线；
+- 顶部保留周栏快速导航，星期与节气信息精准同步。
 
-今日页以 Apple 日历式月历网格作为日计划的上一级总览，不设置“月历 / 日计划”分段控件。日计划主体顶部同步显示本周七天，并和月历一致固定为周一到周日，星期栏只显示“一”至“日”：选中日期使用明确实心底色；今天仅在自身被选中时使用红色实心圆，选中其他日期时今天退回红色文字，避免同屏出现两个类似选中态。日期数字与农历日期共同位于圆内，每个日期同时继承月历中的首要节日或节气及休班状态，但不在周栏重复展示任务数量。月历中有未完成任务的日期显示蓝色圆点和数量，只有已完成任务时使用淡化圆点。节日、调休、农历节日和节气用文字层级表达，不与任务状态点混用；必须显示节假日数据覆盖年份。
+### 非独占时间线车道算法（Non-Exclusive Timeline Lanes）
+时间线上容纳固定日程、任务执行块与重复事项：
+- 严格按真实起止分钟等比例绘制高度；
+- 相同起止时段横向等分；
+- 相交时段构成重叠组并分配稳定基础列，无碰撞时向右安全延伸扩展；
+- 避免形成卡片嵌套，事项在自身高度内宽度恒定。
 
-选中日期详情随月历同步，展示日期信息、固定日程、已安排执行块和当天截止任务，并提供新建任务、新建日程、安排当天。固定日程不显示阻塞、仅提示或占用状态；设置只维护工作日和每日工作时间偏好，不提供午休、不可安排时段或任务间缓冲。表单中的内容在提交前只是本地草稿，只有 Rust 命令成功提交 SQLite 后，界面才重新读取并显示为当前事实。
+### 任务生命周期与 30 天回收站
+- 正式任务必须具备完整的开始与结束日期时间；时间不完整的内容始终保留在“任务草案”中。
+- 移入回收站是结束未完成任务的唯一正式入口，软删除记录在回收站保留 30 天，支持全字段查看、恢复原状或经二次确认后永久清除。
 
-全天日程以 `Asia/Shanghai` 当日 00:00 至次日 00:00 保存。任何固定日程、执行块、草案块和有展示时间的重复事项都可以重叠；界面不提供“阻塞 / 仅提示”开关，后端不得因时间交叠拒绝原子写入。固定日程仍不可被 AI 擅自移动、缩短或删除。
-
-日计划采用“用户点击生成 → 持久化草案 → 用户确认 → 事务写入”的显式流程。早间 Windows 通知和进入应用后的提醒都不得自动调用 AI。生成草案不得创建已确认的 `daily_plans` 或任何 `plan_blocks`；确认时由后端按当前 SQLite 状态重新检查任务版本、日期边界、执行和复盘事实。固定日程新增、其他块重叠或工作时间偏好变化本身不得使草案失效。任务块时间可在当天完整范围内调整；弹出的时间轴保持在紧凑浮层内容中央，并展示起止时间附近的稳定刻度。跨度超过四小时的区间使用断轴：左右只保留开始、结束附近的可操作窗口，中间明确标注省略时长，控制柄不得进入省略区或越出当天范围。若调整超出任务已有的最早开始或截止时间，只向外放宽对应任务边界，不因单个时间块的内移而收窄任务范围。任务边界与草案必须一次保存并同步刷新草案校验状态。确认日计划时保留由草案放宽的任务边界；放弃整份草案时恢复草案开始前的任务边界，但不得覆盖任务在草案之外发生的后续修改。已确认计划中的待安排任务可以直接加入时间线，第一次实际修改时自动进入待保存状态；底层仍通过草案隔离修改，只有“保存调整”才替换正式计划。
-
-已确认计划右上角使用紧凑的刷新图标提供“重新安排未执行任务”，完整功能说明在悬停和键盘聚焦时显示，不平铺长文字按钮。重新安排必须保留已有执行和复盘记录，并明确替换本轮未保存的时间修改和新加入任务；如果本轮修改曾放宽任务时间，重新安排前先恢复草案开始前的任务边界，任务页后来单独修改过的时间仍以当前值为准。重新生成的结果继续处于待保存状态，不得自动提交。
-
-确认后的日计划始终放入从 `00:00` 到 `24:00` 的完整小时轴，不按当天事项裁剪时间范围。非工作时间只在小时网格底层使用极浅中性纸面或稀疏纹理，不绘制成带边框、圆角和大段文字的事件卡片。固定日程使用柔和暖灰纸面和竖向标记；普通执行块使用淡靛蓝纸面和左侧细状态线，首行把圆形勾选固定在标题左上方、标题之前，第二行显示时钟图标和 `起 - 止`。重复事项块共享紧凑标题/时间层级，右上角使用刷新/重复图标，不显示普通任务勾选。当前时间只使用细墨红线和紧凑时间标签，并始终位于背景与事项之上。
-
-时间不完整的草稿和历史兼容任务都不能排入时间线。生成计划时若没有任何可安排的待处理任务，只显示顶部 Toast 提示，不挂载空草案面板；如果存在任务但未能安排，则仍在草案中显示缺少预计工作量、日期边界不允许或任务状态变化等真实原因，不能使用时间不足、空档不足、固定日程冲突、重叠、午休或工作时间外作为原因。草案与已确认计划在标题、容器和操作文案上保持清楚区分，成功状态只在完整事务提交后出现。
-
-普通执行块首行的圆形勾选与内容区是两个独立操作：勾选固定在标题左上方、标题之前，只保存当前执行块“本次完成”的轻量执行记录，并从 SQLite 重新读取后回显绿色对勾；最终复盘前再次操作可以取消本次完成，最终复盘后勾选锁定并说明原因。内容区打开轻量执行浮层，可记录本次结果和一句简短备注。执行结果先只展示“完成 / 部分完成 / 未完成”，选择“未完成”后再展开“遇到阻塞 / 放弃本次安排 / 其他”原因；底层仍映射为可查询的执行事实，不把五种状态平铺成一次选择。日间记录不得猜测实际耗时、扣减剩余工作量或改变整个任务状态，也不得覆盖已经确认的最终复盘事实。
-
-轻量执行浮层以任务标题为主标题，计划时间和就近的“调整时间”入口位于本次结果上方，不再重复解释任务与执行块的关系。“从今日计划移除”属于计划操作，固定在浮层底部左侧，不混入时间编辑器；点击后立即从调整草案撤下该块并回到待安排，不弹二次确认，正式日计划仍须通过“保存调整”统一提交。尚未选择结果时不显示独立的备注操作且不可保存；选择完成后按需显示“添加备注”，选择部分完成或未完成后自动展开备注框，未完成同时要求选择原因。保存成功后关闭浮层，以短暂提示反馈结果。调整时间仍走日计划草案流程，不因合并入口而直接覆盖正式计划。
-
-普通任务只保留“完成”和“回收站”两种结束路径。“已完成”详情为只读内容，如需修改必须先“取消完成”；前端入口与后端保存校验保持一致，包括尚未确认的 AI 修改建议和修改草稿。未完成任务不再提供“不再进行”状态，“移入回收站”是停止后续安排与从普通列表移除的唯一入口，并保留确认；普通任务默认保留 30 天，恢复后回到移入前状态。升级时旧“不再进行”任务统一迁入回收站，恢复后成为待处理。放弃本次安排只表示一次执行结果，不改变整个任务状态。
-
-回收站中的普通任务与重复事项继续复用任务胶囊：点击胶囊打开完整只读详情，悬停或键盘聚焦胶囊时在右上角显示“恢复 / 永久删除”两个图标操作，并用深色短提示说明图标含义。详情滚动区顶部固定显示回收提示条，按删除时间动态说明已移入多久以及距离 30 天永久删除还有多久；恢复与永久删除同时放在提示条内，永久删除仍必须经过确认。
-
-晚间复盘使用固定表单，不使用 AI 对话替代事实填写。复盘从日间轻量记录预填本次结果和简短备注，由用户核对实际耗时、延期原因、备注与剩余工作量后显式确认，只有此时才写入最终复盘事实。完成整个任务仅出现在复盘确认后的独立“任务后续”区域，使用今序内置确认层单独确认，不调用 WebView 原生确认框，也不改变已经保存的本次执行事实。
+---
 
 ## Do's and Don'ts
 
 ### Do:
-
-- **Do** 让每次保存、状态变化和删除都显示持久的中文结果反馈。
-- **Do** 在任务元数据中始终写出状态文字，颜色仅作辅助。
-- **Do** 保持桌面账本双栏和移动端上下排列的一致心智模型。
-- **Do** 将状态操作限制为领域状态机允许的集合。
-- **Do** 让相同时间段等分、不同相交时间段稳定分列并在安全时向右扩展，同时始终保留普通任务勾选和重复事项图标。
+- **Do** 让每次保存、状态变化和删除都显示持久、确定性的中文结果反馈。
+- **Do** 坚持“状态即文字”原则，状态颜色始终与中文粗体标签成对出现。
+- **Do** 维持桌面账本约 34%/66% 双栏分工，右侧居中单列保证专注编辑。
+- **Do** 严格保持 1px 发丝边框与低曲率剪纸圆角，维护沉静的纸面工作台质感。
 
 ### Don't:
-
-- **Don't** 用大面积品牌色、渐变文字或装饰性玻璃效果打断长时间使用。
-- **Don't** 用 9–10px 小字承载表单、状态或错误恢复信息。
-- **Don't** 用未提交的乐观状态假装数据库写入成功。
-- **Don't** 把任务行、检查器和提示层层包装成同尺寸卡片。
-- **Don't** 把非工作时间画成事件卡片，或用“占用 / 阻塞 / 不阻塞”暗示时间段只能容纳一个事项。
-- **Don't** 把时间包含画成卡片嵌套，或让一个事项在自身高度中途改变宽度。
+- **Don't** 使用大面积鲜艳强调色铺底，破坏长久阅读的舒适感。
+- **Don't** 引入悬浮大模糊毛玻璃（backdrop blur）或无边框模糊重阴影。
+- **Don't** 使用 9–10px 细碎小字承载表单或状态，关键操作文字不低于 12px。
+- **Don't** 使用乐观预测状态（optimistic updates）假装本地数据库已写入成功。

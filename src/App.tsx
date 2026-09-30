@@ -140,7 +140,7 @@ type IconName =
   | "today" | "tasks" | "calendar" | "review" | "settings"
   | "plus" | "sparkle" | "more" | "check" | "send" | "search"
   | "trash" | "restore" | "close" | "clock" | "filter" | "user" | "info" | "chevron-left" | "chevron-right" | "chevron-down"
-  | "pause" | "sliders";
+  | "pause" | "sliders" | "checkbox" | "file";
 
 const navigation: { label: string; icon: IconName; asset: string; description: string }[] = [
   { label: "今日", icon: "today", asset: navTodayIcon, description: "月历与日计划" },
@@ -216,6 +216,8 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
     today: <><rect x="3" y="4" width="18" height="17" rx="3" /><path d="M8 2v4M16 2v4M3 10h18M8 14h3" /></>,
     tasks: <><path d="m5 12 4 4L19 6" /><path d="M5 5h7M5 19h7" /></>,
+    checkbox: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="m7 12 3 3 7-7" /></>,
+    file: <><path d="M6 3h9l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" /><path d="M14 3v5h5M8 12h7M8 16h7" /></>,
     calendar: <><rect x="3" y="4" width="18" height="17" rx="3" /><path d="M8 2v4M16 2v4M3 10h18" /></>,
     review: <><path d="M4 19.5V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14.5" /><path d="M8 8h8M8 12h8M8 16h5" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.14 2.14-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.55V20.3h-3v-.08A1.7 1.7 0 0 0 10.65 18.7a1.7 1.7 0 0 0-1.88.34l-.06.06-2.14-2.14.06-.06A1.7 1.7 0 0 0 6.97 15a1.7 1.7 0 0 0-1.55-1.03h-.08v-3h.08A1.7 1.7 0 0 0 6.97 9.94a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.14-2.14.06.06a1.7 1.7 0 0 0 1.88.34 1.7 1.7 0 0 0 1.03-1.55v-.08h3v.08a1.7 1.7 0 0 0 1.03 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06L19.8 8l-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.55 1.03h.08v3h-.08A1.7 1.7 0 0 0 19.4 15Z" /></>,
@@ -229,7 +231,7 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     restore: <><path d="M4 12a8 8 0 1 0 2.34-5.66L4 8.68" /><path d="M4 4v4.68h4.68" /></>,
     close: <path d="m6 6 12 12M18 6 6 18" />,
     clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
-    filter: <><path d="M4 6h16M7 12h10M10 18h4" /></>,
+    filter: <path d="M3 5h18l-7 8v6l-4 2v-8L3 5Z" />,
     user: <><circle cx="12" cy="8" r="3.2" /><path d="M5.5 20a6.5 6.5 0 0 1 13 0" /></>,
     info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></>,
     "chevron-left": <path d="m15 18-6-6 6-6" />,
@@ -577,9 +579,9 @@ function ExecutionOutcomePicker({
 }
 
 const taskViewIcon: Record<TaskView, IconName> = {
-  draft: "sparkle",
+  draft: "file",
   recurring: "restore",
-  open: "tasks",
+  open: "checkbox",
   scheduled: "calendar",
   done: "check",
   deleted: "trash"
@@ -587,8 +589,8 @@ const taskViewIcon: Record<TaskView, IconName> = {
 
 const taskViewGroups: { label: string; items: TaskView[] }[] = [
   { label: "常用", items: ["open", "scheduled"] },
-  { label: "管理", items: ["recurring", "draft"] },
-  { label: "历史", items: ["done", "deleted"] }
+  { label: "工作流", items: ["recurring", "draft"] },
+  { label: "历史与维护", items: ["done", "deleted"] }
 ];
 
 const taskEmptyCopy: Record<TaskView, { title: string; description: string }> = {
@@ -1919,13 +1921,11 @@ function RecurringItemEditor({ form, disabled, idPrefix, autoFocusTitle = false,
   const ruleTitleId = `${idPrefix}-rule-title`;
   const titleId = `${idPrefix}-title`;
   const notesId = `${idPrefix}-notes`;
-  const [notesExpanded, setNotesExpanded] = useState(() => Boolean(form.notes.trim()));
+  const [optionalNotesExpanded, setNotesExpanded] = useState(false);
+  const notesExpanded = !isCreating || optionalNotesExpanded;
   const [validityPicker, setValidityPicker] = useState<{ activeField: "start" | "end" | "time" | "duration" } | null>(null);
   const [intervalNoticeId, setIntervalNoticeId] = useState(0);
   const intervalShakeRef = useRef<Animation | null>(null);
-  useEffect(() => {
-    if (form.notes.trim()) setNotesExpanded(true);
-  }, [form.notes]);
   useEffect(() => {
     if (!intervalNoticeId) return;
     const timer = window.setTimeout(() => setIntervalNoticeId(0), 2400);
@@ -2227,10 +2227,10 @@ function RecurringItemEditor({ form, disabled, idPrefix, autoFocusTitle = false,
     {/* END: RepeatScheduleConfiguration */}
 
     <section className={`recurring-optional-notes${notesExpanded ? " is-expanded" : ""}`} aria-label="备注">
-      <button type="button" className="recurring-notes-toggle" disabled={disabled} aria-label={notesExpanded ? "收起备注" : undefined} aria-expanded={notesExpanded} aria-controls={`${notesId}-panel`} onClick={() => setNotesExpanded((current) => !current)}>
+      {isCreating && <button type="button" className="recurring-notes-toggle" disabled={disabled} aria-label={notesExpanded ? "收起备注" : undefined} aria-expanded={notesExpanded} aria-controls={`${notesId}-panel`} onClick={() => setNotesExpanded((current) => !current)}>
         <span className="recurring-notes-toggle-main">{notesExpanded ? <span className="sr-only">备注</span> : <><span className="recurring-notes-toggle-icon" aria-hidden="true"><Icon name="plus" size={12} /></span>{form.notes.trim() ? "查看备注" : "添加备注（可选）"}</>}</span>
         <span className="recurring-notes-toggle-hint">{notesExpanded ? <>收起<Icon name="chevron-down" size={14} /></> : form.notes.trim() ? "点击查看说明" : "点击补充说明"}</span>
-      </button>
+      </button>}
       <div id={`${notesId}-panel`} className="recurring-notes-panel" hidden={!notesExpanded}>
         <TaskNotesInputs id={notesId} value={form.notes} disabled={disabled} maxLength={2000} onChange={(notes) => onChange({ ...form, notes })} />
       </div>
@@ -2323,7 +2323,7 @@ function RecurringModalDialog({
       >
         <div className="recurring-modal-body">
           {/* BEGIN: TypeSelectionHeader */}
-          <section className="recurring-type-selection-header" data-purpose="task-type-toggle">
+          <section className="recurring-type-selection-header" data-purpose="task-type-toggle" data-autosaving={draftSaving && !busy}>
             {/* 普通任务卡片 */}
             <button
               type="button"
@@ -2368,6 +2368,7 @@ function RecurringModalDialog({
             idPrefix={isEditing ? "edit-recurring" : "new-recurring"}
             autoFocusTitle
             compact
+            isCreating={!isEditing}
             onChange={onChange}
           />
         </div>
@@ -2643,6 +2644,7 @@ function TaskWorkspace({
   const [view, setView] = useState<TaskView>("open");
   const [search, setSearch] = useState("");
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const [filterMenuPlacement, setFilterMenuPlacement] = useState({ left: 0, top: 0, width: 0, maxHeight: 0 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ManualTaskUpdate | null>(null);
   const [compactTaskEditorDismissed, setCompactTaskEditorDismissed] = useState(false);
@@ -2674,6 +2676,8 @@ function TaskWorkspace({
   const [pendingTrashRecurringItem, setPendingTrashRecurringItem] = useState<RecurringItem | null>(null);
   const preferredSelection = useRef<string | null>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
+  const filterTriggerRef = useRef<HTMLButtonElement>(null);
+  const filterPopupRef = useRef<HTMLElement>(null);
   const ledgerRef = useRef<HTMLDivElement>(null);
   const ledgerResizeSession = useRef<LedgerResizeSession | null>(null);
   const [ledgerListWidth, setLedgerListWidth] = useState<number | null>(null);
@@ -2746,10 +2750,14 @@ function TaskWorkspace({
   useEffect(() => {
     if (!filterMenuOpen) return;
     function closeFilterMenu(event: PointerEvent) {
-      if (!filterMenuRef.current?.contains(event.target as Node)) setFilterMenuOpen(false);
+      if (!filterMenuRef.current?.contains(event.target as Node) && !filterPopupRef.current?.contains(event.target as Node)) setFilterMenuOpen(false);
     }
     function closeFilterMenuWithKeyboard(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") setFilterMenuOpen(false);
+      if (event.key === "Escape") {
+        setFilterMenuOpen(false);
+        filterTriggerRef.current?.focus();
+        event.preventDefault();
+      }
     }
     window.addEventListener("pointerdown", closeFilterMenu);
     window.addEventListener("keydown", closeFilterMenuWithKeyboard);
@@ -2758,6 +2766,40 @@ function TaskWorkspace({
       window.removeEventListener("keydown", closeFilterMenuWithKeyboard);
     };
   }, [filterMenuOpen]);
+
+  useLayoutEffect(() => {
+    if (!filterMenuOpen) return;
+    function positionFilterMenu() {
+      const list = filterMenuRef.current?.closest(".task-ledger-list")?.getBoundingClientRect();
+      const searchBar = filterMenuRef.current?.closest(".task-queue-search")?.getBoundingClientRect();
+      if (!list || !searchBar) return;
+      const width = Math.min(340, list.width - 24, window.innerWidth - 24);
+      const top = searchBar.bottom + 2;
+      setFilterMenuPlacement({
+        left: list.right - 12 - width,
+        top,
+        width,
+        maxHeight: window.innerHeight - top - 16
+      });
+    }
+    positionFilterMenu();
+    filterPopupRef.current?.querySelector<HTMLButtonElement>('[role="radio"][aria-checked="true"]')?.focus();
+    window.addEventListener("resize", positionFilterMenu);
+    window.addEventListener("scroll", positionFilterMenu, true);
+    return () => {
+      window.removeEventListener("resize", positionFilterMenu);
+      window.removeEventListener("scroll", positionFilterMenu, true);
+    };
+  }, [filterMenuOpen]);
+
+  function handleFilterMenuKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const options = Array.from(filterPopupRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []);
+    const current = options.indexOf(document.activeElement as HTMLButtonElement);
+    const next = (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+    options[next]?.focus();
+    event.preventDefault();
+  }
 
   const visibleTasks = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("zh-CN");
@@ -3673,12 +3715,19 @@ function TaskWorkspace({
         <div className="task-ledger-list" aria-busy={loading}>
           <header className="task-queue-header">
             <div className="task-queue-heading">
-              <div><h1>{taskViewCopy[view]}</h1><span>{view === "recurring" ? "单独管理" : view === "deleted" ? "普通任务与重复事项" : "任务队列"}{counts[view] + (showUnsavedCreateCapsule ? 1 : 0) > 0 ? ` · ${counts[view] + (showUnsavedCreateCapsule ? 1 : 0)} 项` : ""}</span></div>
+              <h1>{taskViewCopy[view]}</h1>
+              <span className="task-queue-count">{counts[view] + (showUnsavedCreateCapsule ? 1 : 0)} 项任务</span>
+            </div>
+            <div className="task-queue-search">
+              <Icon name="search" size={16} />
+              <input type="search" aria-label="搜索当前任务视图" placeholder="搜索任务" value={search} onChange={(event) => setSearch(event.target.value)} />
+              {search && <button type="button" aria-label="清除搜索" onClick={() => setSearch("")}><Icon name="close" size={14} /></button>}
               <div className="task-filter-control" ref={filterMenuRef}>
-                <button className={`queue-filter-button${filterMenuOpen ? " is-open" : ""}${view !== "open" || search ? " is-filtered" : ""}`} type="button" aria-label={`筛选任务，当前为${taskViewCopy[view]}`} aria-haspopup="dialog" aria-expanded={filterMenuOpen} onClick={() => setFilterMenuOpen((open) => !open)}><Icon name="filter" size={19} /><span className="filter-button-state" aria-hidden="true" /></button>
-                {filterMenuOpen && <section className="task-filter-menu" role="dialog" aria-label="筛选任务">
-                  <header className="filter-menu-heading"><strong>筛选</strong>{(view !== "open" || search) && <button type="button" onClick={() => { requestTaskChange({ kind: "view", view: "open" }); setSearch(""); }} aria-label="恢复默认筛选">重置</button>}</header>
-                  <label className="task-search"><Icon name="search" size={16} /><span className="sr-only">搜索任务</span><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索任务" />{search && <button type="button" aria-label="清除搜索" onClick={() => setSearch("")}><Icon name="close" size={14} /></button>}</label>
+                <button ref={filterTriggerRef} className={`queue-filter-button${filterMenuOpen ? " is-open" : ""}${view !== "open" || search ? " is-filtered" : ""}`} type="button" aria-label={`筛选任务，当前为${taskViewCopy[view]}`} aria-haspopup="dialog" aria-expanded={filterMenuOpen} aria-controls={filterMenuOpen ? "task-filter-menu" : undefined} onClick={() => setFilterMenuOpen((open) => !open)}><Icon name="filter" size={18} /></button>
+                {filterMenuOpen && createPortal(<section id="task-filter-menu" ref={filterPopupRef} className="task-filter-menu" role="dialog" aria-label="视图与筛选" style={filterMenuPlacement} onKeyDown={handleFilterMenuKeyDown}>
+                  <header className="filter-menu-heading">
+                    <div className="filter-menu-title"><strong>视图与筛选</strong></div>
+                  </header>
                   <div className="filter-menu-options" role="radiogroup" aria-label="任务类型">
                     {taskViewGroups.map((group) => <div className="filter-menu-group" role="group" aria-label={group.label} key={group.label}>
                       <span className="filter-menu-caption">{group.label}</span>
@@ -3686,15 +3735,15 @@ function TaskWorkspace({
                         <button key={item} type="button" role="radio" aria-checked={view === item} onClick={() => { requestTaskChange({ kind: "view", view: item }); setFilterMenuOpen(false); }}>
                           <span className={`filter-option-icon filter-option-${item}`}><Icon name={taskViewIcon[item]} size={16} /></span>
                           <span className="filter-option-copy"><strong>{taskViewCopy[item]}</strong></span>
-                          <span className="filter-option-meta">{counts[item] > 0 && <em>{counts[item]}</em>}{view === item && <Icon name="check" size={15} />}</span>
+                          <span className="filter-option-meta"><em>{counts[item]}</em>{view === item && <Icon name="check" size={15} />}</span>
                         </button>
                       ))}
                     </div>)}
                   </div>
-                </section>}
+                  <footer className="filter-menu-footer"><span><kbd>↑↓</kbd> 导航</span><i aria-hidden="true">·</i><span><kbd>↵</kbd> 选择</span><span className="filter-menu-footer-close"><kbd>Esc</kbd> 关闭</span></footer>
+                </section>, document.body)}
               </div>
             </div>
-            {search && <div className="active-filter-row"><button className="active-search-filter" type="button" onClick={() => setSearch("")} title="清除搜索"><Icon name="search" size={13} /><span>“{search}”</span><Icon name="close" size={12} /></button></div>}
           </header>
           <p className="workspace-feedback" role="status" aria-live="polite">{feedback ?? ""}</p>
           {showUnsavedCreateCapsule && (
@@ -3817,7 +3866,7 @@ function TaskWorkspace({
               </header>
               <div className="task-compact-body">
                 {!persistedNewTaskDraft?.target_task_id && (
-                  <div className="create-type-switch" role="radiogroup" aria-label="创建类型">
+                  <div className="create-type-switch" role="radiogroup" aria-label="创建类型" data-autosaving={draftSaving && !busy}>
                     <button type="button" role="radio" disabled={busy || draftSaving} aria-checked={createItemType === "task"} onClick={() => requestCreateItemType("task")}>
                       <Icon name="tasks" size={16} />
                       <span><strong>普通任务</strong><small>时间完整后进入待处理</small></span>
@@ -4079,11 +4128,13 @@ type PlanDraftTimeEdit = {
   error: string;
 };
 type TimelineTooltipContent = {
-  kind: "任务安排" | "计划草案" | "固定日程" | "重复事项" | "待安排任务" | "非工作时间";
+  kind: "普通任务" | "任务安排" | "计划草案" | "固定日程" | "重复事项" | "待安排任务" | "非工作时间";
   title: string;
   time: string;
   detail: string;
   tone: "execution" | "execution-completed" | "execution-partial" | "execution-blocked" | "execution-cancelled" | "execution-not_started" | "draft" | "fixed" | "recurring" | "task" | "nonworking";
+  url?: string;
+  note?: string;
 };
 type TimelineTooltipState = TimelineTooltipContent & {
   left: number;
@@ -5009,20 +5060,25 @@ function TodayPage({
       : null;
     const contentRect = contentAnchor?.getBoundingClientRect() ?? targetRect;
     const scrollRect = target.closest(".timeline-events") ? timelineScrollRef.current?.getBoundingClientRect() : null;
+    const taskTooltip = content.kind === "普通任务" || content.kind === "重复事项";
+    const tooltipHalfWidth = taskTooltip ? 165 : 148;
+    const tooltipHeight = taskTooltip
+      ? 86 + (content.url ? 36 : 0) + (content.note ? 76 : 0) + (content.detail ? 22 : 0)
+      : 126;
     if (anchorMode === "block-top" || anchorMode === "block-bottom") {
       const anchorTop = scrollRect ? Math.max(targetRect.top, scrollRect.top) : targetRect.top;
       const anchorBottom = scrollRect ? Math.min(targetRect.bottom, scrollRect.bottom) : targetRect.bottom;
       const viewportWidth = document.documentElement.clientWidth;
       const viewportHeight = document.documentElement.clientHeight;
       const prefersBelow = anchorMode === "block-bottom";
-      const placement = prefersBelow && viewportHeight - anchorBottom >= 126
+      const placement = prefersBelow && viewportHeight - anchorBottom >= tooltipHeight
         ? "below"
-        : anchorTop >= 126 ? "above" : "below";
+        : anchorTop >= tooltipHeight ? "above" : "below";
       setTimelineTooltip({
         ...content,
         left: prefersBelow
-          ? Math.max(143, Math.min(viewportWidth - 143, targetRect.right - 143))
-          : Math.max(148, Math.min(viewportWidth - 148, targetRect.left + targetRect.width / 2)),
+          ? Math.max(tooltipHalfWidth, Math.min(viewportWidth - tooltipHalfWidth, targetRect.right - tooltipHalfWidth))
+          : Math.max(tooltipHalfWidth, Math.min(viewportWidth - tooltipHalfWidth, targetRect.left + targetRect.width / 2)),
         top: placement === "above" ? anchorTop - 12 : anchorBottom + 12,
         placement
       });
@@ -5035,10 +5091,10 @@ function TodayPage({
     const anchorTop = contentIsVisible ? visibleTop : scrollRect ? Math.max(targetRect.top, scrollRect.top) : targetRect.top;
     const anchorBottom = contentIsVisible ? visibleBottom : scrollRect ? Math.min(targetRect.bottom, scrollRect.bottom) : targetRect.bottom;
     const viewportWidth = document.documentElement.clientWidth;
-    const placement = anchorTop >= 126 ? "above" : "below";
+    const placement = anchorTop >= tooltipHeight ? "above" : "below";
     setTimelineTooltip({
       ...content,
-      left: Math.max(148, Math.min(viewportWidth - 148, anchorRect.left + anchorRect.width / 2)),
+      left: Math.max(tooltipHalfWidth, Math.min(viewportWidth - tooltipHalfWidth, anchorRect.left + anchorRect.width / 2)),
       top: placement === "above" ? anchorTop - 10 : anchorBottom + 10,
       placement
     });
@@ -5839,7 +5895,10 @@ function TodayPage({
             })}</div>
             {preview && <div className="plan-draft-summary" role="status"><span><Icon name="sparkle" size={14} /><strong>{preview.blocks.length} 项草案安排</strong>{preview.unscheduled.length > 0 && <> · {preview.unscheduled.length} 项未排入</>}</span><small>{isAdjustingConfirmedPlan ? "可调整时间块或重新生成；保存前，原计划不会变化。" : "点击浅蓝虚线时间块可以修改；确认计划前，正式日历不会变化。"}</small></div>}
             <div className="timeline-lanes">
-              {untimedRecurringOccurrences.length > 0 && <section className="recurring-occurrence-lane" aria-label="今天的重复事项"><h2>重复事项</h2><div>{untimedRecurringOccurrences.map((item) => <div key={item.id} className="lane-item recurring" role="note" tabIndex={0} {...timelineTooltipProps({ kind: "重复事项", title: item.title, time: "时间未指定", detail: item.outcome ? `已复盘 · ${item.outcome === "completed" ? "完成" : item.outcome === "partial" ? "部分完成" : "未完成"}` : "待复盘；未设置展示时间", tone: "recurring" })}><span className="lane-symbol recurring" aria-hidden="true" /><span className="lane-copy"><strong>{item.title}</strong><small>{item.outcome ? `已复盘 · ${item.outcome === "completed" ? "完成" : item.outcome === "partial" ? "部分完成" : "未完成"}` : "时间未指定 · 待复盘"}</small></span></div>)}</div></section>}
+              {untimedRecurringOccurrences.length > 0 && <section className="recurring-occurrence-lane" aria-label="今天的重复事项"><h2>重复事项</h2><div>{untimedRecurringOccurrences.map((item) => {
+                const { url, body } = splitTaskNotes(item.notes ?? "");
+                return <div key={item.id} className="lane-item recurring" role="note" tabIndex={0} {...timelineTooltipProps({ kind: "重复事项", title: item.title, time: "时间未指定", detail: item.outcome ? `已复盘 · ${item.outcome === "completed" ? "完成" : item.outcome === "partial" ? "部分完成" : "未完成"}` : "待复盘；未设置展示时间", tone: "recurring", url, note: body })}><span className="lane-symbol recurring" aria-hidden="true" /><span className="lane-copy"><strong>{item.title}</strong><small>{item.outcome ? `已复盘 · ${item.outcome === "completed" ? "完成" : item.outcome === "partial" ? "部分完成" : "未完成"}` : "时间未指定 · 待复盘"}</small></span></div>;
+              })}</div></section>}
               <section className="waiting-task-lane" aria-label={preview ? "草案中未排入今日的任务" : "待安排任务"}><h2>{preview ? "未排入" : "待安排"}</h2><div>{preview ? preview.unscheduled.length ? preview.unscheduled.map((item) => {
                 const task = tasks.find((candidate) => candidate.id === item.task_id);
                 const actionLabel = item.estimated_minutes ? "加入时间线" : "补充估时";
@@ -5918,7 +5977,23 @@ function TodayPage({
                   })}
                   onClick={(clickEvent) => selectTimelineItem({ kind: "event", id: event.id }, clickEvent.currentTarget)}
                 ><span className="timeline-event-symbol fixed" aria-hidden="true" /><span className="timeline-event-copy"><strong>{event.title}</strong><small>{timeRangeLabel(event.starts_at, event.ends_at)} · 固定日程</small></span></button>)}
-                {recurringTimelineBlocks.map(({ item, starts_at, ends_at, layoutKey }) => <div key={item.id} className={`timeline-event recurring-event${item.outcome ? ` reviewed outcome-${item.outcome}` : ""}`} style={timelineEventPosition(starts_at, ends_at, selectedDate, axisStart, pixelsPerHour, timelineItemLanes[layoutKey])} tabIndex={0} {...timelineTooltipProps({ kind: "重复事项", title: item.title, time: timeRangeLabel(starts_at, ends_at), detail: item.outcome ? `已复盘 · ${item.outcome === "completed" ? "完成" : item.outcome === "partial" ? "部分完成" : "未完成"}` : "待复盘；这项重复安排会单独显示", tone: "recurring" }, "block-bottom")}><span className="timeline-event-symbol recurring" aria-hidden="true" /><span className="timeline-event-copy"><strong>{item.title}</strong><small><Icon name="clock" size={11} />{timeRangeLabel(starts_at, ends_at)}</small></span><span className="recurring-event-icon" aria-hidden="true"><img src={recurringIcon} alt="" /></span></div>)}
+                {recurringTimelineBlocks.map(({ item, starts_at, ends_at, layoutKey }) => {
+                  const { url, body } = splitTaskNotes(item.notes ?? "");
+                  const time = `${timeRangeLabel(starts_at, ends_at)} (${timeRangeDurationMinutes(starts_at, ends_at)}m)`;
+                  return <div
+                    key={item.id}
+                    className={`timeline-event recurring-event${item.outcome ? ` reviewed outcome-${item.outcome}` : ""}`}
+                    style={timelineEventPosition(starts_at, ends_at, selectedDate, axisStart, pixelsPerHour, timelineItemLanes[layoutKey])}
+                    tabIndex={0}
+                    {...timelineTooltipProps({ kind: "重复事项", title: item.title, time, detail: item.outcome ? `已复盘 · ${item.outcome === "completed" ? "完成" : item.outcome === "partial" ? "部分完成" : "未完成"}` : "", tone: "recurring", url, note: body }, "block-bottom")}
+                  >
+                    <span className="timeline-task-leading recurring" aria-hidden="true"><img src={recurringIcon} alt="" /></span>
+                    <div className="timeline-task-body">
+                      <span className="timeline-task-head"><strong>{item.title}</strong><time>{time}</time></span>
+                      {(url || body) && <span className="timeline-task-info">{url && <span className="timeline-task-url">{url}</span>}{url && body && <span className="timeline-task-divider" />}{body && <span className="timeline-task-note">{body}</span>}</span>}
+                    </div>
+                  </div>;
+                })}
                 {draftBlocks.map((block, index) => <button
                   key={draftLayoutKeys[index]}
                   type="button"
@@ -5937,6 +6012,8 @@ function TodayPage({
                   onClick={(event) => selectPlanDraftBlock(index, event.currentTarget)}
                 ><span className="plan-draft-grip" aria-hidden="true" /><span className="timeline-event-copy"><strong>{block.task_title}</strong><small><Icon name="clock" size={11} />{timeRangeLabel(block.starts_at, block.ends_at)} · {block.estimated_minutes} 分钟</small></span></button>)}
                 {visibleTaskBlocks.map((block) => {
+                  const { url, body } = splitTaskNotes(tasks.find((task) => task.id === block.task_id)?.notes ?? "");
+                  const time = `${timeRangeLabel(block.starts_at, block.ends_at)} (${timeRangeDurationMinutes(block.starts_at, block.ends_at)}m)`;
                   const effectiveOutcome = block.review?.outcome ?? (block.execution_status === "planned" ? null : block.execution_status);
                   const blockCompleted = effectiveOutcome === "completed";
                   const blockIsSaving = quickCompletingBlockId === block.id;
@@ -5961,22 +6038,22 @@ function TodayPage({
                       selectTimelineItem({ kind: "block", id: block.id }, trigger, event.currentTarget);
                     }}
                     {...timelineTooltipProps({
-                      kind: "任务安排",
+                      kind: "普通任务",
                       title: block.task_title,
-                      time: timeRangeLabel(block.starts_at, block.ends_at),
+                      time,
                       detail: block.review
                         ? `本次${reviewOutcomeCopy[block.review.outcome]} · 已复盘 · 实际 ${block.review.actual_minutes} 分钟`
-                        : effectiveOutcome
-                          ? `本次${reviewOutcomeCopy[effectiveOutcome]} · 等待每日复盘`
-                          : `尚未开始 · 计划 ${durationLabel(block.starts_at, block.ends_at)}`,
-                      tone: effectiveOutcome ? `execution-${effectiveOutcome}` : "execution"
+                        : effectiveOutcome ? `本次${reviewOutcomeCopy[effectiveOutcome]} · 等待每日复盘` : "",
+                      tone: "task",
+                      url,
+                      note: body
                     }, "block-top")}
                   >
-                    <span className="plan-draft-grip" aria-hidden="true" />
-                    <div className="timeline-execution-content">
-                      <button type="button" className={`timeline-event-check${blockCompleted ? " done" : ""}${blockHasFact && !blockCompleted ? " recorded" : ""}${blockIsSaving ? " saving" : ""}`} aria-label={block.review ? `${block.task_title}已完成每日复盘，不能取消完成` : blockCompleted ? `取消完成：${block.task_title}` : quickCompleteLabel} aria-pressed={blockCompleted} disabled={Boolean(block.review) || blockHasFact && !blockCompleted || blockIsSaving || selectedDate !== today} onClick={(event) => { event.stopPropagation(); void (blockCompleted ? clearQuickCompletedTimelineBlock(block) : quickCompleteTimelineBlock(block)); }}>{blockIsSaving ? <span className="timeline-check-spinner" /> : blockCompleted ? <Icon name="check" size={11} /> : null}</button>
-                      <button type="button" className="timeline-event-body" aria-label={`打开本次执行：${block.task_title}`} aria-haspopup="dialog" aria-controls="timeline-context-panel" aria-pressed={selection?.kind === "block" && selection.id === block.id}><span className="timeline-event-copy"><strong>{block.task_title}</strong><small><Icon name="clock" size={11} />{timeRangeLabel(block.starts_at, block.ends_at)} · {block.review ? `${reviewOutcomeCopy[block.review.outcome]} ${block.review.actual_minutes} 分钟` : effectiveOutcome ? `本次${reviewOutcomeCopy[effectiveOutcome]} · 待复盘` : `计划 ${durationLabel(block.starts_at, block.ends_at)}`}</small></span></button>
-                    </div>
+                    <button type="button" className={`timeline-event-check${blockCompleted ? " done" : ""}${blockHasFact && !blockCompleted ? " recorded" : ""}${blockIsSaving ? " saving" : ""}`} aria-label={block.review ? `${block.task_title}已完成每日复盘，不能取消完成` : blockCompleted ? `取消完成：${block.task_title}` : quickCompleteLabel} aria-pressed={blockCompleted} disabled={Boolean(block.review) || blockHasFact && !blockCompleted || blockIsSaving || selectedDate !== today} onClick={(event) => { event.stopPropagation(); void (blockCompleted ? clearQuickCompletedTimelineBlock(block) : quickCompleteTimelineBlock(block)); }}>{blockIsSaving ? <span className="timeline-check-spinner" /> : blockCompleted ? <Icon name="check" size={11} /> : null}</button>
+                    <button type="button" className="timeline-event-body timeline-task-body" aria-label={`打开本次执行：${block.task_title}`} aria-haspopup="dialog" aria-controls="timeline-context-panel" aria-pressed={selection?.kind === "block" && selection.id === block.id}>
+                      <span className="timeline-task-head"><strong>{block.task_title}</strong><time>{time}</time></span>
+                      {(url || body) && <span className="timeline-task-info">{url && <span className="timeline-task-url">{url}</span>}{url && body && <span className="timeline-task-divider" />}{body && <span className="timeline-task-note">{body}</span>}</span>}
+                    </button>
                   </div>;
                 })}
                 {selectedTimelineFrame && timelineItemLanes[selectedTimelineFrame.layoutKey] && <div className="timeline-event-selection-frame" style={timelineEventPosition(selectedTimelineFrame.starts_at, selectedTimelineFrame.ends_at, selectedDate, axisStart, pixelsPerHour, timelineItemLanes[selectedTimelineFrame.layoutKey])} aria-hidden="true" />}
@@ -5988,13 +6065,14 @@ function TodayPage({
       {timelineTooltip && createPortal(
         <aside
           id="timeline-time-block-tooltip"
-          className={`timeline-hover-card tone-${timelineTooltip.tone} placement-${timelineTooltip.placement}`}
+          className={`timeline-hover-card tone-${timelineTooltip.tone} placement-${timelineTooltip.placement}${timelineTooltip.kind === "普通任务" || timelineTooltip.kind === "重复事项" ? " task-type-hover" : ""}`}
           style={{ left: timelineTooltip.left, top: timelineTooltip.top }}
           role="tooltip"
         >
           <div className="timeline-hover-meta"><span>{timelineTooltip.kind}</span><time>{timelineTooltip.time}</time></div>
           <strong>{timelineTooltip.title}</strong>
-          <p>{timelineTooltip.detail}</p>
+          {(timelineTooltip.url || timelineTooltip.note) && <div className="timeline-hover-details">{timelineTooltip.url && <span className="timeline-hover-url">{timelineTooltip.url}</span>}{timelineTooltip.url && timelineTooltip.note && <span className="timeline-hover-divider" aria-hidden="true" />}{timelineTooltip.note && <p className="timeline-hover-note">{timelineTooltip.note}</p>}</div>}
+          {timelineTooltip.detail && <p>{timelineTooltip.detail}</p>}
         </aside>,
         document.body
       )}

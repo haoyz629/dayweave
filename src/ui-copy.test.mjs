@@ -196,7 +196,7 @@ test("ordinary tasks use one recycle-bin path instead of a cancellation state", 
   assert.doesNotMatch(appSource, /type TaskView = .*"cancelled"/);
   assert.equal(appSource.includes("不再进行"), false);
   assert.equal(appSource.includes("task-more-actions"), false);
-  assert.match(appSource, /\{ label: "历史", items: \["done", "deleted"\] \}/);
+  assert.match(appSource, /\{ label: "历史与维护", items: \["done", "deleted"\] \}/);
   assert.match(appSource, /className="task-compact-trash" disabled=\{busy\} onClick=\{\(\) => requestTaskChange\(\{ kind: "trash" \}\)\}/);
   assert.equal(stylesSource.includes("status-row-cancelled"), false);
   assert.equal(stylesSource.includes("terminal-task-status.cancelled"), false);
@@ -377,12 +377,12 @@ test("task editor uses shared semantic colors and keeps recycle actions in place
   assert.doesNotMatch(appSource, /setView\(["']deleted["']\)/);
 });
 
-test("task capsule titles stay on one line and schedule capsules keep their content visible", () => {
+test("task capsule titles stay on one line and timeline task blocks fit their available height", () => {
   assert.match(appSource, /<strong title=\{title\}>\{title\}<\/strong>/);
   assert.match(stylesSource, /\.task-capsule-heading > strong \{[^}]*display: block;[^}]*flex: 1 1 auto;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
   assert.doesNotMatch(stylesSource, /\.task-capsule-heading > strong \{[^}]*-webkit-line-clamp:/);
   assert.match(stylesSource, /\.timeline-lanes \.task-capsule-content\.compact \{[^}]*height: auto;[^}]*min-height: 76px;/);
-  assert.match(stylesSource, /\.timeline-execution-content \{[^}]*display: grid;[^}]*height: 100%;[^}]*overflow: hidden;/);
+  assert.match(stylesSource, /\.timeline-task-body, \.timeline-event\.execution-block \.timeline-task-body \{[^}]*display: flex;[^}]*height: 100%;[^}]*overflow: hidden;/);
   assert.match(stylesSource, /\.timeline-event-body \{[^}]*min-width: 0;[^}]*width: 100%;[^}]*overflow: hidden;/);
 });
 

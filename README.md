@@ -1,4 +1,7 @@
-# 今序（JinXu）
+# 今序 · Dayweave
+
+*Bring order to your day.*<br>
+让今天，井然有序。
 
 Windows 本地优先的任务、日计划与复盘应用。技术栈为 Tauri v2、React、TypeScript、Rust 与 SQLite。
 

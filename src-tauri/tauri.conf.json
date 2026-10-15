@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "今序（JinXu）",
+  "productName": "今序 · Dayweave",
   "version": "0.1.0",
   "identifier": "com.jinxu.desktop",
   "build": {
@@ -10,12 +10,13 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "今序（JinXu）", "width": 1280, "height": 800, "minWidth": 960, "minHeight": 640 }],
+    "windows": [{ "title": "今序 · Dayweave", "width": 1280, "height": 800, "minWidth": 960, "minHeight": 640 }],
     "security": { "csp": "default-src 'self'; connect-src 'self' https: http:; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'" }
   },
   "bundle": {
     "active": true,
     "targets": "nsis",
+    "publisher": "今序",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -23,6 +24,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "windows": { "nsis": { "displayLanguageSelector": true } }
+    "windows": { "nsis": { "displayLanguageSelector": true, "installerHooks": "windows/installer-hooks.nsh" } }
   }
 }

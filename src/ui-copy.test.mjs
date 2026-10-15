@@ -6,7 +6,7 @@ const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const stylesSource = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const tauriSource = readFileSync(new URL("./tauri.ts", import.meta.url), "utf8");
 const userInterfaceSource = appSource.replace(
-  /function uiErrorMessage\(reason: unknown\) \{[\s\S]*?\n\}\n\nfunction pickerDateLabel/,
+  /function uiErrorMessage\(reason: unknown\) \{[\s\S]*?\r?\n\}\r?\n\r?\nfunction pickerDateLabel/,
   "function pickerDateLabel"
 );
 
@@ -177,11 +177,11 @@ test("task capsule hover actions do not stay open after a pointer click", () => 
   assert.match(stylesSource, /\.task-ledger-row:has\(:focus-visible\) \.ledger-row-actions/);
 });
 
-test("task capsule selection is visually distinct in light and dark modes", () => {
-  assert.match(stylesSource, /\.ledger-row\.task-capsule-row \{[\s\S]*?background: #fff;/);
+test("task list selection is visually distinct in light and dark modes", () => {
+  assert.match(stylesSource, /\.ledger-row\.task-capsule-row \{[^}]*border-bottom: 1px solid var\(--task-row-divider\);[^}]*border-radius: 0;[^}]*background: var\(--jx-raised\);/);
   assert.match(stylesSource, /\.ledger-row\.task-capsule-row:not\(\.selected\):hover/);
-  assert.match(stylesSource, /\.ledger-row\.task-capsule-row\.selected \{[\s\S]*?border-color: #536dff;[\s\S]*?background: #e8edff;/);
-  assert.match(stylesSource, /html\[data-mode="dark"\] \.next-workspace \.ledger-row\.task-capsule-row\.selected/);
+  assert.match(stylesSource, /\.ledger-row\.task-capsule-row\.selected \{[^}]*background: var\(--jx-focus-soft\);[^}]*box-shadow: none;/);
+  assert.match(stylesSource, /html\[data-mode="dark"\] \.next-workspace \.ledger-row\.task-capsule-row\.selected \{[^}]*background: var\(--jx-focus-soft\);/);
 });
 
 test("task inspector keeps a single column and centers in wide desktop workspace", () => {
@@ -226,11 +226,11 @@ test("recycle-bin capsules open full details with dynamic top-level recovery act
   assert.match(stylesSource, /\.ledger-quick-action\.icon-only:is\(:hover, :focus-visible\)::after/);
 });
 
-test("confirmed plans expose automatic adjustment without a separate mode button", () => {
+test("confirmed plans expose direct operations without a separate adjustment mode", () => {
   assert.doesNotMatch(appSource, />调整计划<\/button>/);
   assert.doesNotMatch(appSource, /onClick=\{onAdjustPlan\}/);
   assert.match(appSource, /sourceBlockId: selectedBlock\.id/);
-  assert.match(appSource, /if \(!workingPreview\) workingPreview = await onAdjustPlan\(\)/);
+  assert.doesNotMatch(appSource, /onAdjustPlan|startPlanAdjustment/);
   assert.match(appSource, /includeWaitingTask\(task, event\.currentTarget\)/);
   assert.equal(appSource.includes("移到待安排"), false);
   assert.match(appSource, /<Icon name="trash" size=\{14\} \/>从今日计划移除/);
@@ -242,15 +242,16 @@ test("timeline detail flows provide contextual return actions", () => {
   assert.match(appSource, /planDraftTimeEdit\.sourceBlockId && <button[^>]*className="timeline-panel-back"[^>]*aria-label="返回任务块详情"/);
   assert.match(appSource, /className="task-context-return"><button[^>]*aria-label="返回今日计划中的任务块"/);
   assert.match(appSource, /onOpenTasks\(taskId, \{ date: selectedDate, blockId \}\)/);
-  assert.match(appSource, /setSelection\(\{ kind: "block", id: block\.id \}\)/);
+  // Returning reveals the original block without reopening its editing dialog.
+  assert.match(appSource, /setSelection\(null\);\s*setExecutionDraft\(null\);\s*setExecutionMessage\(""\);\s*const frame/);
   assert.match(appSource, /requestNavigation\(\{ active: "今日", timelineReturnContext: returnContext \}\)/);
   assert.match(stylesSource, /\.timeline-panel-back:focus-visible/);
   assert.match(stylesSource, /\.task-context-return button:focus-visible/);
 });
 
 test("newly included tasks are revealed on the timeline", () => {
-  assert.match(appSource, /function revealDraftBlock\(blockIndex: number\)/);
-  assert.match(appSource, /revealDraftBlock\(blockIndex\)/);
+  assert.match(appSource, /function revealTimelineBlock\(kind: "draft" \| "block", id: string\)/);
+  assert.match(appSource, /revealTimelineBlock\("draft", String\(blockIndex\)\)/);
   assert.match(appSource, /scroller\.scrollTo\(\{[\s\S]*?top: nextTop,[\s\S]*?prefers-reduced-motion: reduce/);
 });
 
@@ -286,12 +287,6 @@ test("timeline notes appear only after an execution result is selected", () => {
   assert.match(appSource, /disabled=\{savingExecution \|\| !executionDraft\.outcome\}/);
 });
 
-test("plan regeneration uses an accessible compact tooltip button", () => {
-  assert.match(appSource, /confirmed \? "重新安排未执行任务" : "重新生成日计划草案"/);
-  assert.match(appSource, /className="plan-action-tooltip" role="tooltip"/);
-  assert.match(stylesSource, /\.plan-regenerate-control:focus-within \.plan-action-tooltip/);
-  assert.match(stylesSource, /\.plan-regenerate-button:focus-visible/);
-});
 
 test("calendar and daily plan behave as one two-level workspace", () => {
   assert.doesNotMatch(appSource, /aria-label="今日页视图"/);

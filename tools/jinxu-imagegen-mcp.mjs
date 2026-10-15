@@ -14,7 +14,7 @@ const outputDirectory = resolve(
 const toolDefinition = {
   name: "generate_jinxu_image",
   description:
-    "Generate a square raster image with the configured GPT Image-compatible API. The image is saved only in JinXu's local logo-candidates folder and is also returned inline for review.",
+    "Generate a square raster image with the configured GPT Image-compatible API. The image is saved only in Dayweave's local logo-candidates folder and is also returned inline for review.",
   inputSchema: {
     type: "object",
     additionalProperties: false,

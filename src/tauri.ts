@@ -2,6 +2,16 @@ import { invoke } from "@tauri-apps/api/core";
 
 const desktopRuntimeMessage = "请在今序桌面应用中打开；网页预览无法使用保存在这台电脑上的数据。";
 
+export function setAppLogoMode(mode: "light" | "dark") {
+  return invokeDesktop<void>("set_app_logo_mode", { mode });
+}
+
+export function setAppWindowTitle(title: string) {
+  document.title = title;
+  if (!("__TAURI_INTERNALS__" in window)) return Promise.resolve();
+  return invokeDesktop<void>("set_app_window_title", { title });
+}
+
 function invokeDesktop<T>(command: string, args?: Record<string, unknown>) {
   if (!("__TAURI_INTERNALS__" in window)) return Promise.reject(desktopRuntimeMessage);
   return invoke<T>(command, args);
@@ -86,6 +96,7 @@ export type Task = {
   reserved_minutes: number;
   scheduled_dates: string[];
   tags: string[];
+  execution_locked: boolean;
 };
 
 export type TaskDraftInput = {
@@ -167,6 +178,7 @@ export type AvailabilitySettings = {
     weekdays: number[];
     workday_start: string;
     workday_end: string;
+    makeup_workdays_as_workdays: boolean;
 };
 
 export type RulePlanBlock = {
@@ -556,6 +568,10 @@ export function startConfirmedPlanAdjustment(planDate: string) {
   return invokeDesktop<RulePlanPreview>("start_confirmed_plan_adjustment", { planDate });
 }
 
+export function startManualPlanDraft(planDate: string) {
+  return invokeDesktop<RulePlanPreview>("start_manual_plan_draft", { planDate });
+}
+
 export function regenerateConfirmedPlanAdjustment(planDate: string) {
   return invokeDesktop<RulePlanPreview>("regenerate_confirmed_plan_adjustment", { planDate });
 }
@@ -577,8 +593,30 @@ export function confirmRuleBasedPlan(preview: RulePlanPreview) {
   return invokeDesktop<DaySchedule>("confirm_rule_based_plan", { preview });
 }
 
+export function updatePlanBlockTime(planDate: string, block: PlanBlock, startsAt: string, endsAt: string) {
+  return invokeDesktop<DaySchedule>("update_plan_block_time", { input: {
+    plan_date: planDate, block_id: block.id,
+    expected_starts_at: block.starts_at, expected_ends_at: block.ends_at,
+    starts_at: startsAt, ends_at: endsAt
+  } });
+}
+
 export function getDaySchedule(planDate: string) {
   return invokeDesktop<DaySchedule>("get_day_schedule", { planDate });
+}
+
+export function includePlanTask(planDate: string, task: Task, blocks: RulePlanBlock[]) {
+  return invokeDesktop<DaySchedule>("include_plan_task", { input: {
+    plan_date: planDate, task_id: task.id, expected_updated_at: task.updated_at,
+    expected_reserved_minutes: task.reserved_minutes, blocks
+  } });
+}
+
+export function removePlanBlock(planDate: string, block: PlanBlock) {
+  return invokeDesktop<DaySchedule>("remove_plan_block", { input: {
+    plan_date: planDate, block_id: block.id,
+    expected_starts_at: block.starts_at, expected_ends_at: block.ends_at
+  } });
 }
 
 export function saveExecutionCapture(captureDate: string, input: ExecutionCaptureInput) {

@@ -1,4 +1,7 @@
-# 今序（JinXu）产品介绍
+# 今序 · Dayweave 产品介绍
+
+*Bring order to your day.*<br>
+让今天，井然有序。
 
 > 版本：首发产品定位稿  
 > 平台：Windows 桌面端  

@@ -5,12 +5,18 @@ mod database;
 mod domain;
 mod error;
 
+#[cfg(windows)]
+mod taskbar_icon;
+
+#[cfg(test)]
+mod logo_test;
+
 use std::{fs, sync::Mutex, thread, time::Duration};
 
 use database::{
     AiConnectionSettingsDto, AiConnectionSettingsInput, AiConversationDto, AiMessageDto, AiRunDto,
     ApplyResult, AvailabilitySettings, CalendarEventDto, Database, DayScheduleDto, ExecutionCaptureInput,
-    ManualCalendarEventInput, ManualTaskUpdate, ProposalPreview, RulePlanBlock, RulePlanPreview,
+    ManualCalendarEventInput, ManualTaskUpdate, PlanBlockTimeUpdate, PlanBlockRemove, PlanTaskInclude, ProposalPreview, RulePlanBlock, RulePlanPreview,
     RecurringItemDto, RecurringItemInput, RecurringOccurrenceDto, RecurringOccurrenceReviewInput,
     TaskDraftDto, ReviewEntryDto, ReviewEntryInput, TaskDraftInput, TaskDto, TaskMetadataDto,
     UndoEntryDto, UnscheduledTask, purge_expired_deleted_items,
@@ -433,7 +439,7 @@ fn set_global_shortcut(
 #[tauri::command]
 fn send_test_notification(app: AppHandle) -> Result<(), String> {
     app.notification().builder()
-        .title("今序提醒可用")
+        .title("今序 · Dayweave 提醒可用")
         .body("这是一条本机 Windows 通知测试，不会调用 AI。")
         .show()
         .map_err(|error| error.to_string())
@@ -447,13 +453,48 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
+fn app_logo(mode: &str) -> Result<tauri::image::Image<'static>, String> {
+    let rgba: &'static [u8] = match mode {
+        "light" => include_bytes!("../icons/logo-light.rgba"),
+        "dark" => include_bytes!("../icons/logo-dark.rgba"),
+        _ => return Err("不支持的明暗模式".into()),
+    };
+    Ok(tauri::image::Image::new(rgba, 128, 128))
+}
+
+#[tauri::command]
+fn set_app_window_title(window: tauri::WebviewWindow, title: String) -> Result<(), String> {
+    window.set_title(&title).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_app_logo_mode(app: AppHandle, mode: String) -> Result<(), String> {
+    let icon = app_logo(&mode)?;
+    if let Some(window) = app.get_webview_window("main") {
+        window.set_icon(icon.clone()).map_err(|error| error.to_string())?;
+        // Tauri's Windows set_icon updates ICON_SMALL only; the taskbar uses ICON_BIG.
+        #[cfg(windows)]
+        {
+            let hwnd = window.hwnd().map_err(|error| error.to_string())?.0 as isize;
+            let taskbar_app = app.clone();
+            window.run_on_main_thread(move || {
+                taskbar_app.state::<taskbar_icon::TaskbarIcons>().set_for_window(hwnd, &mode);
+            }).map_err(|error| error.to_string())?;
+        }
+    }
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        tray.set_icon(Some(icon)).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "显示今序", true, None::<&str>)?;
+    let show = MenuItem::with_id(app, "show", "显示今序 · Dayweave", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
     let mut builder = TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
-        .tooltip("今序（JinXu）")
+        .tooltip("今序 · Dayweave")
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main_window(app),
@@ -629,6 +670,14 @@ fn get_rule_plan_draft(
 }
 
 #[tauri::command]
+fn start_manual_plan_draft(
+    state: State<'_, AppState>,
+    plan_date: String,
+) -> Result<RulePlanPreview, String> {
+    with_database(&state, |database| database.start_manual_plan_draft(&plan_date))
+}
+
+#[tauri::command]
 fn start_confirmed_plan_adjustment(
     state: State<'_, AppState>,
     plan_date: String,
@@ -667,6 +716,24 @@ fn discard_rule_plan_draft(
     expected_version: i64,
 ) -> Result<database::RulePlanDraftDiscardResult, String> {
     with_database(&state, |database| database.discard_rule_plan_draft(&preview_id, expected_version))
+}
+
+#[tauri::command]
+fn include_plan_task(state: State<'_, AppState>, input: PlanTaskInclude) -> Result<DayScheduleDto, String> {
+    with_database(&state, |database| database.include_plan_task(input))
+}
+
+#[tauri::command]
+fn remove_plan_block(state: State<'_, AppState>, input: PlanBlockRemove) -> Result<DayScheduleDto, String> {
+    with_database(&state, |database| database.remove_plan_block(input))
+}
+
+#[tauri::command]
+fn update_plan_block_time(
+    state: State<'_, AppState>,
+    input: PlanBlockTimeUpdate,
+) -> Result<DayScheduleDto, String> {
+    with_database(&state, |database| database.update_plan_block_time(input))
 }
 
 #[tauri::command]
@@ -740,6 +807,7 @@ fn apply_confirmed_ai_proposal(
 
 pub fn run() {
     tauri::Builder::default()
+        // Keep the existing registry value name so upgrades retain the autostart preference.
         .plugin(tauri_plugin_autostart::Builder::new().app_name("今序（JinXu）").build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app, _shortcut, event| {
@@ -752,8 +820,15 @@ pub fn run() {
             let mut database = Database::open(data_dir.join("jinxu.sqlite3"))?;
             purge_expired_deleted_items(&mut database)?;
             application.manage(AppState { database: Mutex::new(database) });
+            #[cfg(windows)]
+            application.manage(taskbar_icon::TaskbarIcons::new().map_err(std::io::Error::other)?);
             setup_tray(application)?;
             let app_handle = application.handle().clone();
+            let logo_mode = application.state::<AppState>().database.lock().ok()
+                .and_then(|database| database.get_ui_setting("ui.appearance.mode").ok().flatten())
+                .filter(|mode| mode == "dark")
+                .unwrap_or_else(|| "light".into());
+            set_app_logo_mode(app_handle.clone(), logo_mode).map_err(std::io::Error::other)?;
             if let Some(shortcut) = application.state::<AppState>().database.lock().ok()
                 .and_then(|database| database.get_ui_setting("ui.desktop.shortcut").ok().flatten())
                 .or_else(|| Some("Ctrl+Alt+Space".into()))
@@ -805,6 +880,8 @@ pub fn run() {
             apply_undo,
             get_ui_setting,
             set_ui_setting,
+            set_app_logo_mode,
+            set_app_window_title,
             get_ai_connection_settings,
             save_ai_connection_settings,
             test_ai_connection,
@@ -837,11 +914,15 @@ pub fn run() {
             save_availability_settings,
             preview_rule_based_plan,
             get_rule_plan_draft,
+            start_manual_plan_draft,
             start_confirmed_plan_adjustment,
             regenerate_confirmed_plan_adjustment,
             update_rule_plan_draft,
             discard_rule_plan_draft,
             confirm_rule_based_plan,
+            update_plan_block_time,
+            include_plan_task,
+            remove_plan_block,
             get_day_schedule,
             save_execution_capture,
             clear_execution_capture,
@@ -851,5 +932,5 @@ pub fn run() {
             apply_confirmed_ai_proposal
         ])
         .run(tauri::generate_context!())
-        .expect("启动今序（JinXu）时发生无法恢复的错误");
+        .expect("启动今序时发生无法恢复的错误");
 }

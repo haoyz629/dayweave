@@ -85,6 +85,20 @@ export function lunarDayLabel(date: string) {
   return day === 1 ? month ?? LUNAR_DAY_LABELS[day] : LUNAR_DAY_LABELS[day];
 }
 
+export function lunarDateLabel(date: string) {
+  const parts = chineseCalendarLabel.formatToParts(new Date(`${date}T00:00:00+08:00`));
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = Number(parts.find((part) => part.type === "day")?.value);
+  return month && Number.isInteger(day) && day >= 1 && day <= 30 ? `${month}${LUNAR_DAY_LABELS[day]}` : "";
+}
+
+export function solarTermProgressLabel(date: string) {
+  const termDate = Object.keys(SOLAR_TERMS_2026).filter((key) => key.slice(0, 4) === date.slice(0, 4) && key <= date).at(-1);
+  if (!termDate) return null;
+  const elapsedDays = Math.round((Date.parse(`${date}T00:00:00+08:00`) - Date.parse(`${termDate}T00:00:00+08:00`)) / 86400000);
+  return elapsedDays === 0 ? SOLAR_TERMS_2026[termDate] : `${SOLAR_TERMS_2026[termDate]}第${elapsedDays + 1}天`;
+}
+
 function nextDate(date: string) {
   const value = new Date(`${date}T00:00:00+08:00`);
   value.setUTCDate(value.getUTCDate() + 1);
@@ -94,6 +108,15 @@ function nextDate(date: string) {
 const officialHolidayByDate = new Map<string, OfficialHolidayGroup>();
 for (const group of OFFICIAL_HOLIDAYS_2026) {
   for (const date of group.dates) officialHolidayByDate.set(date, group);
+}
+
+export function availabilityWorkdayOn(date: string, weekdays: readonly number[], makeupWorkdaysAsWorkdays = true) {
+  if (officialHolidayCoverageFor(date)) {
+    if (officialHolidayByDate.has(date)) return false;
+    if (makeupWorkdaysAsWorkdays && MAKEUP_WORKDAYS_2026.has(date)) return true;
+  }
+  const weekday = new Date(`${date}T00:00:00Z`).getUTCDay() || 7;
+  return weekdays.includes(weekday);
 }
 
 export function calendarDayInfo(date: string): CalendarDayInfo | null {

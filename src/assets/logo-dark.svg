@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="今序 · 深蓝">
+ <defs>
+  <linearGradient id="jx-reference-depth" x1="0" y1="0" x2="1" y2="1"><stop class="tile-light" stop-color="#263854"/><stop class="tile-dark" offset="1" stop-color="#101a2c"/></linearGradient>
+  <linearGradient id="jx-reference-edge" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#576c86" stop-opacity=".6"/><stop offset="1" stop-color="#101a2c" stop-opacity=".6"/></linearGradient>
+  <linearGradient id="jx-fold-top" x1="60" y1="29" x2="76" y2="38" gradientUnits="userSpaceOnUse"><stop stop-color="#e8d8b8"/><stop offset=".32" stop-color="#d7c4a2"/><stop class="fold-dark" offset=".6" stop-color="#b5a07d"/><stop offset="1" stop-color="#e8d8b8"/></linearGradient>
+  <linearGradient id="jx-fold-bottom" x1="72" y1="73" x2="91" y2="80" gradientUnits="userSpaceOnUse"><stop stop-color="#e8d8b8"/><stop offset=".3" stop-color="#d7c4a2"/><stop class="fold-dark" offset=".58" stop-color="#b5a07d"/><stop offset=".84" stop-color="#d7c4a2"/><stop offset="1" stop-color="#e8d8b8"/></linearGradient>
+  <clipPath id="jx-fold-roof-clip"><path d="M27 57C42 52 52 41 59 30C62 25 68 24 72 31C79 43 88 52 102 57Q104 58 103 60L101 65Q100 67 97 66C82 61 74 51 66 37C58 50 46 61 31 66Q28 67 27 64L25 60Q24 58 27 57Z"/></clipPath>
+  <clipPath id="jx-fold-bottom-clip"><path d="M44 71H81C88 71 92 73 91 79C89 86 78 98 69 105Q66 108 63 105L59 102Q56 100 59 97C66 90 73 83 78 79H44C40 79 38 77 38 75C38 72 40 71 44 71Z"/></clipPath>
+ </defs>
+ <style>.ink{fill:#e8d8b8}</style>
+ <rect class="depth-tile" width="128" height="128" rx="30" fill="url(#jx-reference-depth)"/>
+ <rect x=".8" y=".8" width="126.4" height="126.4" rx="29.2" fill="none" stroke="url(#jx-reference-edge)" stroke-width="1.6"/>
+ <g class="ink">
+  <path d="M27 57C42 52 52 41 59 30C62 25 68 24 72 31C79 43 88 52 102 57Q104 58 103 60L101 65Q100 67 97 66C82 61 74 51 66 37C58 50 46 61 31 66Q28 67 27 64L25 60Q24 58 27 57Z"/>
+  <path d="M61 49C66 48 72 53 75 58Q77 62 74 64Q72 66 69 63C65 60 62 57 58 54Q56 51 61 49Z"/>
+  <path d="M44 71H81C88 71 92 73 91 79C89 86 78 98 69 105Q66 108 63 105L59 102Q56 100 59 97C66 90 73 83 78 79H44C40 79 38 77 38 75C38 72 40 71 44 71Z"/>
+ </g>
+ <path class="fold-shade" d="M60 27C65 25 69 25 72 31L78 42L71 39Q68 34 66 37C65 30 62 29 60 30Z" fill="url(#jx-fold-top)" clip-path="url(#jx-fold-roof-clip)"/>
+ <path class="fold-shade" d="M77 71H81C88 71 92 73 91 79C89 84 86 88 83 91C87 82 85 78 78 79H71C76 77 79 73 77 71Z" fill="url(#jx-fold-bottom)" clip-path="url(#jx-fold-bottom-clip)"/>
+</svg>

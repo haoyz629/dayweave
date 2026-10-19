@@ -4,6 +4,7 @@ mod ai;
 mod database;
 mod domain;
 mod error;
+mod legacy;
 
 #[cfg(windows)]
 mod taskbar_icon;
@@ -11,7 +12,7 @@ mod taskbar_icon;
 #[cfg(test)]
 mod logo_test;
 
-use std::{fs, sync::Mutex, thread, time::Duration};
+use std::{fs, sync::{Mutex, atomic::{AtomicBool, Ordering}}, thread, time::Duration};
 
 use database::{
     AiConnectionSettingsDto, AiConnectionSettingsInput, AiConversationDto, AiMessageDto, AiRunDto,
@@ -26,7 +27,7 @@ use serde::Serialize;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Manager, State, Window, WindowEvent,
+    AppHandle, Emitter, Manager, State, Window, WindowEvent,
 };
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -34,6 +35,20 @@ use tauri_plugin_notification::NotificationExt;
 
 struct AppState {
     database: Mutex<Database>,
+}
+
+struct ReviewCloseGuard(AtomicBool);
+
+#[tauri::command]
+fn set_review_close_guard(guard: State<'_, ReviewCloseGuard>, enabled: bool) {
+    guard.0.store(enabled, Ordering::SeqCst);
+}
+
+#[tauri::command]
+fn finish_review_window_close(window: Window, state: State<'_, AppState>) -> Result<(), String> {
+    let close_to_tray = with_database(&state, |database| database.get_ui_setting("ui.desktop.close_to_tray"))?
+        .as_deref() != Some("false");
+    if close_to_tray { window.hide() } else { window.destroy() }.map_err(|error| error.to_string())
 }
 
 #[derive(Debug, Serialize)]
@@ -72,6 +87,11 @@ fn list_task_drafts(
     include_discarded: bool,
 ) -> Result<Vec<TaskDraftDto>, String> {
     with_database(&state, |database| database.list_task_drafts(include_discarded))
+}
+
+#[tauri::command]
+fn prepare_task_followup(state: State<'_, AppState>, source_task_id: String) -> Result<database::FollowupPreparation, String> {
+    with_database(&state, |database| database.prepare_task_followup(&source_task_id))
 }
 
 #[tauri::command]
@@ -218,6 +238,16 @@ fn update_recurring_task(
 #[tauri::command]
 fn list_tags(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     with_database(&state, |database| database.list_tags())
+}
+
+#[tauri::command]
+fn list_tag_catalog(state: State<'_, AppState>) -> Result<Vec<database::TaskTagDefinition>, String> {
+    with_database(&state, |database| database.list_tag_catalog())
+}
+
+#[tauri::command]
+fn create_tag(state: State<'_, AppState>, name: String) -> Result<database::TaskTagDefinition, String> {
+    with_database(&state, |database| database.create_tag(&name))
 }
 
 #[tauri::command]
@@ -454,11 +484,11 @@ fn show_main_window(app: &AppHandle) {
 }
 
 fn app_logo(mode: &str) -> Result<tauri::image::Image<'static>, String> {
-    let rgba: &'static [u8] = match mode {
-        "light" => include_bytes!("../icons/logo-light.rgba"),
-        "dark" => include_bytes!("../icons/logo-dark.rgba"),
-        _ => return Err("不支持的明暗模式".into()),
-    };
+    if !matches!(mode, "light" | "dark") {
+        return Err("不支持的明暗模式".into());
+    }
+    // Keep the existing command compatible while using one logo in every theme.
+    let rgba: &'static [u8] = include_bytes!("../icons/logo-light.rgba");
     Ok(tauri::image::Image::new(rgba, 128, 128))
 }
 
@@ -528,7 +558,7 @@ fn launch_reminder_worker(app: AppHandle) {
                     let task_blocks = database.claim_due_task_block_notifications(task_lead).unwrap_or_default();
                     if evening_enabled && minute >= evening_time {
                         let kind = "evening_review";
-                        ("该复盘今天的执行情况了", "打开今序，核对实际耗时、结果和剩余工作量。", database.claim_daily_notification(kind, &date).unwrap_or(false), task_blocks)
+                        ("可以回顾今天的执行情况了", "打开今序的“今日 → 复盘与记录”，按需补充结果和详情。", database.claim_daily_notification(kind, &date).unwrap_or(false), task_blocks)
                     } else if morning_enabled && minute >= morning_time {
                         let kind = "morning_plan";
                         ("今天准备怎么安排？", "打开今序主动生成或调整今天的计划；提醒不会自动调用 AI。", database.claim_daily_notification(kind, &date).unwrap_or(false), task_blocks)
@@ -560,8 +590,9 @@ fn update_manual_task(
     state: State<'_, AppState>,
     task_id: String,
     update: ManualTaskUpdate,
+    tags: Option<Vec<String>>,
 ) -> Result<TaskDto, String> {
-    with_database(&state, |database| database.update_manual_task(&task_id, update))
+    with_database(&state, |database| database.update_manual_task_with_tags(&task_id, update, tags))
 }
 
 #[tauri::command]
@@ -759,6 +790,15 @@ fn save_execution_capture(
 }
 
 #[tauri::command]
+fn resolve_task_execution(
+    state: State<'_, AppState>,
+    capture_date: String,
+    input: database::TaskExecutionResolutionInput,
+) -> Result<TaskDto, String> {
+    with_database(&state, |database| database.resolve_task_execution(&capture_date, input))
+}
+
+#[tauri::command]
 fn clear_execution_capture(
     state: State<'_, AppState>,
     capture_date: String,
@@ -774,6 +814,26 @@ fn save_review_entry(
     input: ReviewEntryInput,
 ) -> Result<ReviewEntryDto, String> {
     with_database(&state, |database| database.save_review_entry(&review_date, input))
+}
+
+#[tauri::command]
+fn list_review_form_drafts(state: State<'_, AppState>, review_date: String) -> Result<Vec<database::ReviewFormDraft>, String> {
+    with_database(&state, |db| db.list_review_form_drafts(&review_date))
+}
+
+#[tauri::command]
+fn save_review_form_draft(state: State<'_, AppState>, review_date: String, item_type: String, item_id: String, payload_json: String, expected_revision: i64) -> Result<database::ReviewFormDraft, String> {
+    with_database(&state, |db| db.save_review_form_draft(&review_date, &item_type, &item_id, &payload_json, expected_revision))
+}
+
+#[tauri::command]
+fn delete_review_form_draft(state: State<'_, AppState>, review_date: String, item_type: String, item_id: String) -> Result<(), String> {
+    with_database(&state, |db| db.delete_review_form_draft(&review_date, &item_type, &item_id))
+}
+
+#[tauri::command]
+fn complete_task(state: State<'_, AppState>, task_id: String, plan_block_id: Option<String>, note: Option<String>) -> Result<TaskDto, String> {
+    with_database(&state, |db| db.complete_task_with_note(&task_id, plan_block_id.as_deref(), note))
 }
 
 #[tauri::command]
@@ -807,8 +867,8 @@ fn apply_confirmed_ai_proposal(
 
 pub fn run() {
     tauri::Builder::default()
-        // Keep the existing registry value name so upgrades retain the autostart preference.
-        .plugin(tauri_plugin_autostart::Builder::new().app_name("今序（JinXu）").build())
+        .manage(ReviewCloseGuard(AtomicBool::new(false)))
+        .plugin(tauri_plugin_autostart::Builder::new().app_name(legacy::AUTOSTART_NAME).build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app, _shortcut, event| {
             if event.state == ShortcutState::Pressed { show_main_window(app); }
@@ -816,10 +876,14 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|application| {
             let data_dir = application.path().app_data_dir()?;
+            legacy::migrate_database(&data_dir)?;
             fs::create_dir_all(&data_dir)?;
-            let mut database = Database::open(data_dir.join("jinxu.sqlite3"))?;
+            let mut database = Database::open(data_dir.join(legacy::DATABASE_NAME))?;
             purge_expired_deleted_items(&mut database)?;
             application.manage(AppState { database: Mutex::new(database) });
+            // Migrate localStorage before WebView2 creates a fresh profile for the new identifier.
+            legacy::migrate_local_storage(&application.path().app_local_data_dir()?)?;
+            tauri::WebviewWindowBuilder::from_config(application, &application.config().app.windows[0])?.build()?;
             #[cfg(windows)]
             application.manage(taskbar_icon::TaskbarIcons::new().map_err(std::io::Error::other)?);
             setup_tray(application)?;
@@ -840,6 +904,11 @@ pub fn run() {
         })
         .on_window_event(|window: &Window, event: &WindowEvent| {
             if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.app_handle().state::<ReviewCloseGuard>().0.load(Ordering::SeqCst) {
+                    api.prevent_close();
+                    let _ = window.emit("review-close-requested", ());
+                    return;
+                }
                 let close_to_tray = if let Some(state) = window.app_handle().try_state::<AppState>() {
                     match state.database.lock() {
                         Ok(database) => database.get_ui_setting("ui.desktop.close_to_tray")
@@ -854,10 +923,13 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            set_review_close_guard,
+            finish_review_window_close,
             create_manual_task_draft,
             save_task_draft,
             list_task_drafts,
             confirm_task_draft,
+            prepare_task_followup,
             confirm_creation_draft,
             import_legacy_recurring_draft,
             discard_task_draft,
@@ -876,6 +948,8 @@ pub fn run() {
             set_task_tags,
             update_recurring_task,
             list_tags,
+            list_tag_catalog,
+            create_tag,
             latest_undo,
             apply_undo,
             get_ui_setting,
@@ -925,8 +999,13 @@ pub fn run() {
             remove_plan_block,
             get_day_schedule,
             save_execution_capture,
+            resolve_task_execution,
             clear_execution_capture,
             save_review_entry,
+            list_review_form_drafts,
+            save_review_form_draft,
+            delete_review_form_draft,
+            complete_task,
             complete_task_from_review,
             preview_ai_proposal,
             apply_confirmed_ai_proposal

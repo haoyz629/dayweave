@@ -293,3 +293,21 @@ test("syncFormCommonFields synchronizes title, notes, and tags while preserving 
   assert.equal(updatedTask.due_time, "11:00");
   assert.equal(updatedTask.estimated_minutes, 60);
 });
+
+test("linked followup drafts keep inherited priority and tags and submit only ordinary-task settings", async () => {
+  const { state } = editor();
+  const linked = { ...state.persistedNewTaskDraft, id: "followup-draft", item_type: "task", title: "后续任务",
+    notes: null, priority: "low", tags: ["项目A", "文档"], recurring_settings: null,
+    origin: { source_task_id: "original-task", source_title: "来源任务", source_status: "scheduled" } };
+  await state.openPersistedTaskDraft(linked);
+  assert.equal(state.newTaskForm.priority, "low");
+  assert.deepEqual(state.newTaskForm.tags, ["项目A", "文档"]);
+  assert.equal(state.newTaskForm.notes, null);
+  state.applyCreateItemType("recurring");
+  assert.equal(state.createItemType, "task");
+  const input = state.currentCreationInput();
+  assert.equal(input.item_type, "task");
+  assert.equal(input.recurring_settings, null);
+  assert.equal(input.priority, "low");
+  assert.deepEqual(input.tags, ["项目A", "文档"]);
+});

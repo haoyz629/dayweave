@@ -3,11 +3,10 @@ use windows_sys::Win32::{
     UI::WindowsAndMessaging::{CreateIcon, DestroyIcon, HICON, SendMessageW, ICON_BIG, WM_SETICON},
 };
 
-// Both handles remain owned by application state for the lifetime of the window.
-// Windows borrows HICON in WM_SETICON; changing themes must not destroy an in-use handle.
+// The window borrows this handle, so application state owns it until shutdown.
+// Theme changes reuse the same approved light icon.
 pub(super) struct TaskbarIcons {
-    light: NativeIcon,
-    dark: NativeIcon,
+    icon: NativeIcon,
 }
 
 struct NativeIcon(isize);
@@ -49,15 +48,13 @@ impl Drop for NativeIcon {
 impl TaskbarIcons {
     pub(super) fn new() -> Result<Self, String> {
         Ok(Self {
-            light: NativeIcon::new(&super::app_logo("light")?)?,
-            dark: NativeIcon::new(&super::app_logo("dark")?)?,
+            icon: NativeIcon::new(&super::app_logo("light")?)?,
         })
     }
 
     // Called on the window's UI thread with a live HWND and a validated mode.
-    pub(super) fn set_for_window(&self, hwnd: isize, mode: &str) {
-        let icon = if mode == "dark" { &self.dark } else { &self.light };
-        unsafe { SendMessageW(hwnd as HWND, WM_SETICON, ICON_BIG as usize, icon.0); }
+    pub(super) fn set_for_window(&self, hwnd: isize, _mode: &str) {
+        unsafe { SendMessageW(hwnd as HWND, WM_SETICON, ICON_BIG as usize, self.icon.0); }
     }
 }
 
@@ -69,7 +66,7 @@ mod tests {
     };
 
     #[test]
-    fn taskbar_uses_big_icon_and_tracks_repeated_theme_changes() {
+    fn taskbar_uses_one_light_big_icon_across_repeated_theme_changes() {
         let icons = TaskbarIcons::new().unwrap();
         let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
         let hwnd = unsafe {
@@ -82,13 +79,13 @@ mod tests {
             fn drop(&mut self) { unsafe { DestroyWindow(self.0); } }
         }
         let window = TestWindow(hwnd);
-        unsafe { SendMessageW(window.0, WM_SETICON, ICON_SMALL as usize, icons.light.0); }
+        unsafe { SendMessageW(window.0, WM_SETICON, ICON_SMALL as usize, icons.icon.0); }
         for mode in ["light", "dark", "light", "dark", "light"] {
             icons.set_for_window(window.0 as isize, mode);
             let actual = unsafe { SendMessageW(window.0, WM_GETICON, ICON_BIG as usize, 0) };
-            assert_eq!(actual, if mode == "dark" { icons.dark.0 } else { icons.light.0 });
+            assert_eq!(actual, icons.icon.0);
             assert_eq!(unsafe { SendMessageW(window.0, WM_GETICON, ICON_SMALL as usize, 0) },
-                icons.light.0, "taskbar updates must not replace Tauri's small icon");
+                icons.icon.0, "taskbar updates must not replace Tauri's small icon");
         }
     }
 }

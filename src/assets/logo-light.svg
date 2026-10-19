@@ -1,20 +1,102 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-5 -5 138 138" role="img" aria-label="今序 · 白色">
- <defs><filter id="jx-edge-shadow" x="-12%" y="-12%" width="124%" height="124%" color-interpolation-filters="sRGB"><feDropShadow dx="0" dy="1.5" stdDeviation="1.4" flood-color="#1b2941" flood-opacity=".16"/></filter>
-  <linearGradient id="jx-reference-depth" x1="0" y1="0" x2="1" y2="1"><stop class="tile-light" stop-color="#ffffff"/><stop class="tile-dark" offset="1" stop-color="#eeede7"/></linearGradient>
-  <linearGradient id="jx-reference-edge" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#c9c9c0" stop-opacity=".6"/><stop offset="1" stop-color="#eeede7" stop-opacity=".6"/></linearGradient>
-  <linearGradient id="jx-fold-top" x1="60" y1="29" x2="76" y2="38" gradientUnits="userSpaceOnUse"><stop stop-color="#1b2941"/><stop offset=".32" stop-color="#394a63"/><stop class="fold-dark" offset=".6" stop-color="#0c1729"/><stop offset="1" stop-color="#1b2941"/></linearGradient>
-  <linearGradient id="jx-fold-bottom" x1="72" y1="73" x2="91" y2="80" gradientUnits="userSpaceOnUse"><stop stop-color="#1b2941"/><stop offset=".3" stop-color="#394a63"/><stop class="fold-dark" offset=".58" stop-color="#0c1729"/><stop offset=".84" stop-color="#394a63"/><stop offset="1" stop-color="#1b2941"/></linearGradient>
-  <clipPath id="jx-fold-roof-clip"><path d="M27 57C42 52 52 41 59 30C62 25 68 24 72 31C79 43 88 52 102 57Q104 58 103 60L101 65Q100 67 97 66C82 61 74 51 66 37C58 50 46 61 31 66Q28 67 27 64L25 60Q24 58 27 57Z"/></clipPath>
-  <clipPath id="jx-fold-bottom-clip"><path d="M44 71H81C88 71 92 73 91 79C89 86 78 98 69 105Q66 108 63 105L59 102Q56 100 59 97C66 90 73 83 78 79H44C40 79 38 77 38 75C38 72 40 71 44 71Z"/></clipPath>
- </defs>
- <style>.ink{fill:#1b2941}</style>
- <rect class="depth-tile" filter="url(#jx-edge-shadow)" width="128" height="128" rx="30" fill="url(#jx-reference-depth)"/>
- <rect x=".8" y=".8" width="126.4" height="126.4" rx="29.2" fill="none" stroke="#abb3bf" stroke-opacity=".7" stroke-width="2"/>
- <g class="ink">
-  <path d="M27 57C42 52 52 41 59 30C62 25 68 24 72 31C79 43 88 52 102 57Q104 58 103 60L101 65Q100 67 97 66C82 61 74 51 66 37C58 50 46 61 31 66Q28 67 27 64L25 60Q24 58 27 57Z"/>
-  <path d="M61 49C66 48 72 53 75 58Q77 62 74 64Q72 66 69 63C65 60 62 57 58 54Q56 51 61 49Z"/>
-  <path d="M44 71H81C88 71 92 73 91 79C89 86 78 98 69 105Q66 108 63 105L59 102Q56 100 59 97C66 90 73 83 78 79H44C40 79 38 77 38 75C38 72 40 71 44 71Z"/>
- </g>
- <path class="fold-shade" d="M60 27C65 25 69 25 72 31L78 42L71 39Q68 34 66 37C65 30 62 29 60 30Z" fill="url(#jx-fold-top)" clip-path="url(#jx-fold-roof-clip)"/>
- <path class="fold-shade" d="M77 71H81C88 71 92 73 91 79C89 84 86 88 83 91C87 82 85 78 78 79H71C76 77 79 73 77 71Z" fill="url(#jx-fold-bottom)" clip-path="url(#jx-fold-bottom-clip)"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"
+     viewBox="-44 10 1024 1024" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Dayweave · 晴蓝折带标志</title>
+  <desc id="desc">纯白至浅灰圆角底板，午夜深蓝 D，天蓝至钴蓝 W 与深海青蓝背面；亮白边缘、柔和弥散投影与连续渐变折痕。</desc>
+  <defs>
+    <linearGradient id="panel" x1="150" y1="80" x2="780" y2="960" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/><stop offset=".5" stop-color="#F8FAFC"/><stop offset="1" stop-color="#F1F5F9"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="170" y1="70" x2="770" y2="970" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/><stop offset=".45" stop-color="#E8EEF5"/><stop offset="1" stop-color="#CBD5E1"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="240" y1="203" x2="650" y2="845" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1E3A8A"/><stop offset=".4" stop-color="#1B326B"/>
+      <stop offset=".72" stop-color="#152545"/><stop offset="1" stop-color="#0F172A"/>
+    </linearGradient>
+    <!-- Soft tonal modelling of D: no separate opaque shadow patches. -->
+    <radialGradient id="blueShade" cx="601" cy="685" r="320" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F172A" stop-opacity=".14"/>
+      <stop offset=".55" stop-color="#0F172A" stop-opacity=".05"/>
+      <stop offset="1" stop-color="#0F172A" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="white" x1="250" y1="370" x2="350" y2="725" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/><stop offset=".5" stop-color="#0284C7"/>
+      <stop offset=".8" stop-color="#1873DE"/><stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="middle" x1="396" y1="444" x2="440" y2="710" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/><stop offset=".5" stop-color="#0284C7"/>
+      <stop offset=".8" stop-color="#1873DE"/><stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="right" x1="693" y1="373" x2="584" y2="720" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/><stop offset=".5" stop-color="#0284C7"/>
+      <stop offset=".8" stop-color="#1873DE"/><stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="back" x1="475" y1="455" x2="550" y2="709" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#126084"/><stop offset=".38" stop-color="#0C4A6E"/>
+      <stop offset=".73" stop-color="#0B4568"/><stop offset="1" stop-color="#093C5C"/>
+    </linearGradient>
+    <radialGradient id="foldShade" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse"
+                    gradientTransform="translate(521 681) rotate(-18) scale(70 100)">
+      <stop stop-color="#082F49" stop-opacity=".24"/>
+      <stop offset=".45" stop-color="#082F49" stop-opacity=".10"/>
+      <stop offset="1" stop-color="#082F49" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="contact" x1="471" y1="492" x2="568" y2="625" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#082F49" stop-opacity="0"/>
+      <stop offset=".35" stop-color="#082F49" stop-opacity=".16"/>
+      <stop offset=".72" stop-color="#082F49" stop-opacity=".08"/>
+      <stop offset="1" stop-color="#082F49" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="panelShadow" x="-44" y="10" width="1024" height="1024" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="0" stdDeviation="18" flood-color="#64748B" flood-opacity=".24"/>
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#475569" flood-opacity=".14"/>
+    </filter>
+    <filter id="dShadow" x="-.25" y="-.2" width="1.5" height="1.55" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="9" stdDeviation="13" flood-color="#334155" flood-opacity=".18"/>
+    </filter>
+    <filter id="ribbonShadow" x="-.2" y="-.3" width="1.4" height="1.7" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="9" stdDeviation="12" flood-color="#0C4A6E" flood-opacity=".20"/>
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1E3A8A" flood-opacity=".08"/>
+    </filter>
+    <filter id="softFold" x="-.6" y="-.3" width="2.2" height="1.6" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <path id="panelShape" d="M278 60H655C825 60 914 85 914 292V746C914 918 849 980 657 980H278C106 980 24 914 24 746V294C24 127 87 60 278 60Z"/>
+    <path id="dShape" fill-rule="evenodd" d="M239 203H442C618 203 745 337 745 523C745 711 620 845 441 845H239C212 845 194 827 194 800V248C194 221 212 203 239 203ZM302 298C298 298 295 301 295 306V742C295 747 297 749 302 749H443C565 749 649 658 649 524C649 391 567 298 443 298H302Z"/>
+    <path id="ribbon" d="M136 373H214C251 373 273 393 287 438L332 580C336 593 338 607 342 607C345 607 346 601 348.15 598L385 485C394 458 408 444 432 444H508C526 444 539 481 552 521L578 600L634 433C648 391 670 373 705 373H785C760 381 747 400 735 437L663 654C652 688 637 706 615 706H527C509 706 498 677 487 643L460 546L429 645C417 684 406 706 382 706H294C280 706 271 683 263 660L193 446C181 410 164 381 136 376Z"/>
+    <path id="backShape" d="M508 444C526 444 539 481 552 521L578 600L572 625C559 665 546 706 527 706C509 706 498 677 487 643L460 546L471 511C482 478 491 444 508 444Z"/>
+    <clipPath id="ribbonClip"><use href="#ribbon"/></clipPath>
+    <clipPath id="backClip"><use href="#backShape"/></clipPath>
+  </defs>
+
+  <g filter="url(#panelShadow)">
+    <use href="#panelShape" fill="url(#panel)" stroke="url(#rim)" stroke-width="3.2"/>
+    <use href="#panelShape" transform="translate(469 520) scale(.991) translate(-469 -520)"
+         stroke="#FFFFFF" stroke-opacity=".85" stroke-width="1.6"/>
+  </g>
+  <g id="centeredMark" transform="translate(7.5 -2)">
+  <g filter="url(#dShadow)">
+    <use href="#dShape" fill="url(#blue)"/>
+    <use href="#dShape" fill="url(#blueShade)"/>
+  </g>
+  <g id="raisedRibbon" transform="translate(0 -45.5)" filter="url(#ribbonShadow)">
+    <use href="#ribbon" fill="url(#white)"/>
+    <g clip-path="url(#ribbonClip)">
+      <use href="#backShape" fill="url(#back)"/>
+      <!-- Clipped to the reverse face: shadow never dirties the white front. -->
+      <g clip-path="url(#backClip)">
+        <use href="#backShape" fill="url(#foldShade)"/>
+        <path d="M474 504L492 584C505 641 515 684 530 698"
+              stroke="url(#contact)" stroke-width="23" stroke-linecap="round" filter="url(#softFold)"/>
+        <path d="M584 579L563 645C550 683 539 698 527 702"
+              stroke="url(#contact)" stroke-width="19" stroke-linecap="round" filter="url(#softFold)"/>
+      </g>
+      <path fill="url(#middle)" d="M294 706C313 706 327 664 340 623L385 485C394 458 408 444 432 444H508C491 444 482 478 471 511L460 546L429 645C417 684 406 706 382 706H294Z"/>
+      <path fill="url(#right)" d="M527 706C546 706 559 665 572 625L634 433C648 391 670 373 705 373H785C760 381 747 400 735 437L663 654C652 688 637 706 615 706H527Z"/>
+      <!-- Delicate highlight only; no dark outline along fold boundaries. -->
+      <path d="M136 375C164 381 181 410 193 446L263 660C271 683 280 706 294 706C313 706 327 664 340 623L385 485C394 458 408 444 432 444H508"
+            stroke="#FFFFFF" stroke-opacity=".3" stroke-width="1.2" stroke-linecap="round"/>
+    </g>
+  </g>
+  </g>
 </svg>

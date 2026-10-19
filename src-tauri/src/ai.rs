@@ -89,13 +89,13 @@ pub fn call_task_assistant(
             "messages": conversational_messages,
             "response_format": {
                 "type": "json_schema",
-                "json_schema": { "name": "jinxu_task_drafts", "strict": true, "schema": schema }
+                "json_schema": { "name": "dayweave_task_drafts", "strict": true, "schema": schema }
             }
         }),
         "responses" => json!({
             "model": settings.model,
             "input": conversational_messages,
-            "text": { "format": { "type": "json_schema", "name": "jinxu_task_drafts", "strict": true, "schema": schema } }
+            "text": { "format": { "type": "json_schema", "name": "dayweave_task_drafts", "strict": true, "schema": schema } }
         }),
         _ => return Err(AppError::Domain("AI API 类型无效".into())),
     };
@@ -211,7 +211,7 @@ fn task_draft_schema() -> Value {
                         "due_time": nullable_string,
                         "total_workload_minutes": nullable_minutes,
                         "remaining_workload_minutes": nullable_minutes,
-                        "tags": { "type": "array", "maxItems": 20, "items": { "type": "string", "minLength": 1, "maxLength": 40 } },
+                        "tags": { "type": "array", "maxItems": 10, "items": { "type": "string", "minLength": 1, "maxLength": 30 } },
                         "recurrence": {
                             "anyOf": [
                                 { "type": "null" },

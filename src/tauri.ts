@@ -97,6 +97,7 @@ export type Task = {
   scheduled_dates: string[];
   tags: string[];
   execution_locked: boolean;
+  status_locked: boolean;
 };
 
 export type TaskDraftInput = {
@@ -130,13 +131,26 @@ export type TaskDraft = TaskDraftInput & {
   created_at: string;
   updated_at: string;
   confirmed_at: string | null;
+  origin?: TaskOrigin | null;
 };
 
 export type TaskMetadata = {
   task_id: string;
   tags: string[];
   recurrence: RecurrenceInput | null;
+  origin?: TaskOrigin | null;
+  followups?: TaskFollowup[];
+  latest_execution?: TaskExecutionFact | null;
 };
+
+export type TaskOrigin = { source_task_id: string | null; source_title: string; source_status: TaskStatus | null };
+export type TaskFollowup = { task_id: string; title: string; status: TaskStatus; starts_at: string | null };
+export type TaskExecutionFact = { plan_block_id: string; plan_date: string; outcome: ReviewOutcome; note: string | null };
+export type FollowupPreparation = { kind: "draft"; draft: TaskDraft } | { kind: "existing"; task_id: string };
+
+export function prepareTaskFollowup(sourceTaskId: string) {
+  return invokeDesktop<FollowupPreparation>("prepare_task_followup", { sourceTaskId });
+}
 
 export type UndoEntry = {
   id: string;
@@ -236,10 +250,18 @@ export type ExecutionCaptureInput = {
   note: string | null;
 };
 
+export type TaskExecutionResolutionInput = ExecutionCaptureInput & {
+  expected_task_updated_at: string;
+  next_action: "schedule" | "wait" | "stop" | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  remaining_workload_minutes: number | null;
+};
+
 export type ReviewEntryInput = {
   plan_block_id: string;
   outcome: ReviewOutcome;
-  actual_minutes: number;
+  actual_minutes: number | null;
   defer_reason: string | null;
   notes: string | null;
   remaining_workload_minutes: number | null;
@@ -250,6 +272,16 @@ export type ReviewEntry = ReviewEntryInput & {
   review_date: string;
   task_id: string;
   created_at: string;
+  updated_at: string;
+  followup_action?: "schedule" | "wait" | "stop" | null;
+};
+
+export type ReviewFormDraft = {
+  review_date: string;
+  item_type: "task" | "recurring";
+  item_id: string;
+  payload_json: string;
+  revision: number;
   updated_at: string;
 };
 
@@ -417,6 +449,16 @@ export function listTags() {
   return invokeDesktop<string[]>("list_tags");
 }
 
+export type TaskTagDefinition = { name: string; color: number };
+
+export function listTagCatalog() {
+  return invokeDesktop<TaskTagDefinition[]>("list_tag_catalog");
+}
+
+export function createTag(name: string) {
+  return invokeDesktop<TaskTagDefinition>("create_tag", { name });
+}
+
 export function latestUndo() {
   return invokeDesktop<UndoEntry | null>("latest_undo");
 }
@@ -508,8 +550,8 @@ export function sendTestNotification() {
   return invokeDesktop<void>("send_test_notification");
 }
 
-export function updateManualTask(taskId: string, update: ManualTaskUpdate) {
-  return invokeDesktop<Task>("update_manual_task", { taskId, update });
+export function updateManualTask(taskId: string, update: ManualTaskUpdate, tags?: string[]) {
+  return invokeDesktop<Task>("update_manual_task", { taskId, update, tags });
 }
 
 export function transitionManualTask(taskId: string, targetStatus: TaskStatus) {
@@ -623,12 +665,32 @@ export function saveExecutionCapture(captureDate: string, input: ExecutionCaptur
   return invokeDesktop<void>("save_execution_capture", { captureDate, input });
 }
 
+export function resolveTaskExecution(captureDate: string, input: TaskExecutionResolutionInput) {
+  return invokeDesktop<Task>("resolve_task_execution", { captureDate, input });
+}
+
 export function clearExecutionCapture(captureDate: string, planBlockId: string) {
   return invokeDesktop<void>("clear_execution_capture", { captureDate, planBlockId });
 }
 
 export function saveReviewEntry(reviewDate: string, input: ReviewEntryInput) {
   return invokeDesktop<ReviewEntry>("save_review_entry", { reviewDate, input });
+}
+
+export function listReviewFormDrafts(reviewDate: string): Promise<ReviewFormDraft[]> {
+  return invokeDesktop<ReviewFormDraft[]>("list_review_form_drafts", { reviewDate });
+}
+
+export function saveReviewFormDraft(reviewDate: string, itemType: "task" | "recurring", itemId: string, payloadJson: string, expectedRevision: number): Promise<ReviewFormDraft> {
+  return invokeDesktop<ReviewFormDraft>("save_review_form_draft", { reviewDate, itemType, itemId, payloadJson, expectedRevision });
+}
+
+export function deleteReviewFormDraft(reviewDate: string, itemType: "task" | "recurring", itemId: string): Promise<void> {
+  return invokeDesktop<void>("delete_review_form_draft", { reviewDate, itemType, itemId });
+}
+
+export function completeTask(taskId: string, planBlockId: string | null = null, note: string | null = null): Promise<Task> {
+  return invokeDesktop<Task>("complete_task", { taskId, planBlockId, note });
 }
 
 export function completeTaskFromReview(taskId: string, reviewDate: string, confirmed: boolean) {

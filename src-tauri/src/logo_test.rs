@@ -1,5 +1,5 @@
 #[test]
-fn logo_modes_use_distinct_valid_rgba_assets() {
+fn logo_modes_use_the_same_valid_light_rgba_asset() {
     let light = super::app_logo("light").unwrap();
     let dark = super::app_logo("dark").unwrap();
     for icon in [&light, &dark] {
@@ -8,6 +8,6 @@ fn logo_modes_use_distinct_valid_rgba_assets() {
         assert_eq!(icon.rgba()[3], 0, "rounded corner is transparent");
         assert_eq!(icon.rgba()[(64 * 128 + 64) * 4 + 3], 255);
     }
-    assert_ne!(light.rgba(), dark.rgba());
+    assert_eq!(light.rgba(), dark.rgba(), "all themes use the approved light logo");
     assert!(super::app_logo("unknown").is_err());
 }

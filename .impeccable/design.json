@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "generatedAt": "2026-09-03T15:47:28+08:00",
-  "title": "Design System: 今序 JinXu",
+  "title": "Design System: 今序 · Dayweave",
   "extensions": {
     "colorMeta": {
       "ink": { "role": "neutral", "displayName": "主墨色", "canonical": "#20221f", "tonalRamp": ["#171816", "#20221f", "#343731", "#555850", "#777a72", "#a4a69f", "#d1d2cb", "#f4f5f0"] },

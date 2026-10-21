@@ -1,10 +1,14 @@
 # 今序冻结产品方案（2026-08-21）
 
-> 状态：已冻结，作为后续产品、架构、界面和测试任务的共同基线。文档或现有代码与本文件冲突时，以本文件为目标方向；若后续改变本文件中的边界，应同步修改 `CONTEXT.md`、`PRODUCT.md`、`DESIGN.md`、`frontend-requirements.md`、`jinxu-product-overview.md`、`ai-todolist-implementation-spec.md`、`README.md` 及相关 ADR。
+> 状态：历史冻结快照，未被后续 ADR 取代的边界继续有效；与后续已接受规则冲突时，以后续 ADR 为准。边界变更应同步 `CONTEXT.md`、`PRODUCT.md`、`DESIGN.md`、`frontend-requirements.md`、`dayweave-product-overview.md`、`ai-todolist-implementation-spec.md`、`README.md` 及相关 ADR。
 
 > 2026-09-03 更新说明：本文件保留为历史冻结快照。涉及时间块独占、固定日程阻塞、可用空档、工作时间硬限制、午休、任务间缓冲、重叠冲突和“排程”用户文案的条款，已由 `adr/0003-adopt-non-exclusive-daily-timeline.md` 取代；其余边界继续有效。
 
 > 2026-09-10 更新说明：本文件中关于 Inbox、无日期任务确认和正式任务日期/时刻可空的条款，已由 `adr/0004-require-complete-task-time-and-remove-inbox.md` 取代；这些文字只保留为历史决策快照。
+
+> ADR-0005 取代范围：本文件 3.2、3.3、6.3、7.1、7.3、8.1 中“生成／重排计划”“任务确认不产生执行块”“所有调整先生成草案”等流程仅保留历史上下文。现行规则为所有日期无生成或重新排程入口；今天／未来单日任务正式保存事务内直接安排，日常加入／移除／调时立即保存可撤销，已有整批草案仅改草案并保留确认；历史、执行、复盘与多块例外按 `adr/0005-single-day-direct-scheduling.md`。品牌技术命名统一 Dayweave/dayweave，兼容迁移已有数据、设置和注册项；不要求继续沿用旧标识。本注不代表重新验收。
+
+> ADR-0007 取代范围：下文复盘一级导航、每日固定表单、实际耗时默认值及昨日复盘阻断等仅保留为历史快照。现行为今日／任务／设置三个一级入口；复盘降为“今日 → 复盘与记录”，轻量结果有效、耗时可空、整项完成无需先复盘并可短时撤销。最近 7 天可首次补录已有对象，历史补录不改当前任务决策；可靠草稿按条目持久化。以 `adr/0007-lightweight-review-and-backfill.md` 为准，本注不代表重新验收历史条款。
 
 ## 1. 本次替代的旧方向
 

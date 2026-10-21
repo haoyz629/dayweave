@@ -400,23 +400,30 @@ fn migration_v23_preserves_existing_records_and_adds_nullable_checked_action() {
 }
 
 #[test]
-fn completion_note_never_rewrites_a_selected_final_review_or_historical_facts() {
+fn completion_note_changes_only_result_fields_and_undo_preserves_independent_review_and_history() {
     let _clock = TestToday::new(TODAY);
     let mut database = Database::in_memory().unwrap();
     let (id, selected) = fixture(&mut database,true);
     let history = block(&database,&id,"2026-10-15");
     database.save_review_entry(TODAY,ReviewEntryInput { plan_block_id:selected.clone(), outcome:ReviewOutcome::Blocked,
         actual_minutes:Some(7), defer_reason:None, notes:Some("final record".into()), remaining_workload_minutes:None }).unwrap();
-    let selected_fact = rows(&database,&selected);
+    let selected_fact = serde_json::to_value(execution_snapshot(&database.connection,&selected).unwrap()).unwrap();
     let history_fact = rows(&database,&history);
     let review = fact_rows(&database.connection,"SELECT * FROM review_entries WHERE task_id = ?1",&id).unwrap();
     let completed = database.complete_task_with_note(&id,Some(&selected),Some("completion note".into())).unwrap();
     assert_eq!(completed.status,"done");
     assert_eq!(completed.remaining_workload_minutes,Some(0));
-    assert_eq!(rows(&database,&selected),selected_fact);
+    let captured = execution_snapshot(&database.connection,&selected).unwrap();
+    assert_eq!(captured.execution_status,"completed");
+    assert_eq!(captured.execution_note.as_deref(),Some("completion note"));
+    assert_eq!(captured.actual_minutes,Some(7));
+    let saved = database.get_review_entry_for_block(&selected).unwrap();
+    assert_eq!(saved.outcome,"completed");
+    assert_eq!(saved.actual_minutes,Some(7));
+    assert_eq!(saved.notes.as_deref(),Some("completion note"));
     assert_eq!(rows(&database,&history),history_fact);
     database.apply_undo(&database.latest_undo().unwrap().unwrap().id).unwrap();
-    assert_eq!(rows(&database,&selected),selected_fact);
+    assert_eq!(serde_json::to_value(execution_snapshot(&database.connection,&selected).unwrap()).unwrap(),selected_fact);
     assert_eq!(rows(&database,&history),history_fact);
     assert_eq!(fact_rows(&database.connection,"SELECT * FROM review_entries WHERE task_id = ?1",&id).unwrap(),review);
 }

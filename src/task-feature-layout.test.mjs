@@ -44,3 +44,14 @@ test("block result choices retain semantic selection colors in the centered popu
   assert.match(styles, /\.task-block-editor \.execution-capture-fields \.floating-outcomes button:not\(\[aria-pressed="true"\]\):hover:not\(:disabled\)/);
   assert.match(styles, /button\[data-outcome="partial"\]\[aria-pressed="true"\][\s\S]*?background: var\(--state-partial-surface\)/);
 });
+
+test("recurring title and tag dropdown share one non-wrapping row", () => {
+  const app = source("./App.tsx");
+  const start = app.indexOf("function RecurringItemEditor(");
+  const editor = app.slice(start, app.indexOf("\nfunction ", start + 1));
+  assert.match(editor, /className="recurring-title-row">[\s\S]*className="recurring-title-field">[\s\S]*<input[\s\S]*?<\/div>\s*<TaskTagEditor/);
+  assert.equal((editor.match(/<TaskTagEditor/g) ?? []).length, 1);
+  const styles = source("./styles.css");
+  assert.match(styles, /\.recurring-editor-surface \.recurring-title-row \{ display: flex; flex-wrap: nowrap; align-items: center;/);
+  assert.match(styles, /\.recurring-editor-surface \.recurring-title-field \{ flex: 1 1 0; min-width: 0;/);
+});

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { timelineDurationHeight, timelineLaneLayout } from "./timeline-lane-layout.ts";
 
 const item = (layoutKey, startMinute, endMinute) => ({ layoutKey, startMinute, endMinute });
@@ -76,4 +77,53 @@ test("separate overlap groups calculate their widths independently", () => {
 test("input order does not change the computed geometry", () => {
   const items = [item("A", 540, 720), item("B", 540, 600), item("C", 600, 660)];
   assert.deepEqual(timelineLaneLayout(items), timelineLaneLayout([...items].reverse()));
+});
+
+test("dragging into an overlap uses the same lanes as a slide-to-create preview", () => {
+  const moving = item("block:moving", 540, 600);
+  const target = item("block:target", 720, 780);
+  const preview = item(moving.layoutKey, 735, 795);
+  const dragged = timelineLaneLayout([moving, target], preview);
+  const created = timelineLaneLayout([target, item("create:selection", 735, 795)]);
+  assert.deepEqual(dragged[moving.layoutKey], created["create:selection"]);
+  assert.deepEqual(dragged[target.layoutKey], created[target.layoutKey]);
+  assert.equal(dragged[target.layoutKey].total, 2);
+});
+
+test("dragging out releases the original overlap without keeping a phantom source lane", () => {
+  const items = [item("block:moving", 540, 600), item("block:other", 540, 600)];
+  const before = structuredClone(items);
+  const dragged = timelineLaneLayout(items, item("block:moving", 720, 780));
+  assert.deepEqual(dragged, {
+    "block:other": { column: 0, columnSpan: 1, total: 1 },
+    "block:moving": { column: 0, columnSpan: 1, total: 1 }
+  });
+  assert.deepEqual(items, before);
+  assert.deepEqual(timelineLaneLayout(items, null), timelineLaneLayout(before));
+  assert.equal(timelineLaneLayout(items, null)["block:other"].total, 2);
+});
+
+test("drag previews cover draft blocks, multiple overlaps and exact adjacency", () => {
+  const key = "draft:task:time:0";
+  const items = [item(key, 540, 600), item("event:fixed", 720, 780), item("recurring:other", 735, 795)];
+  const preview = item(key, 750, 810);
+  assert.deepEqual(timelineLaneLayout(items, preview), timelineLaneLayout([preview, ...items.slice(1)]));
+  assert.equal(timelineLaneLayout(items, preview)[key].total, 3);
+  assert.equal(timelineLaneLayout(items, item(key, 795, 855))[key].total, 1);
+});
+
+test("the timeline wires the active drag into shared lanes and freezes the source placeholder", () => {
+  const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+  assert.match(app, /const timelineItemLanes = timelineLaneLayout\(timelineItems, selectedDate, timelineDrag\)/);
+  assert.match(app, /drag \? \{ layoutKey: drag.key, startMinute: drag.start, endMinute: drag.end \} : null/);
+  assert.match(app, /sourceLane: timelineItemLanes\[/);
+  assert.match(app, /className="timeline-drag-source"[^\n]+timelineDragRef.current.sourceLane/);
+});
+
+test("shared overlap transitions animate horizontally without delaying vertical dragging", () => {
+  const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  const rule = styles.match(/\.timeline-event \{[^}]+\}/)?.[0];
+  assert.match(rule, /transition: left \.18s ease, right \.18s ease,/);
+  assert.doesNotMatch(rule, /(?:transition:|,)\s*(?:top|all)\s/);
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{ \.timeline-event \{ transition: none; \} \}/);
 });

@@ -55,7 +55,9 @@ fn nullable_zero_known_minutes_and_duplicate_are_distinct_and_additive() {
         assert_eq!(saved.actual_minutes, minutes);
         assert_eq!(execution_snapshot(&database.connection, &id).unwrap().actual_minutes, minutes);
         assert!(database.save_review_entry(TODAY, review(&id, Some(900))).is_err());
-        assert!(database.save_execution_capture(TODAY, capture(&id)).is_err());
+        database.save_execution_capture(TODAY, capture(&id)).unwrap();
+        assert_eq!(database.get_review_entry_for_block(&id).unwrap().actual_minutes, minutes);
+        assert_eq!(execution_snapshot(&database.connection, &id).unwrap().actual_minutes, minutes);
     }
     let saved = database.get_task(&task_id).unwrap();
     assert_eq!(saved.actual_minutes, 40);
@@ -67,15 +69,17 @@ fn nullable_zero_known_minutes_and_duplicate_are_distinct_and_additive() {
 }
 
 #[test]
-fn last_seven_cst_days_accept_boundaries_reject_eighth_future_and_nonexistent_targets() {
+fn task_history_is_unlimited_while_recurring_and_draft_windows_stay_seven_days() {
     let _clock = TestToday::new(TODAY);
     let mut database = Database::in_memory().unwrap();
     let task_id = task(&mut database);
     for (date, allowed) in [(TODAY,true),("2026-10-15",true),("2026-10-10",true),("2026-10-09",false),("2026-10-17",false)] {
         let id = block(&database, &task_id, date);
-        assert_eq!(database.save_execution_capture(date,capture(&id)).is_ok(), allowed, "capture {date}");
+        let task_allowed = date <= TODAY;
+        assert_eq!(database.save_execution_capture(date,capture(&id)).is_ok(), task_allowed, "capture {date}");
         assert_eq!(database.save_review_form_draft(date,"task",&id,"{}",0).is_ok(), false, "capture already created a draft tombstone or date is forbidden");
-        assert_eq!(database.save_review_entry(date,review(&id,None)).is_ok(), allowed, "review {date}");
+        let review_id = if date == TODAY { id.clone() } else { block(&database, &task_id, date) };
+        assert_eq!(database.save_review_entry(date,review(&review_id,None)).is_ok(), task_allowed, "first review {date}");
         let recurring = occurrence(&mut database,date);
         assert_eq!(database.save_review_form_draft(date,"recurring",&recurring,"{}",0).is_ok(), allowed, "draft {date}");
         assert_eq!(database.save_recurring_occurrence_review(&recurring,repeat_review("completed",None)).is_ok(), allowed, "repeat {date}");
@@ -102,7 +106,6 @@ fn historical_backfill_accumulates_only_known_actuals_without_current_state_or_p
     let current_block = fact_rows(&database.connection,"SELECT * FROM plan_blocks WHERE id = ?1",&today).unwrap();
     let plans = fact_rows(&database.connection,"SELECT dp.* FROM daily_plans dp JOIN plan_blocks pb ON pb.daily_plan_id = dp.id WHERE pb.task_id = ?1 ORDER BY dp.id",&task_id).unwrap();
     let estimates = fact_rows(&database.connection,"SELECT * FROM task_estimates WHERE task_id = ?1",&task_id).unwrap();
-    database.save_execution_capture("2026-10-10",capture(&history)).unwrap();
     let mut invalid = review(&history,Some(18));
     invalid.remaining_workload_minutes = Some(50);
     assert!(database.save_review_entry("2026-10-10",invalid).is_err());
@@ -110,7 +113,7 @@ fn historical_backfill_accumulates_only_known_actuals_without_current_state_or_p
     assert_eq!(saved.review_date,"2026-10-10");
     assert!(DateTime::parse_from_rfc3339(&saved.created_at).is_ok());
     let after = database.get_task(&task_id).unwrap();
-    assert_eq!(after.actual_minutes,before.actual_minutes + 18);
+    assert_eq!(after.actual_minutes,before.actual_minutes, "historical first backfill never changes the current task");
     assert_eq!(after.status,before.status);
     assert_eq!(after.remaining_workload_minutes,before.remaining_workload_minutes);
     assert_eq!(after.earliest_start_at,before.earliest_start_at);
@@ -137,7 +140,7 @@ fn completion_captures_only_selected_today_block_and_undo_restores_prior_facts()
     let completed = database.complete_task(&task_id,Some(&selected)).unwrap();
     assert_eq!(completed.status,"done");
     assert_eq!(completed.remaining_workload_minutes,Some(0));
-    assert_eq!(completed.actual_minutes,25);
+    assert_eq!(completed.actual_minutes,13);
     assert_eq!(execution_snapshot(&database.connection,&selected).unwrap().execution_status,"completed");
     assert_eq!(fact_rows(&database.connection,"SELECT * FROM plan_blocks WHERE id = ?1",&other).unwrap(),untouched);
     let latest = undo(&database);
@@ -147,7 +150,7 @@ fn completion_captures_only_selected_today_block_and_undo_restores_prior_facts()
     let restored = database.get_task(&task_id).unwrap();
     assert_eq!(restored.status,"open");
     assert_eq!(restored.remaining_workload_minutes,Some(90));
-    assert_eq!(restored.actual_minutes,25);
+    assert_eq!(restored.actual_minutes,13);
     assert_eq!(serde_json::to_value(execution_snapshot(&database.connection,&selected).unwrap()).unwrap(),serde_json::to_value(old_capture).unwrap());
     assert_eq!(fact_rows(&database.connection,"SELECT * FROM review_entries WHERE task_id = ?1",&task_id).unwrap(),old_review);
     assert_eq!(database.connection.query_row("SELECT count(*) FROM task_estimates WHERE task_id = ?1",[&task_id],|row|row.get::<_,i64>(0)).unwrap(),estimate_count + 1,"append compensation; retain completion estimate history");
@@ -155,7 +158,7 @@ fn completion_captures_only_selected_today_block_and_undo_restores_prior_facts()
 }
 
 #[test]
-fn completion_preserves_final_review_and_all_existing_block_columns() {
+fn completion_preserves_independent_review_fields_and_undo_restores_only_its_result_changes() {
     let _clock = TestToday::new(TODAY);
     let mut database = Database::in_memory().unwrap();
     let task_id = task(&mut database);
@@ -163,12 +166,14 @@ fn completion_preserves_final_review_and_all_existing_block_columns() {
     let mut detail = review(&id,Some(7));
     detail.outcome = ReviewOutcome::Blocked;
     database.save_review_entry(TODAY,detail).unwrap();
-    let before_block = fact_rows(&database.connection,"SELECT * FROM plan_blocks WHERE id = ?1",&id).unwrap();
+    let before_block = serde_json::to_value(execution_snapshot(&database.connection,&id).unwrap()).unwrap();
     let before_review = fact_rows(&database.connection,"SELECT * FROM review_entries WHERE task_id = ?1",&task_id).unwrap();
     database.complete_task(&task_id,Some(&id)).unwrap();
-    assert_eq!(fact_rows(&database.connection,"SELECT * FROM plan_blocks WHERE id = ?1",&id).unwrap(),before_block);
+    assert_eq!(execution_snapshot(&database.connection,&id).unwrap().execution_status,"completed");
+    assert_eq!(execution_snapshot(&database.connection,&id).unwrap().actual_minutes,Some(7));
+    assert_eq!(database.get_review_entry_for_block(&id).unwrap().outcome,"completed");
     database.apply_undo(&undo(&database).id).unwrap();
-    assert_eq!(fact_rows(&database.connection,"SELECT * FROM plan_blocks WHERE id = ?1",&id).unwrap(),before_block);
+    assert_eq!(serde_json::to_value(execution_snapshot(&database.connection,&id).unwrap()).unwrap(),before_block);
     assert_eq!(fact_rows(&database.connection,"SELECT * FROM review_entries WHERE task_id = ?1",&task_id).unwrap(),before_review);
 }
 
@@ -484,18 +489,19 @@ fn historical_unknown_minutes_do_not_touch_task_and_no_draft_is_submitted_automa
 }
 
 #[test]
-fn historical_light_result_is_first_write_only_but_can_receive_final_details() {
+fn historical_light_result_can_be_corrected_and_reviewed_without_changing_task() {
     let _clock = TestToday::new(TODAY);
     let mut database = Database::in_memory().unwrap();
     let task_id = task(&mut database);
     let id = block(&database, &task_id, "2026-10-15");
     database.save_execution_capture("2026-10-15", capture(&id)).unwrap();
-    let before = execution_snapshot(&database.connection, &id).unwrap();
-    assert!(database.save_execution_capture("2026-10-15", ExecutionCaptureInput {
+    let before = fact_rows(&database.connection, "SELECT * FROM tasks WHERE id = ?1", &task_id).unwrap();
+    database.save_execution_capture("2026-10-15", ExecutionCaptureInput {
         plan_block_id: id.clone(), outcome: ReviewOutcome::Completed, note: None,
-    }).is_err());
-    assert_eq!(execution_snapshot(&database.connection, &id).unwrap().execution_status, before.execution_status);
+    }).unwrap();
+    assert_eq!(execution_snapshot(&database.connection, &id).unwrap().execution_status, "completed");
     database.save_review_entry("2026-10-15", review(&id, Some(20))).unwrap();
+    assert_eq!(fact_rows(&database.connection, "SELECT * FROM tasks WHERE id = ?1", &task_id).unwrap(), before);
     assert_eq!(database.get_task(&task_id).unwrap().remaining_workload_minutes, Some(90));
     let today_block = block(&database, &task_id, TODAY);
     database.save_execution_capture(TODAY, capture(&today_block)).unwrap();

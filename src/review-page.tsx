@@ -191,10 +191,10 @@ export function ReviewPage({ today, reviewDate, onSelectDate, onFactsChanged, on
       const saved = await saveRecurringOccurrenceReview(item.id, { outcome, notes: recurringRef.current[item.id]?.notes.trim() || null });
       queue.current.forget(identity("recurring", item.id));
       const undo = await latestUndo().catch(() => null);
-      if (undo) setToast({ id: undo.id, itemId: item.id, message: "本次结果已保存，重复安排会继续" });
+      if (undo) setToast({ id: undo.id, itemId: item.id, message: "本次结果已保存" });
       setOccurrences((current) => current.map((value) => value.id === item.id ? saved : value));
       await loadReviewSchedule(item.id);
-      setMessages((current) => ({ ...current, [item.id]: "本次结果已保存。" }));
+      setMessages((current) => ({ ...current, [item.id]: undo ? "" : "本次结果已保存。" }));
       await onFactsChanged(reviewDate);
     });
   }

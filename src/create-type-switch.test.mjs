@@ -6,6 +6,7 @@ import ts from "typescript";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { syncFormCommonFields } from "./create-type-switch.ts";
+import { taskListStatus } from "./task-result.ts";
 
 // Exercise the real editor handlers; persistence is isolated from user data.
 const source = ts.createSourceFile("App.tsx", readFileSync(new URL("./App.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -39,7 +40,7 @@ function editor({ saved = true } = {}) {
     newTaskDefaultForm: defaults, emptyNewTaskForm: defaults, recurringItemDefaultForm: recurringDefaults,
     today: "2026-09-23", setTimeout, Date, syncFormCommonFields, validDraftClock: () => true,
     taskDraftInputForForm: (form) => ({ ...form }), taskFormForPersistedDraft: (draft) => ({ ...defaults(), ...draft }),
-    uiErrorMessage: String, preferredSelection: { current: null }, viewForStatus: () => "open",
+    uiErrorMessage: String, preferredSelection: { current: null }, taskListStatus,
     recurringItemInputForForm: (form) => form,
     async createManualTaskDraft(input) { const draft = makeDraft(input); db.set(draft.id, draft); return draft; },
     async saveTaskDraft(id, version, input) {
@@ -294,20 +295,21 @@ test("syncFormCommonFields synchronizes title, notes, and tags while preserving 
   assert.equal(updatedTask.estimated_minutes, 60);
 });
 
-test("linked followup drafts keep inherited priority and tags and submit only ordinary-task settings", async () => {
+test("independent task drafts keep copied priority and tags without relation fields", async () => {
   const { state } = editor();
-  const linked = { ...state.persistedNewTaskDraft, id: "followup-draft", item_type: "task", title: "后续任务",
-    notes: null, priority: "low", tags: ["项目A", "文档"], recurring_settings: null,
-    origin: { source_task_id: "original-task", source_title: "来源任务", source_status: "scheduled" } };
-  await state.openPersistedTaskDraft(linked);
+  state.createItemType = "task";
+  state.initialCreateItemType.current = "task";
+  const independent = { ...state.persistedNewTaskDraft, id: "independent-draft", item_type: "task", title: "独立新任务",
+    notes: null, priority: "low", tags: ["项目A", "文档"], recurring_settings: null };
+  await state.openPersistedTaskDraft(independent);
   assert.equal(state.newTaskForm.priority, "low");
   assert.deepEqual(state.newTaskForm.tags, ["项目A", "文档"]);
   assert.equal(state.newTaskForm.notes, null);
   state.applyCreateItemType("recurring");
-  assert.equal(state.createItemType, "task");
+  assert.equal(state.createItemType, "recurring");
   const input = state.currentCreationInput();
-  assert.equal(input.item_type, "task");
-  assert.equal(input.recurring_settings, null);
-  assert.equal(input.priority, "low");
-  assert.deepEqual(input.tags, ["项目A", "文档"]);
+  assert.equal(input.item_type, "recurring");
+  assert.ok(input.recurring_settings);
+  assert.equal("origin" in input, false);
+  assert.equal("source_task_id" in input, false);
 });

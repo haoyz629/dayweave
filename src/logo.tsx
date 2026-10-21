@@ -1,10 +1,11 @@
-import lightLogo from "./assets/logo-light.svg";
+import navigationLogo from "./assets/logo-light.svg";
+import windowsLogo from "./assets/logo-windows.png";
 
-// One approved light asset is used on every theme and surface.
+// Supplied transparent SVG in-app; native/favicons use the separate shadowed render.
 // Accept the old preview prop without reintroducing a theme-dependent icon.
 export function Logo(_props: { mode?: "light" | "dark" } = {}) {
   return <span className="dayweave-logo" aria-hidden="true">
-    <img className="dayweave-logo-light" src={lightLogo} alt="" draggable={false} />
+    <img className="dayweave-logo-light" src={navigationLogo} alt="" draggable={false} />
   </span>;
 }
 
@@ -15,7 +16,7 @@ export function ProductBrand() {
       <div className="product-brand-text">
         <h1 className="product-brand-name">今序 · Dayweave</h1>
         <div className="product-brand-copy">
-          <h2 className="product-brand-chinese">让今天，井然有序。</h2>
+          <p className="product-brand-chinese">让今天，井然有序。</p>
           <p className="product-brand-english" lang="en">Bring order to your day.</p>
         </div>
       </div>
@@ -24,5 +25,5 @@ export function ProductBrand() {
 }
 
 export function logoUrl(_mode?: string) {
-  return lightLogo;
+  return windowsLogo;
 }

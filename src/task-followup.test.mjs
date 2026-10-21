@@ -1,62 +1,65 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
+import { independentTaskDraft } from './task-followup.ts';
 import vm from 'node:vm';
 import ts from 'typescript';
-import { followupActionLabel, canCreateTaskFollowup } from './task-followup.ts';
-const source=path=>readFileSync(new URL(path,import.meta.url),'utf8');
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
-test('unfinished tasks may create followups without day restrictions',()=>{
-  for(const status of ['open','scheduled']) assert.equal(canCreateTaskFollowup({status}),true);
-  for(const task of [null,undefined,{status:'done'},{status:'deleted'}]) assert.equal(canCreateTaskFollowup(task),false);
+const task={id:'old-task',title:'开发任务',priority:'high',tags:['工作'],notes:'不复制的旧备注',status:'scheduled'};
+
+test('quick new task copies only title, priority and tags into a normal independent draft',()=>{
+  const before=structuredClone(task);
+  const draft=independentTaskDraft(task,'2026-10-19');
+  assert.deepEqual(draft,{
+    item_type:'task',recurring_settings:null,title:task.title,notes:null,priority:'high',tags:['工作'],
+    earliest_start_date:'2026-10-20',earliest_start_time:'09:00',due_date:'2026-10-20',due_time:'10:00',
+    total_workload_minutes:60,remaining_workload_minutes:60,field_states_json:'{}',recurrence:null
+  });
+  assert.deepEqual(task,before);
+  assert.equal('source_task_id' in draft,false);
+  assert.equal('target_task_id' in draft,false);
+  assert.equal('origin' in draft,false);
+  draft.tags.push('独立新标签');
+  assert.deepEqual(task.tags,['工作']);
 });
-test('existing followup lookup is unrelated to date and deleted children do not block new creation',()=>{
-  assert.equal(followupActionLabel(undefined),'创建后续任务');
-  assert.equal(followupActionLabel([]),'创建后续任务');
-  for(const starts_at of [null,'2026-10-20T09:00:00+08:00','2026-12-31T09:00:00+08:00']) {
-    assert.equal(followupActionLabel([{task_id:'child',title:'renamed',status:'scheduled',starts_at}]),'查看后续任务');
+
+test('each click gets an independent seed and dates use CST across month and year ends',()=>{
+  for(const [today,tomorrow] of [['2026-10-31','2026-11-01'],['2026-12-31','2027-01-01'],['2028-02-28','2028-02-29']]) {
+    const first=independentTaskDraft(task,today),second=independentTaskDraft(task,today);
+    assert.equal(first.due_date,tomorrow);
+    assert.notEqual(first,second);
+    assert.notEqual(first.tags,second.tags);
   }
-  assert.equal(followupActionLabel([{task_id:'child',status:'done'}]),'查看后续任务');
-  assert.equal(followupActionLabel([{task_id:'child',status:'deleted'}]),'创建后续任务');
-});
-test('followup entry reuses guarded navigation, persisted drafts and source metadata',()=>{
-  const app=source('./App.tsx');
-  assert.match(app,/prepareTaskFollowup\(sourceTaskId\)/);
-  assert.match(app,/await openPersistedTaskDraft\(result.draft\)/);
-  assert.match(app,/change.kind === "linked-select"/);
-  assert.match(app,/change.kind === "followup"/);
-  assert.match(app,/persistedNewTaskDraft\?\.origin && <TaskOriginBanner/);
-  assert.match(app,/!persistedNewTaskDraft\?\.target_task_id && !persistedNewTaskDraft\?\.origin/);
-  assert.match(app,/Boolean\(intent.followupSourceId\)/);
-  assert.match(app,/creating\) \{\s*if \(!await saveNewTaskBeforeLeaving\(\)\) return;/);
-});
-test('lineage displays actual IDs and separate execution notes, never copies source notes into new input',()=>{
-  const lineage=source('./task-lineage.tsx'),api=source('./tauri.ts');
-  assert.match(lineage,/onOpenTask\(origin.source_task_id!\)/);
-  assert.match(lineage,/onOpenTask\(child.task_id\)/);
-  assert.match(lineage,/来源任务已永久删除，来源信息仍保留/);
-  assert.match(lineage,/metadata\?\.latest_execution/);
-  assert.match(api,/"prepare_task_followup", \{ sourceTaskId \}/);
-  assert.doesNotMatch(lineage,/创建明天|今天未完成|查看明天/);
+  assert.throws(()=>independentTaskDraft(task,'invalid'));
 });
 
-test('failed followup preparation stays on its source task so the persistent CTA can retry', async()=>{
-  const ast=ts.createSourceFile('App.tsx',source('./App.tsx'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
-  const functions=[];
-  function collect(node){if(ts.isFunctionDeclaration(node)&&['selectLinkedTask','openFollowupDraft'].includes(node.name?.text))functions.push(node.getText(ast));ts.forEachChild(node,collect)}
-  collect(ast);
-  const original={id:'source',status:'scheduled',title:'Source'};
-  const state={tasks:[original],preparingFollowup:{current:false},preferredSelection:{current:null},view:'open',selectedId:null,creating:false,busy:false,
-    viewForStatus:status=>status,draftForTask:task=>({...task}),uiErrorMessage:String,
-    async prepareTaskFollowup(){throw new Error('preparation failed')}};
-  for(const key of ['search','tagFilter','view','creating','selectedRecurringId','selectedId','draft','compactTaskEditorDismissed','feedback','busy'])state[`set${key[0].toUpperCase()}${key.slice(1)}`]=value=>{state[key]=value};
-  const context=vm.createContext(state);
-  vm.runInContext(ts.transpileModule(functions.join('\n'),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,context);
-  await context.openFollowupDraft('source');
-  assert.equal(state.selectedId,'source');
-  assert.equal(state.view,'scheduled');
-  assert.equal(state.creating,false);
-  assert.match(state.feedback,/preparation failed/);
-  assert.equal(state.busy,false);
-  assert.equal(state.preparingFollowup.current,false);
+test('execution record component keeps facts and offers new task without relation links',()=>{
+  const source=readFileSync(new URL('./task-lineage.tsx',import.meta.url),'utf8');
+  assert.match(source,/metadata\?\.latest_execution/);
+  assert.match(source,/fact.outcome !== "completed"/);
+  assert.match(source,/>新建任务<\/button>/);
+  assert.doesNotMatch(source,/source_task_id|followups|onOpenTask|来源任务|后续任务|status_locked/);
+  const api=readFileSync(new URL('./tauri.ts',import.meta.url),'utf8');
+  assert.doesNotMatch(api,/prepare_task_followup|status_locked|TaskOrigin|TaskFollowup/);
+});
+
+test('unfinished record new-task button remains available after its result window expires',()=>{
+  const text=readFileSync(new URL('./task-lineage.tsx',import.meta.url),'utf8');
+  const code=ts.transpileModule(text.replace(/^import type[^\n]*\n/,'').replace('export function','function'),{compilerOptions:{jsx:ts.JsxEmit.React,target:ts.ScriptTarget.ES2022}}).outputText;
+  const context=vm.createContext({React});
+  vm.runInContext(code,context);
+  let calls=0;
+  const oldFact={plan_date:'2020-01-01',outcome:'not_started',note:'旧执行备注'};
+  const tree=context.TaskExecutionRecord({metadata:{latest_execution:oldFact},disabled:false,onNewTask(){calls++;}});
+  const markup=renderToStaticMarkup(tree);
+  assert.match(markup,/旧执行备注/);
+  assert.match(markup,/新建任务/);
+  const button=React.Children.toArray(tree.props.children).find(child=>child.type==='button');
+  assert.equal(button.props.disabled,false);
+  button.props.onClick();assert.equal(calls,1);
+  const completed=context.TaskExecutionRecord({metadata:{latest_execution:{...oldFact,outcome:'completed'}},disabled:false,onNewTask(){calls++;}});
+  assert.doesNotMatch(renderToStaticMarkup(completed),/新建任务/);
+  assert.equal(context.TaskExecutionRecord({metadata:null,disabled:false,onNewTask(){}}),null);
 });

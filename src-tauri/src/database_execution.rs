@@ -15,12 +15,10 @@ pub struct TaskExecutionResolutionInput {
 
 impl Database {
     pub fn resolve_task_execution(&mut self, capture_date: &str, mut input: TaskExecutionResolutionInput) -> AppResult<TaskDto> {
-        if !validate_review_date(capture_date)? {
-            return Err(AppError::Domain("历史记录不能改变当前任务或下一步安排".into()));
-        }
         input.note = normalize_review_text(input.note, 500, "执行备注")?;
         let completed = input.outcome == ReviewOutcome::Completed;
-        let record_only = input.outcome == ReviewOutcome::NotStarted && input.next_action.is_none();
+        let historical = parse_plan_date(capture_date)? < parse_plan_date(&shanghai_today())?;
+        let record_only = historical || (input.outcome == ReviewOutcome::NotStarted && input.next_action.is_none());
         if completed || record_only {
             if input.next_action.is_some() || input.starts_at.is_some() || input.ends_at.is_some() || input.remaining_workload_minutes.is_some() {
                 return Err(AppError::Schema("直接完成或仅记录结果不能附带下一步安排或剩余估算".into()));
@@ -59,26 +57,46 @@ impl Database {
             return Err(AppError::Domain("执行日期必须与执行块所属日期一致".into()));
         }
         let task = load_task_dto_in_transaction(&transaction, &task_id)?;
-        database_followup::ensure_status_editable(&transaction, &task_id)?;
-        if task.deleted_at.is_some() || !matches!(task.status.as_str(), "open" | "scheduled") {
-            return Err(AppError::Domain("只有进行中的任务可以记录结果并选择下一步".into()));
+        let in_window = database_results::allow_capture(&transaction, capture_date, &input.plan_block_id)?;
+        if task.deleted_at.is_some() || task.status == "deleted" {
+            return Err(AppError::Domain("回收站任务不能记录结果".into()));
+        }
+        if plan_date != shanghai_today() && input.next_action.is_some() {
+            return Err(AppError::Domain("跨日宽限不能修改下一步安排或工作量".into()));
+        }
+        if !in_window && input.next_action.is_some() {
+            return Err(AppError::Domain("历史记录不能改变当前任务或下一步安排".into()));
         }
         if task.updated_at != input.expected_task_updated_at {
             return Err(AppError::Domain("任务已经变化，请重新加载后再记录".into()));
         }
-        if final_record {
-            return Err(AppError::Domain("该执行块已有最终结果，不能重复记录".into()));
+        if final_record && input.next_action.is_some() {
+            return Err(AppError::Domain("该执行块已有最终结果，不能重复安排".into()));
         }
-        if completed {
-            complete_in_transaction(&transaction, &task_id, Some(&input.plan_block_id), input.note.as_deref())?;
+        if !in_window {
+            database_results::freeze_block(&transaction, &input.plan_block_id)?;
+            transaction.execute("UPDATE plan_blocks SET execution_status = ?2, execution_note = ?3,
+                execution_captured_at = ?4, review_required = CASE WHEN ?5 THEN review_required ELSE 1 END, updated_at = ?4 WHERE id = ?1",
+                params![input.plan_block_id, input.outcome.as_str(), input.note, now(), final_record])?;
+            transaction.execute("UPDATE review_entries SET outcome = ?2, notes = ?3 WHERE plan_block_id = ?1",
+                params![input.plan_block_id, input.outcome.as_str(), input.note])?;
+            clear_review_draft(&transaction, capture_date, "task", &input.plan_block_id)?;
+        } else if completed {
+            complete_result_in_transaction(&transaction, &task_id, Some(&input.plan_block_id), input.note.as_deref(), true)?;
         } else if record_only {
+            if task.status == "done" { reopen_in_transaction(&transaction, &task_id, &plan_date)?; }
+            database_results::freeze_block(&transaction, &input.plan_block_id)?;
             let timestamp = now();
             transaction.execute("UPDATE plan_blocks SET execution_status = 'not_started', execution_note = ?2,
                 execution_captured_at = ?3, review_required = 0, updated_at = ?3 WHERE id = ?1",
                 params![input.plan_block_id, input.note, timestamp])?;
+            transaction.execute("UPDATE review_entries SET outcome = 'not_started', notes = ?2 WHERE plan_block_id = ?1",
+                params![input.plan_block_id, input.note])?;
             transaction.execute("UPDATE tasks SET updated_at = ?2 WHERE id = ?1", params![task_id, timestamp])?;
             clear_review_draft(&transaction, capture_date, "task", &input.plan_block_id)?;
         } else {
+            if task.status == "done" { reopen_in_transaction(&transaction, &task_id, &plan_date)?; }
+            database_results::freeze_block(&transaction, &input.plan_block_id)?;
             // Validate the entire follow-up before persisting any execution facts.
             let schedule = if input.next_action.as_deref() == Some("schedule") {
                 let start_text = input.starts_at.as_deref().unwrap();
@@ -156,31 +174,47 @@ impl Database {
 
 // Shared by explicit completion and execution resolution, keeping completion undo atomic.
 pub(super) fn complete_in_transaction(transaction: &Transaction<'_>, task_id: &str, plan_block_id: Option<&str>, note: Option<&str>) -> AppResult<()> {
-    let today = shanghai_today();
+    complete_result_in_transaction(transaction, task_id, plan_block_id, note, false)
+}
+
+fn complete_result_in_transaction(transaction: &Transaction<'_>, task_id: &str, plan_block_id: Option<&str>, note: Option<&str>, replace_note: bool) -> AppResult<()> {
     let before_task = load_task_dto_in_transaction(transaction, task_id)?;
-    database_followup::ensure_status_editable(transaction, task_id)?;
-    if before_task.deleted_at.is_some() || matches!(before_task.status.as_str(), "done" | "deleted") {
-        return Err(AppError::Domain("任务已完成或已删除".into()));
+    if before_task.deleted_at.is_some() || before_task.status == "deleted" {
+        return Err(AppError::Domain("任务已删除".into()));
     }
     let block_id: Option<String> = if let Some(id) = plan_block_id {
-        let valid: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM plan_blocks pb JOIN daily_plans dp ON dp.id = pb.daily_plan_id
-            WHERE pb.id = ?1 AND pb.task_id = ?2 AND dp.plan_date = ?3)", params![id, task_id, today], |row| row.get(0))?;
-        if !valid { return Err(AppError::Domain("必须选择该任务今天的执行块".into())); }
+        let (owner, _, _) = database_results::block_context(transaction, id)?;
+        if owner != task_id { return Err(AppError::Domain("执行块不属于该任务".into())); }
         Some(id.into())
-    } else {
-        transaction.query_row("SELECT pb.id FROM plan_blocks pb JOIN daily_plans dp ON dp.id = pb.daily_plan_id
-            WHERE pb.task_id = ?1 AND dp.plan_date = ?2 ORDER BY pb.starts_at, pb.id LIMIT 1",
-            params![task_id, today], |row| row.get(0)).optional()?
-    };
-    let mut before_block = None;
-    if let Some(id) = &block_id {
-        let final_review: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM review_entries WHERE plan_block_id = ?1)", [id], |row| row.get(0))?;
-        if !final_review {
-            before_block = Some(execution_snapshot(transaction, id)?);
-            transaction.execute("UPDATE plan_blocks SET execution_status = 'completed', execution_note = COALESCE(?3, execution_note),
-                execution_captured_at = ?2, review_required = 0, updated_at = ?2 WHERE id = ?1", params![id, now(), note])?;
-            clear_review_draft(transaction, &today, "task", id)?;
+    } else { database_results::completion_candidate(transaction, task_id)? };
+    database_results::completion_context(transaction, &before_task, block_id.as_deref())?;
+    if before_task.status == "done" {
+        if let Some(id) = block_id {
+            database_results::require_block_window(transaction, &id)?;
+            transaction.execute("UPDATE plan_blocks SET execution_status = 'completed', execution_note = CASE WHEN ?4 THEN ?2 ELSE COALESCE(?2, execution_note) END,
+                execution_captured_at = ?3, updated_at = ?3 WHERE id = ?1", params![id, note, now(), replace_note])?;
+            transaction.execute("UPDATE review_entries SET outcome = 'completed', notes = CASE WHEN ?3 THEN ?2 ELSE COALESCE(?2, notes) END WHERE plan_block_id = ?1", params![id, note, replace_note])?;
+            let after = serde_json::to_string(&execution_snapshot(transaction, &id)?)?;
+            transaction.execute("UPDATE task_completion_snapshots SET block_after_json = ?2 WHERE task_id = ?1", params![task_id, after])?;
         }
+        transaction.execute("UPDATE tasks SET updated_at = ?2 WHERE id = ?1", params![task_id, now()])?;
+        if let Some(note) = note { record_task_change(transaction, task_id, "completion_note_changed", None, Some(note), "manual", Some(note))?; }
+        return Ok(());
+    }
+    let mut before_block = None;
+    let mut before_review = None;
+    if let Some(id) = &block_id {
+        before_block = Some(execution_snapshot(transaction, id)?);
+        before_review = transaction.query_row("SELECT id, outcome, notes FROM review_entries WHERE plan_block_id = ?1", [id],
+            |row| Ok(ReviewResultSnapshot { id: row.get(0)?, outcome: row.get(1)?, notes: row.get(2)? })).optional()?;
+        let result_note = if replace_note { note } else { note.or_else(|| before_review.as_ref().and_then(|review| review.notes.as_deref())) };
+        transaction.execute("UPDATE plan_blocks SET execution_status = 'completed', execution_note = CASE WHEN ?4 THEN ?3 ELSE COALESCE(?3, execution_note) END,
+            execution_captured_at = ?2, review_required = 0, updated_at = ?2 WHERE id = ?1", params![id, now(), result_note, replace_note])?;
+        if before_review.is_some() {
+            transaction.execute("UPDATE review_entries SET outcome = 'completed', notes = CASE WHEN ?3 THEN ?2 ELSE COALESCE(?2, notes) END WHERE plan_block_id = ?1", params![id, note, replace_note])?;
+        }
+        let (_, date, _) = database_results::block_context(transaction, id)?;
+        clear_review_draft(transaction, &date, "task", id)?;
     }
     if before_task.remaining_workload_minutes != Some(0) {
         transaction.execute("INSERT INTO task_estimates (id, task_id, estimate_kind, old_minutes, new_minutes, source, reason, created_at)
@@ -189,7 +223,7 @@ pub(super) fn complete_in_transaction(transaction: &Transaction<'_>, task_id: &s
     }
     transaction.execute("UPDATE tasks SET status = 'done', remaining_workload_minutes = 0, updated_at = ?2 WHERE id = ?1", params![task_id, now()])?;
     record_task_change(transaction, task_id, "status_changed", Some(&before_task.status), Some("done"), "manual", note.or(Some("明确完成整个任务")))?;
-    let payload = FactUndo { task: Some(before_task), block: before_block, occurrence: None,
+    let payload = FactUndo { task: Some(before_task), block: before_block, occurrence: None, review: before_review,
         after_facts: fact_fingerprint(transaction, "task_completion", task_id)? };
     let before_json = serde_json::to_string(&payload)?;
     let after_json = block_id.as_deref().map(|id| execution_snapshot(transaction, id)
@@ -206,12 +240,12 @@ pub(super) fn has_followup(connection: &Connection, task_id: &str) -> AppResult<
         AND followup_action IN ('schedule','wait','stop'))", [task_id], |row| row.get(0))?)
 }
 
-pub(super) fn reopen_in_transaction(transaction: &Transaction<'_>, task_id: &str, plan_date: &str) -> AppResult<()> {
+pub(super) fn reopen_in_transaction(transaction: &Transaction<'_>, task_id: &str, _plan_date: &str) -> AppResult<()> {
     let current = load_task_dto_in_transaction(transaction, task_id)?;
     if current.status != "done" || current.deleted_at.is_some() {
         return Err(AppError::Domain("只有已完成任务可以取消完成".into()));
     }
-    database_followup::ensure_status_editable(transaction, task_id)?;
+    database_results::require_task_window(transaction, task_id)?;
     let snapshot: Option<(String, Option<String>)> = transaction.query_row(
         "SELECT before_json, block_after_json FROM task_completion_snapshots WHERE task_id = ?1", [task_id],
         |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
@@ -228,7 +262,7 @@ pub(super) fn reopen_in_transaction(transaction: &Transaction<'_>, task_id: &str
         let payload: FactUndo = serde_json::from_str(&json)?;
         if let Some(before) = &payload.task { remaining = before.remaining_workload_minutes; }
         let old_facts_unchanged = after_json.is_none()
-            && fact_fingerprint(transaction, "task_completion", task_id)? == payload.after_facts;
+            && database_results::facts_match(&fact_fingerprint(transaction, "task_completion", task_id)?, &payload.after_facts);
         if let Some(block) = payload.block {
             let current_block = match execution_snapshot(transaction, &block.id) {
                 Ok(snapshot) => Some(snapshot),
@@ -239,7 +273,18 @@ pub(super) fn reopen_in_transaction(transaction: &Transaction<'_>, task_id: &str
                 [&block.id], |row| row.get(0))?;
             let matches_after = current_block.as_ref().map(|value| serde_json::to_string(value)).transpose()?
                 .zip(after_json).is_some_and(|(current, after)| current == after);
-            if !has_review && current_block.is_some() && (matches_after || old_facts_unchanged) {
+            let restore_review = if let Some(review) = &payload.review {
+                let saved: Option<(String, Option<String>)> = transaction.query_row("SELECT outcome, notes FROM review_entries WHERE id = ?1",
+                    [&review.id], |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
+                matches_after && saved.is_some_and(|(outcome, note)| outcome == "completed"
+                    && note == current_block.as_ref().and_then(|block| block.execution_note.clone()))
+            } else { false };
+            if restore_review {
+                if let Some(review) = &payload.review {
+                    transaction.execute("UPDATE review_entries SET outcome = ?2, notes = ?3 WHERE id = ?1", params![review.id, review.outcome, review.notes])?;
+                }
+            }
+            if (!has_review || restore_review) && current_block.is_some() && (matches_after || old_facts_unchanged) {
                 transaction.execute("UPDATE plan_blocks SET execution_status = ?2, actual_minutes = ?3, review_required = ?4,
                     execution_note = ?5, execution_captured_at = ?6, updated_at = ?7 WHERE id = ?1",
                     params![block.id, block.execution_status, block.actual_minutes, block.review_required,
@@ -258,9 +303,8 @@ pub(super) fn reopen_in_transaction(transaction: &Transaction<'_>, task_id: &str
     transaction.execute("UPDATE tasks SET remaining_workload_minutes = ?2 WHERE id = ?1", params![task_id, remaining])?;
     let scheduled: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM plan_blocks pb
         JOIN daily_plans dp ON dp.id = pb.daily_plan_id WHERE pb.task_id = ?1 AND dp.plan_date = ?2 AND dp.status = 'confirmed')",
-        params![task_id, plan_date], |row| row.get(0))?;
+        params![task_id, current.result_date.as_deref().unwrap_or(&shanghai_today())], |row| row.get(0))?;
     set_task_status(transaction, task_id, if scheduled { TaskStatus::Scheduled } else { TaskStatus::Open }, "manual")?;
-    transaction.execute("DELETE FROM task_completion_snapshots WHERE task_id = ?1", [task_id])?;
     transaction.execute("UPDATE undo_entries SET status = 'conflicted' WHERE target_type = 'task_completion'
         AND target_id = ?1 AND status = 'available'", [task_id])?;
     Ok(())

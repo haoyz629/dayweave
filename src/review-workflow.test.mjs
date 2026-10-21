@@ -23,17 +23,17 @@ test('legacy review navigation returns to the single Today schedule', () => {
   assert.deepEqual(normalizeTodayNavigation('任务'), { active: '任务' });
 });
 
-test('task block dialogs record today or first results within seven days without overwriting history', () => {
-  const block = { task_status: 'scheduled', review: null, execution_status: 'planned', execution_captured_at: null, actual_minutes: null };
-  for (const date of ['2026-10-16', '2026-10-10']) assert.equal(canCaptureTaskResult(date, '2026-10-16', block), true);
-  for (const date of ['2026-10-09', '2026-10-17']) assert.equal(canCaptureTaskResult(date, '2026-10-16', block), false);
-  for (const change of [{ execution_status: 'blocked' }, { execution_captured_at: 'saved' }, { actual_minutes: 0 }]) {
-    assert.equal(canCaptureTaskResult('2026-10-15', '2026-10-16', { ...block, ...change }), false);
-    assert.equal(canCaptureTaskResult('2026-10-16', '2026-10-16', { ...block, ...change }), true);
+test('task blocks allow repeated corrections on any historical day, independent of saved state', () => {
+  const now=Date.parse('2026-10-16T12:00:00+08:00');
+  const block = { task_status: 'scheduled', review: null, execution_status: 'planned', execution_captured_at: null, actual_minutes: null, ends_at:'2026-10-16T23:30:00+08:00' };
+  for (const date of ['2026-10-16', '2026-10-15', '2026-10-09', '2020-01-01']) {
+    for (const change of [{}, { execution_status: 'completed' }, { execution_status: 'blocked' }, { execution_captured_at: 'saved' }, { actual_minutes: 0 }, {review:{outcome:'completed'}}, {task_status:'done'}]) {
+      assert.equal(canCaptureTaskResult(date, '2026-10-16', {...block,...change},now),true);
+    }
+    assert.equal(canCaptureTaskResult(date,'2026-10-16',{...block,task_status:'deleted'},now),false);
   }
-  for (const change of [{ review: { outcome: 'completed' } }, { task_status: 'deleted' }, { task_status: 'done' }]) {
-    assert.equal(canCaptureTaskResult('2026-10-16', '2026-10-16', { ...block, ...change }), false);
-  }
+  for (const date of ['2026-10-17', 'invalid', '2026-02-30']) assert.equal(canCaptureTaskResult(date,'2026-10-16',block,now),false);
+  assert.equal(canCaptureTaskResult('2026-10-15','2026-10-16',{...block,result_date:'2026-10-14'},now),false);
 });
 
 test('repeat dialogs preserve first-write-only history, date limits and trash protection', () => {

@@ -97,7 +97,9 @@ export type Task = {
   scheduled_dates: string[];
   tags: string[];
   execution_locked: boolean;
-  status_locked: boolean;
+  result_date: string | null;
+  result_ends_at: string | null;
+  is_incomplete: boolean;
 };
 
 export type TaskDraftInput = {
@@ -131,26 +133,18 @@ export type TaskDraft = TaskDraftInput & {
   created_at: string;
   updated_at: string;
   confirmed_at: string | null;
-  origin?: TaskOrigin | null;
 };
 
 export type TaskMetadata = {
   task_id: string;
   tags: string[];
   recurrence: RecurrenceInput | null;
-  origin?: TaskOrigin | null;
-  followups?: TaskFollowup[];
   latest_execution?: TaskExecutionFact | null;
+  completion_date?: string | null;
+  completion_ends_at?: string | null;
 };
 
-export type TaskOrigin = { source_task_id: string | null; source_title: string; source_status: TaskStatus | null };
-export type TaskFollowup = { task_id: string; title: string; status: TaskStatus; starts_at: string | null };
-export type TaskExecutionFact = { plan_block_id: string; plan_date: string; outcome: ReviewOutcome; note: string | null };
-export type FollowupPreparation = { kind: "draft"; draft: TaskDraft } | { kind: "existing"; task_id: string };
-
-export function prepareTaskFollowup(sourceTaskId: string) {
-  return invokeDesktop<FollowupPreparation>("prepare_task_followup", { sourceTaskId });
-}
+export type TaskExecutionFact = { plan_block_id: string; plan_date: string; ends_at: string; outcome: ReviewOutcome; note: string | null };
 
 export type UndoEntry = {
   id: string;
@@ -234,6 +228,8 @@ export type PlanBlock = {
   task_status: TaskStatus;
   starts_at: string;
   ends_at: string;
+  result_date?: string | null;
+  result_ends_at?: string | null;
   source: "ai" | "rule_based" | "manual";
   execution_status: "planned" | ReviewOutcome;
   actual_minutes: number | null;

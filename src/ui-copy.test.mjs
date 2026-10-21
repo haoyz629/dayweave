@@ -200,7 +200,7 @@ test("ordinary tasks use one recycle-bin path instead of a cancellation state", 
   assert.doesNotMatch(appSource, /type TaskView = .*"cancelled"/);
   assert.equal(appSource.includes("不再进行"), false);
   assert.equal(appSource.includes("task-more-actions"), false);
-  assert.match(appSource, /\{ label: "历史与维护", items: \["done", "deleted"\] \}/);
+  assert.match(appSource, /\{ label: "历史与维护", items: \["not_completed", "done", "deleted"\] \}/);
   assert.match(appSource, /className="task-compact-trash" disabled=\{busy\} onClick=\{\(\) => requestTaskChange\(\{ kind: "trash" \}\)\}/);
   assert.equal(stylesSource.includes("status-row-cancelled"), false);
   assert.equal(stylesSource.includes("terminal-task-status.cancelled"), false);
@@ -285,10 +285,11 @@ test("clearing and restoring task time keeps the attribute grid dimensions stabl
   assert.match(stylesSource, /@container inspector \(max-width: 560px\) \{[\s\S]*?\.task-compact-body \.task-attribute-grid \{ grid-template-columns: minmax\(0, 1fr\); \}/);
 });
 
-test("only incomplete results show optional notes, without reasons or followup scheduling in the popup", () => {
-  assert.match(appSource, /draft\.result === "not_completed" && <label className="floating-execution-note"/);
+test("result notes stay visible and editable without reasons or followup scheduling", () => {
+  assert.match(appSource, /<label className="floating-execution-note"/);
+  assert.doesNotMatch(appSource, /draft\.result !== null && <label className="floating-execution-note"/);
   assert.doesNotMatch(appSource, /execution-add-note|incompleteReasonOptions|未完成原因|TaskNextActionFields/);
-  assert.match(appSource, /disabled=\{savingExecution \|\| busy \|\| !executionDraft\.outcome\}/);
+  assert.match(appSource, /disabled=\{savingExecution \|\| busy \|\| loading \|\| Boolean\(quickCompletingBlockId\) \|\| !executionDraft\.outcome\}/);
 });
 
 
@@ -357,7 +358,7 @@ test("task editor uses shared semantic colors and keeps recycle actions in place
   assert.match(appSource, /sameDay \? <output className="apple-schedule-workload"/);
   assert.match(appSource, /className=\{`priority-select-control priority-tone-\$\{form\.priority \?\? "unset"\}`\}/);
   assert.match(appSource, /<option value="low">低优先级<\/option><option value="medium">中优先级<\/option><option value="high">高优先级<\/option>/);
-  assert.match(appSource, /status=\{statusCopy\[task\.status\]\} statusTone=\{task\.status\}/);
+  assert.match(appSource, /status=\{statusCopy\[taskListStatus\(task\)\]\} statusTone=\{taskListStatus\(task\)\}/);
   assert.match(appSource, /status="待确认" statusTone="draft"/);
   assert.match(stylesSource, /--task-state-draft:/);
   assert.match(stylesSource, /--task-state-open:/);
@@ -578,25 +579,27 @@ test("execution records live in timeline dialogs, not a separate Today subview",
   assert.match(appSource, /value === "completed" \? "completed" : "not_started"/);
 });
 
-test("incomplete saves only results and offers followup creation from the resulting toast", () => {
-  assert.match(appSource, /canCaptureTaskResult\(selectedDate, today, selectedBlock\)/);
-  assert.match(appSource, /!canRecordSelectedBlock \|\| savingExecution \|\| busy \|\| quickCompletingBlockId/);
-  assert.match(appSource, /await resolveTaskExecution\(selectedDate, input\)/);
-  assert.match(appSource, /补录仅记录当时结果，不改变当前任务和安排/);
-  assert.match(appSource, /else \{\s*await saveExecutionCapture\(selectedDate/);
-  assert.match(appSource, /incomplete \? selectedBlock.task_id : undefined/);
-  assert.match(appSource, /label: planToast.followupLabel \?\? "创建后续任务"/);
-  assert.match(appSource, /requestNavigation\(\{ active: "任务", followupSourceId: planToast.followupSourceId \}\)/);
-  assert.doesNotMatch(appSource, /finishSelectedTask|execution-complete-whole|clearQuickCompletedTimelineBlock|TaskNextActionFields/);
+test("incomplete saves results and offers a plain independent draft from toast and details", () => {
+  assert.match(appSource, /canCaptureTaskResult\(selectedDate, today, selectedBlock, clock.getTime\(\)\)/);
+  assert.match(appSource, /\|\| savingExecution \|\| busy \|\| quickCompletingBlockId/);
+  assert.match(appSource, /canCaptureTaskResult\(selectedDate, today, selectedBlock, Date\.now\(\)\)/);
+  assert.match(appSource, /await resolveTaskExecution\(resultDate, input\)/);
+  assert.match(appSource, /补记或纠正当天结果，不改变其他日期的任务块和当前任务状态/);
+  assert.match(appSource, /await saveExecutionCapture\(resultDate/);
+  assert.match(appSource, /label: "新建任务"/);
+  assert.match(appSource, /requestNavigation\(\{ active: "任务", taskSeed: planToast.taskSeed \}\)/);
+  assert.match(appSource, /createManualTaskDraft\(independentTaskDraft/);
+  assert.match(appSource, /<TaskExecutionRecord/);
+  assert.doesNotMatch(appSource, /followupSourceId|prepareTaskFollowup|TaskRelations|TaskOriginBanner|status_locked/);
 });
 
 test("legacy confirmed records remain readable in the block dialog without another review form", () => {
-  assert.match(appSource, /selectedBlock.review \? <>/);
+  assert.match(appSource, /selectedBlock.review && !canRecordSelectedBlock \? <>/);
   assert.match(appSource, /selectedBlock.review.actual_minutes !== null/);
   assert.match(appSource, /selectedBlock.review.remaining_workload_minutes !== null/);
   assert.match(appSource, /selectedBlock.review.notes/);
   assert.match(appSource, /selectedBlock.review.defer_reason/);
-  assert.match(appSource, /结果已保存，无需复核/);
+  assert.match(appSource, /已超过结果修改时间/);
   assert.doesNotMatch(appSource, /<ReviewPage|useReviewCloseGuard|reviewFlushRef|等待每日复盘/);
   assert.match(appSource, /const committed = target === "done" \? await completeTask/);
 });
@@ -624,17 +627,20 @@ test("task filter and empty states share type icons and concise copy", () => {
   assert.doesNotMatch(appSource, /taskEmptyCopy\[view\]\.description/);
 });
 
-test("completion controls use followup state locks rather than hiding cancellation for execution history", () => {
+test("whole-task controls keep their result window while historical blocks have independent corrections", () => {
   const details = appSource.slice(appSource.indexOf("function CompletedTaskDetails("), appSource.indexOf("function TaskWorkspace("));
-  assert.match(details, /disabled=\{busy \|\| task.status_locked\}/);
+  assert.match(details, /taskResultEditable\(task, now, metadata\)/);
+  assert.match(details, /disabled=\{busy \|\| !editable\}/);
   assert.match(details, /task.status === "done" \? "取消完成" : "完成任务"/);
-  assert.doesNotMatch(details, /!task.execution_locked/);
-  assert.match(appSource, /selectedBlockStatusLocked/);
-  assert.match(appSource, /disabled=\{taskCompleted \|\| task\?\.status_locked/);
+  assert.match(appSource, /disabled=\{!completionAction \|\| Boolean\(quickCompletingBlockId\)/);
+  assert.match(appSource, /selectedBlockCompletionAction !== selectedBlockDialog.action/);
+  assert.match(appSource, /action === "complete-block" \|\| action === "uncomplete-block"/);
+  assert.match(appSource, /resultDate === resultToday\(Date.now\(\)\)/);
+  assert.match(appSource, /timelineTaskDialogState\(selectedBlock, selectedDate < today\)/);
 });
 
-test("any non-deleted followup task disables source completion and reopening", () => {
-  assert.match(appSource, /task\.status_locked \? "已有后续任务/);
-  assert.match(appSource, /disabled=\{busy \|\| task\.status_locked\}/);
-  assert.match(databaseSource, /child\.status <> 'deleted' AND child\.deleted_at IS NULL/);
+test("tasks are independent and new drafts never use association fields", () => {
+  assert.doesNotMatch(appSource, /status_locked|\.origin\b|followupSourceId|linked-select/);
+  assert.doesNotMatch(tauriSource, /TaskOrigin|TaskFollowup|prepareTaskFollowup|status_locked/);
+  assert.doesNotMatch(databaseSource, /ensure_status_editable|origin\.source_task_id = task.id/);
 });

@@ -15,17 +15,19 @@ test("sidebar uses a responsive proportion without draggable or saved width cont
   assert.match(app, /setUiSetting\(SHELL_SIDEBAR_COLLAPSED_SETTING, String\(nextCollapsed\)\)/);
 });
 
-test("sidebar brand top-aligns the larger logo with the name and stacks its copy", () => {
+test("sidebar balances the supplied SVG logo beside the larger three-line wordmark", () => {
   assert.match(brand, /<h1 className="product-brand-name">今序 · Dayweave<\/h1>/);
-  assert.match(brand, /<h2 className="product-brand-chinese">让今天，井然有序。<\/h2>\s*<p className="product-brand-english" lang="en">Bring order to your day\.<\/p>/);
-  assert.match(styles, /--product-brand-height: calc\(var\(--product-brand-name-size\) \* 1\.4 \+ var\(--product-brand-copy-gap\) \+ 13px \* 1\.5 \+ 2px \+ 10\.5px \* 1\.5\)/);
-  assert.match(styles, /\.product-brand-logo \{ width: var\(--product-brand-height\); height: var\(--product-brand-height\)/);
-  assert.match(styles, /\.product-brand-heading \{ display: flex; align-items: flex-start; justify-content: flex-start/);
+  assert.doesNotMatch(brand, /brand-wordmark\.svg/);
+  assert.match(styles, /\.product-brand-logo \{ width: calc\(56 \* var\(--brand-unit\)\); height: calc\(56 \* var\(--brand-unit\)\)/);
+  assert.match(styles, /\.product-brand-heading \{ display: grid; grid-template-columns: max-content max-content;[^}]*gap: calc\(10 \* var\(--brand-unit\)\);[^}]*width: max-content;[^}]*margin-inline: auto/);
+  assert.doesNotMatch(styles, /product-brand-text \{[^}]*justify-self: end/);
+  assert.match(styles, /\.product-brand-logo \{[^}]*justify-self: center/);
+  assert.match(styles, /--brand-unit: clamp\(1px, \.46728972cqw, 1\.30841122px\)/);
 });
 
-test("sidebar compensates the logo canvas padding and left-aligns the brand without changing collapsed icons", () => {
-  assert.match(styles, /\.next-sidebar \.sidebar-brand \{[^}]*align-items: flex-start;[^}]*text-align: left/);
-  assert.match(styles, /\.product-brand-logo > \.dayweave-logo \{ position: absolute; width: calc\(100% \* 1024 \/ 920\); height: calc\(100% \* 1024 \/ 920\); left: calc\(100% \* -68 \/ 920\); top: calc\(100% \* -50 \/ 920\)/);
+test("sidebar keeps the full logo canvas and left-aligns the brand without changing collapsed icons", () => {
+  assert.match(styles, /\.next-sidebar \.sidebar-brand \{[^}]*align-items: center;[^}]*text-align: left/);
+  assert.match(styles, /\.product-brand-logo > \.dayweave-logo \{ width: 100%; height: 100%; \}/);
   assert.match(styles, /\.sidebar-collapsed \.next-sidebar \.sidebar-brand \{ width: 100%; max-width: none; align-items: center/);
   assert.match(styles, /\.sidebar-collapsed \.next-sidebar \.product-brand-logo > \.dayweave-logo \{ position: static; width: 100%; height: 100%/);
 });

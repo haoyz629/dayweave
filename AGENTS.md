@@ -1,13 +1,27 @@
-# JinXu repository guidance
+# Dayweave repository guidance
+
+## Preview versus implementation
+
+- 用户说“先做个效果让我看”“先做预览页”或类似表达时，先制作独立效果预览，等待确认后再修改正式应用代码。
+- 用户明确说“直接改”“直接实现”时，直接完成正式功能与相关验证，不额外插入预览审批流程。
 
 ## Post-change packaging decision
 
-After completing and verifying a batch of user-requested file changes, ask once before the final handoff:
+After completing and verifying a batch of user-requested changes that actually affect the program or its installer, ask once before the final handoff:
 
 > 本次改动已完成并验证，要现在打包 Windows Debug 安装包吗？
 
 - Do not package until the user answers affirmatively, unless the current request already explicitly asks for packaging.
-- Do not ask after read-only analysis, review-only work, a failed or aborted edit with no effective file changes, or a packaging-only turn.
-- Ask once per completed change batch, not after each individual file edit or intermediate milestone.
-- When packaging is requested or approved, use the repository skill at `.agents/skills/jinxu-package/SKILL.md`.
+- Ask only when effective changes affect application code, runtime assets, dependencies, or build/installer behavior. Do not ask for documentation-only, collaboration-rule-only (including `AGENTS.md` and skill instructions), comment-only, formatting-only, or other non-program changes.
+- Do not ask after read-only analysis, review-only work, a failed or aborted edit with no effective program changes, or a packaging-only turn.
+- Ask once per completed program-change batch, not after each individual file edit or intermediate milestone.
+- When packaging is requested or approved, use the repository skill at `.agents/skills/dayweave-package/SKILL.md`.
+- Once packaging is requested or approved, run the commands required for that packaging workflow without asking the user for per-command authorization. This standing authorization covers packaging commands only and does not bypass platform-enforced permissions or safety restrictions.
+
+## Code push workflow
+
+- 用户说“推送代码”“提交并推送”或“调用推送代码流程”时，读取并执行 `.agents/skills/dayweave-push/SKILL.md`。
+- 默认使用当前分支及其 upstream；先检查改动与提交范围，执行相关验证，再安全提交、普通推送并核对远端提交哈希。
+- 默认不提交 `design-previews/`、`design-references/`、`.agent/`、`.pi/` 本地辅助内容；保留这些目录的已有修改，用户明确指定时再纳入。
+- 推送请求不代表打包授权；不自动强推、重写历史或丢弃本地改动。
 

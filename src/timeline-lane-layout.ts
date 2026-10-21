@@ -23,9 +23,9 @@ export function timelineDurationHeight(startMinute: number, endMinute: number, p
  * every item grow rightward only through columns that stay empty for its full
  * interval. Card height and collision geometry both follow the stored time.
  */
-export function timelineLaneLayout(items: TimelineLaneInput[]): Record<string, TimelineLane> {
+export function timelineLaneLayout(items: TimelineLaneInput[], preview: TimelineLaneInput | null = null): Record<string, TimelineLane> {
   const sorted = items
-    .map((item) => ({ ...item }))
+    .map((item) => ({ ...(preview?.layoutKey === item.layoutKey ? preview : item) }))
     .sort((left, right) => {
       const startDifference = left.startMinute - right.startMinute;
       if (startDifference !== 0) return startDifference;

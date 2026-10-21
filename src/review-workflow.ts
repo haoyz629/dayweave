@@ -1,3 +1,5 @@
+import { blockResultEditable } from "./task-result.ts";
+
 export type ReviewDraft = {
   result: "completed" | "partial" | "not_completed" | null;
   outcome: "completed" | "partial" | "not_started" | "cancelled" | "blocked" | null;
@@ -22,12 +24,13 @@ export function canRecordReview(date: string, today: string) {
   return Number.isFinite(age) && age >= 0 && age < 7;
 }
 
-export function canCaptureTaskResult(date: string, today: string, block: {
+export function canCaptureTaskResult(date: string, _today: string, block: {
   task_status: string; review: unknown; execution_status: string;
-  execution_captured_at: string | null; actual_minutes: number | null;
-}) {
-  return canRecordReview(date, today) && ["open", "scheduled"].includes(block.task_status) && !block.review
-    && (date === today || (block.execution_status === "planned" && !block.execution_captured_at && block.actual_minutes === null));
+  execution_captured_at: string | null; actual_minutes: number | null; ends_at?: string;
+  result_date?: string | null; result_ends_at?: string | null;
+}, now = Date.now()) {
+  if (!["open", "scheduled", "done"].includes(block.task_status)) return false;
+  return blockResultEditable(date, now) && (block.result_date == null || block.result_date === date);
 }
 
 export function canCaptureRecurringResult(date: string, today: string, outcome: string | null, writable: boolean) {

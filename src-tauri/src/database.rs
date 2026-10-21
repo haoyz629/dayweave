@@ -17,7 +17,9 @@ mod database_execution;
 pub use database_execution::TaskExecutionResolutionInput;
 #[path = "database_followup.rs"]
 mod database_followup;
-pub use database_followup::{FollowupPreparation, TaskOriginDto, TaskFollowupDto, TaskExecutionFactDto};
+pub use database_followup::TaskExecutionFactDto;
+#[path = "database_results.rs"]
+mod database_results;
 #[path = "database_tags.rs"]
 mod database_tags;
 pub use database_tags::TaskTagDefinition;
@@ -68,7 +70,11 @@ pub struct TaskDto {
     #[serde(default)]
     pub execution_locked: bool,
     #[serde(default)]
-    pub status_locked: bool,
+    pub result_date: Option<String>,
+    #[serde(default)]
+    pub result_ends_at: Option<String>,
+    #[serde(default)]
+    pub is_incomplete: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -198,9 +204,9 @@ pub struct TaskMetadataDto {
     pub task_id: String,
     pub tags: Vec<String>,
     pub recurrence: Option<RecurrenceInput>,
-    pub origin: Option<TaskOriginDto>,
-    pub followups: Vec<TaskFollowupDto>,
     pub latest_execution: Option<TaskExecutionFactDto>,
+    pub completion_date: Option<String>,
+    pub completion_ends_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -417,7 +423,6 @@ pub struct TaskDraftDto {
     pub confirmed_at: Option<String>,
     pub tags: Vec<String>,
     pub recurrence: Option<RecurrenceInput>,
-    pub origin: Option<TaskOriginDto>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -632,6 +637,8 @@ pub struct PlanBlockDto {
     pub task_status: String,
     pub starts_at: String,
     pub ends_at: String,
+    pub result_date: Option<String>,
+    pub result_ends_at: Option<String>,
     pub source: String,
     pub execution_status: String,
     pub actual_minutes: Option<i64>,
@@ -738,10 +745,19 @@ struct ExecutionSnapshot {
 }
 
 #[derive(Serialize, Deserialize)]
+struct ReviewResultSnapshot {
+    id: String,
+    outcome: String,
+    notes: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
 struct FactUndo {
     task: Option<TaskDto>,
     block: Option<ExecutionSnapshot>,
     occurrence: Option<RecurringOccurrenceDto>,
+    #[serde(default)]
+    review: Option<ReviewResultSnapshot>,
     after_facts: String,
 }
 
@@ -889,6 +905,7 @@ impl Database {
                 rows
             } else { Vec::new() };
             transaction.execute_batch(sql)?;
+            if *version == 26 { database_results::backfill_completion_context(&transaction)?; }
             for (name, definition) in review_schema {
                 let exists: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = ?1)", [&name], |row| row.get(0))?;
                 if !exists { transaction.execute_batch(&definition)?; }
@@ -959,7 +976,6 @@ impl Database {
         let existing = load_task_draft_in_transaction(&transaction, draft_id)?;
         database_tags::validate_selection(&input.tags, &existing.tags)?;
         database_tags::register_tags(&transaction, &input.tags)?;
-        database_followup::validate_linked_draft(&existing, Some(&input))?;
         if existing.draft_kind == "update" && input.item_type != "task" {
             return Err(AppError::Domain("修改已有任务的草稿不能切换类型".into()));
         }
@@ -1018,8 +1034,7 @@ impl Database {
              ORDER BY updated_at DESC",
         )?;
         let rows = statement.query_map([include_discarded as i64], task_draft_dto_from_row)?;
-        let mut drafts = rows.collect::<Result<Vec<_>, _>>()?;
-        for draft in &mut drafts { draft.origin = database_followup::draft_origin(&self.connection, &draft.id)?; }
+        let drafts = rows.collect::<Result<Vec<_>, _>>()?;
         Ok(drafts)
     }
 
@@ -1033,7 +1048,6 @@ impl Database {
         if draft.confirmation_token != confirmation_token {
             return Err(AppError::InvalidConfirmation);
         }
-        database_followup::validate_linked_draft(&draft, None)?;
         if draft.item_type != "task" { return Err(AppError::Domain("请按草稿所选类型确认创建".into())); }
         if draft.status == "confirmed" {
             let task_id = draft.confirmed_task_id.ok_or(AppError::InvalidConfirmation)?;
@@ -1151,7 +1165,6 @@ impl Database {
                 timestamp,
             ],
         )?;
-        database_followup::confirm_origin(&transaction, &draft, &task_id)?;
         let change_source = if draft.source_type == TaskSource::AiAssistant.as_str() { "ai" } else { "manual" };
         record_task_change(
             &transaction,
@@ -1190,7 +1203,6 @@ impl Database {
         let transaction = self.connection.transaction()?;
         let draft = load_task_draft_in_transaction(&transaction, draft_id)?;
         if draft.confirmation_token != confirmation_token { return Err(AppError::InvalidConfirmation); }
-        database_followup::validate_linked_draft(&draft, None)?;
         if draft.item_type == "task" {
             transaction.commit()?;
             return self.confirm_task_draft(draft_id, confirmation_token).map(ConfirmedCreation::Task);
@@ -1273,8 +1285,22 @@ impl Database {
                                 OR COALESCE(fact.actual_minutes, 0) > 0
                                 OR EXISTS(SELECT 1 FROM review_entries review WHERE review.plan_block_id = fact.id))
                         ))
-                        , EXISTS(SELECT 1 FROM task_origins origin JOIN tasks child ON child.id = origin.task_id
-                            WHERE origin.source_task_id = task.id AND child.status <> 'deleted' AND child.deleted_at IS NULL)
+                        , task.result_date, task.result_ends_at
+                        , task.status IN ('open', 'scheduled') AND task.deleted_at IS NULL AND COALESCE((
+                            SELECT COALESCE(review.outcome, fact.execution_status) IN ('not_started', 'partial', 'blocked', 'cancelled')
+                                AND NOT EXISTS (
+                                    SELECT 1 FROM plan_blocks pending JOIN daily_plans future ON future.id = pending.daily_plan_id
+                                    WHERE pending.task_id = task.id AND future.status = 'confirmed' AND future.plan_date >= ?3
+                                        AND pending.starts_at > fact.starts_at AND pending.execution_status = 'planned'
+                                        AND pending.execution_captured_at IS NULL AND COALESCE(pending.actual_minutes, 0) = 0
+                                        AND NOT EXISTS (SELECT 1 FROM review_entries resolved WHERE resolved.plan_block_id = pending.id)
+                                )
+                            FROM plan_blocks fact JOIN daily_plans recorded ON recorded.id = fact.daily_plan_id
+                            LEFT JOIN review_entries review ON review.plan_block_id = fact.id
+                            WHERE fact.task_id = task.id AND recorded.status = 'confirmed'
+                                AND COALESCE(review.outcome, fact.execution_status) <> 'planned'
+                            ORDER BY fact.starts_at DESC, fact.id LIMIT 1
+                        ), 0)
              FROM tasks task
              WHERE (?1 = 1 OR status <> 'deleted')
                AND (?2 IS NULL OR title LIKE ?2 COLLATE NOCASE OR COALESCE(notes, '') LIKE ?2 COLLATE NOCASE
@@ -1285,7 +1311,7 @@ impl Database {
                         WHEN 'done' THEN 2 ELSE 3 END,
                       updated_at DESC",
         )?;
-        let rows = statement.query_map(params![include_deleted as i64, search_pattern], task_dto_from_row)?;
+        let rows = statement.query_map(params![include_deleted as i64, search_pattern, shanghai_today()], task_dto_from_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
     }
 
@@ -1504,7 +1530,7 @@ impl Database {
             recurring_occurrence_dto_from_row,
         )?;
         clear_review_draft(&transaction, &occurrence_date, "recurring", occurrence_id)?;
-        let payload = FactUndo { task: None, block: None, occurrence: Some(before),
+        let payload = FactUndo { task: None, block: None, occurrence: Some(before), review: None,
             after_facts: fact_fingerprint(&transaction, "recurring_review", occurrence_id)? };
         record_undo_entry(&transaction, "recurring_review_saved", "recurring_review", occurrence_id, &serde_json::to_string(&payload)?, None)?;
         transaction.commit()?;
@@ -1553,10 +1579,24 @@ impl Database {
                                 OR COALESCE(fact.actual_minutes, 0) > 0
                                 OR EXISTS(SELECT 1 FROM review_entries review WHERE review.plan_block_id = fact.id))
                         ))
-                        , EXISTS(SELECT 1 FROM task_origins origin JOIN tasks child ON child.id = origin.task_id
-                            WHERE origin.source_task_id = task.id AND child.status <> 'deleted' AND child.deleted_at IS NULL)
+                        , task.result_date, task.result_ends_at
+                        , task.status IN ('open', 'scheduled') AND task.deleted_at IS NULL AND COALESCE((
+                            SELECT COALESCE(review.outcome, fact.execution_status) IN ('not_started', 'partial', 'blocked', 'cancelled')
+                                AND NOT EXISTS (
+                                    SELECT 1 FROM plan_blocks pending JOIN daily_plans future ON future.id = pending.daily_plan_id
+                                    WHERE pending.task_id = task.id AND future.status = 'confirmed' AND future.plan_date >= ?2
+                                        AND pending.starts_at > fact.starts_at AND pending.execution_status = 'planned'
+                                        AND pending.execution_captured_at IS NULL AND COALESCE(pending.actual_minutes, 0) = 0
+                                        AND NOT EXISTS (SELECT 1 FROM review_entries resolved WHERE resolved.plan_block_id = pending.id)
+                                )
+                            FROM plan_blocks fact JOIN daily_plans recorded ON recorded.id = fact.daily_plan_id
+                            LEFT JOIN review_entries review ON review.plan_block_id = fact.id
+                            WHERE fact.task_id = task.id AND recorded.status = 'confirmed'
+                                AND COALESCE(review.outcome, fact.execution_status) <> 'planned'
+                            ORDER BY fact.starts_at DESC, fact.id LIMIT 1
+                        ), 0)
                  FROM tasks task WHERE task.id = ?1",
-                [task_id],
+                params![task_id, shanghai_today()],
                 task_dto_from_row,
             )
             .optional()?
@@ -1592,8 +1632,9 @@ impl Database {
                 })
             },
         ).optional()?;
+        let (completion_date, completion_ends_at) = database_results::candidate_context(&self.connection, task_id)?;
         database_followup::enrich_metadata(&self.connection, TaskMetadataDto { task_id: task_id.to_string(), tags, recurrence,
-            origin: None, followups: Vec::new(), latest_execution: None })
+            latest_execution: None, completion_date, completion_ends_at })
     }
 
     pub fn set_task_tags(&mut self, task_id: &str, tags: Vec<String>) -> AppResult<TaskMetadataDto> {
@@ -1722,12 +1763,17 @@ impl Database {
         if status != "available" { return Err(AppError::Domain("这项操作已经撤销或失效".into())); }
         if expires_at < now() { return Err(AppError::Domain("撤销时间已超过 10 秒".into())); }
         if matches!(target_type.as_str(), "task_completion" | "execution_capture") {
-            database_followup::ensure_status_editable(&transaction, &target_id)?;
+            let payload: FactUndo = serde_json::from_str(&before_json)?;
+            if target_type == "task_completion" {
+                database_results::require_task_window(&transaction, &target_id)?;
+            } else if let Some(block) = payload.block {
+                database_results::require_block_window(&transaction, &block.id)?;
+            }
         }
         match target_type.as_str() {
             "task_completion" | "execution_capture" | "recurring_review" => {
                 let payload: FactUndo = serde_json::from_str(&before_json)?;
-                if fact_fingerprint(&transaction, &target_type, &target_id)? != payload.after_facts {
+                if !database_results::facts_match(&fact_fingerprint(&transaction, &target_type, &target_id)?, &payload.after_facts) {
                     return Err(AppError::Domain("目标已有后续修改、执行、复盘或删除，无法安全撤销".into()));
                 }
                 if let Some(task) = payload.task {
@@ -1746,6 +1792,10 @@ impl Database {
                         execution_note = ?5, execution_captured_at = ?6, updated_at = ?7 WHERE id = ?1",
                         params![block.id, block.execution_status, block.actual_minutes, block.review_required,
                             block.execution_note, block.execution_captured_at, now()])?;
+                }
+                if let Some(review) = payload.review {
+                    transaction.execute("UPDATE review_entries SET outcome = ?2, notes = ?3 WHERE id = ?1",
+                        params![review.id, review.outcome, review.notes])?;
                 }
                 if let Some(occurrence) = payload.occurrence {
                     transaction.execute("UPDATE recurring_occurrences SET outcome = ?2, review_notes = ?3, reviewed_at = ?4, updated_at = ?5 WHERE id = ?1",
@@ -3569,7 +3619,7 @@ impl Database {
                         pb.execution_note, pb.execution_captured_at,
                         review.id, review.review_date, review.plan_block_id, review.task_id, review.outcome,
                         review.actual_minutes, review.defer_reason, review.notes, review.remaining_workload_minutes,
-                        review.created_at, review.updated_at, review.followup_action
+                        review.created_at, review.updated_at, review.followup_action, pb.result_date, pb.result_ends_at
                  FROM plan_blocks pb JOIN tasks task ON task.id = pb.task_id
                  LEFT JOIN review_entries review ON review.plan_block_id = pb.id
                  WHERE pb.daily_plan_id = ?1 AND task.status <> 'deleted'
@@ -3602,6 +3652,7 @@ impl Database {
                     review_required: row.get::<_, i64>(10)? != 0,
                     remaining_workload_minutes: row.get(11)?, execution_note: row.get(12)?,
                     execution_captured_at: row.get(13)?, review,
+                    result_date: row.get(26)?, result_ends_at: row.get(27)?,
                 })
             })?.collect::<Result<Vec<_>, _>>()?;
         }
@@ -3614,12 +3665,11 @@ impl Database {
     }
 
     pub fn save_execution_capture(&mut self, capture_date: &str, mut input: ExecutionCaptureInput) -> AppResult<()> {
-        let is_today = validate_review_date(capture_date)?;
         input.note = normalize_review_text(input.note, 500, "执行备注")?;
         let transaction = self.connection.transaction()?;
         let (plan_date, task_status, has_review): (String, String, bool) = transaction
             .query_row(
-                "SELECT dp.plan_date, task.status,
+                "SELECT dp.plan_date, CASE WHEN task.deleted_at IS NOT NULL THEN 'deleted' ELSE task.status END,
                         EXISTS(SELECT 1 FROM review_entries review WHERE review.plan_block_id = pb.id)
                  FROM plan_blocks pb
                  JOIN daily_plans dp ON dp.id = pb.daily_plan_id
@@ -3636,35 +3686,50 @@ impl Database {
         if task_status == TaskStatus::Deleted.as_str() {
             return Err(AppError::Domain("回收站任务不能记录执行状态".into()));
         }
-        if has_review {
-            return Err(AppError::Domain("该执行块已经完成每日复盘，不能覆盖最终事实".into()));
+        let in_window = database_results::allow_capture(&transaction, capture_date, &input.plan_block_id)?;
+        let task_id: String = transaction.query_row("SELECT task_id FROM plan_blocks WHERE id = ?1", [&input.plan_block_id], |row| row.get(0))?;
+        if in_window && task_status == "done" {
+            if input.outcome == ReviewOutcome::Completed {
+                database_execution::complete_in_transaction(&transaction, &task_id, Some(&input.plan_block_id), input.note.as_deref())?;
+                transaction.commit()?;
+                return Ok(());
+            }
+            database_execution::reopen_in_transaction(&transaction, &task_id, &plan_date)?;
         }
-        validate_review_target(&transaction, capture_date, "task", &input.plan_block_id)?;
         let before = execution_snapshot(&transaction, &input.plan_block_id)?;
-        if !is_today && (before.execution_status != "planned" || before.execution_captured_at.is_some() || before.actual_minutes.is_some()) {
-            return Err(AppError::Domain("历史已有执行结果，只能首次补充详情，不能覆盖轻量结果".into()));
+        database_results::freeze_block(&transaction, &input.plan_block_id)?;
+        if has_review {
+            transaction.execute("UPDATE review_entries SET outcome = ?2, notes = ?3 WHERE plan_block_id = ?1",
+                params![input.plan_block_id, input.outcome.as_str(), input.note])?;
         }
         let timestamp = now();
         transaction.execute(
             "UPDATE plan_blocks
              SET execution_status = ?2, execution_note = ?3, execution_captured_at = ?4,
-                 actual_minutes = NULL, review_required = 1, updated_at = ?4
+                 review_required = CASE WHEN ?5 THEN review_required ELSE 1 END, updated_at = ?4
              WHERE id = ?1",
-            params![input.plan_block_id, input.outcome.as_str(), input.note, timestamp],
+            params![input.plan_block_id, input.outcome.as_str(), input.note, timestamp, has_review],
         )?;
-        preserve_review_supplement_after_capture(&transaction, capture_date, &input.plan_block_id, before.execution_note.as_deref())?;
-        let task_id: String = transaction.query_row("SELECT task_id FROM plan_blocks WHERE id = ?1", [&input.plan_block_id], |row| row.get(0))?;
-        let payload = FactUndo { task: None, block: Some(before), occurrence: None,
-            after_facts: fact_fingerprint(&transaction, "execution_capture", &task_id)? };
-        record_undo_entry(&transaction, "execution_captured", "execution_capture", &task_id, &serde_json::to_string(&payload)?, None)?;
+        if in_window {
+            preserve_review_supplement_after_capture(&transaction, capture_date, &input.plan_block_id, before.execution_note.as_deref())?;
+        } else {
+            clear_review_draft(&transaction, capture_date, "task", &input.plan_block_id)?;
+        }
+        if in_window && !has_review && task_status != "done" {
+            let payload = FactUndo { task: None, block: Some(before), occurrence: None, review: None,
+                after_facts: fact_fingerprint(&transaction, "execution_capture", &task_id)? };
+            record_undo_entry(&transaction, "execution_captured", "execution_capture", &task_id, &serde_json::to_string(&payload)?, None)?;
+        }
         transaction.commit()?;
         Ok(())
     }
 
     pub fn clear_execution_capture(&mut self, capture_date: &str, plan_block_id: &str) -> AppResult<()> {
-        if !validate_review_date(capture_date)? { return Err(AppError::Domain("历史执行事实不能取消；可首次补充详情".into())); }
-        validate_review_target(&self.connection, capture_date, "task", plan_block_id)?;
         let transaction = self.connection.transaction()?;
+        let in_window = database_results::allow_capture(&transaction, capture_date, plan_block_id)?;
+        let task_id: String = transaction.query_row("SELECT task_id FROM plan_blocks WHERE id = ?1", [plan_block_id], |row| row.get(0))?;
+        let task = load_task_dto_in_transaction(&transaction, &task_id)?;
+        if task.deleted_at.is_some() || task.status == "deleted" { return Err(AppError::Domain("回收站任务不能取消结果".into())); }
         let (plan_date, execution_status, has_review): (String, String, bool) = transaction
             .query_row(
                 "SELECT dp.plan_date, pb.execution_status,
@@ -3680,11 +3745,16 @@ impl Database {
         if plan_date != capture_date {
             return Err(AppError::Domain("执行日期必须与执行块所属日期一致".into()));
         }
+        if in_window && task.status == "done" {
+            database_execution::reopen_in_transaction(&transaction, &task_id, &plan_date)?;
+            transaction.commit()?;
+            return Ok(());
+        }
         if has_review {
             return Err(AppError::Domain("该执行块已经完成每日复盘，不能撤销最终事实".into()));
         }
-        if execution_status != ReviewOutcome::Completed.as_str() {
-            return Err(AppError::Domain("只有已完成且未复盘的执行块可以取消勾选".into()));
+        if !matches!(execution_status.as_str(), "completed" | "not_started" | "partial" | "cancelled" | "blocked") {
+            return Err(AppError::Domain("该执行块没有可取消的任务结果".into()));
         }
         let timestamp = now();
         transaction.execute(
@@ -3694,12 +3764,14 @@ impl Database {
              WHERE id = ?1",
             params![plan_block_id, timestamp],
         )?;
+        if in_window { transaction.execute("UPDATE tasks SET updated_at = ?2 WHERE id = ?1", params![task_id, timestamp])?; }
+        clear_review_draft(&transaction, capture_date, "task", plan_block_id)?;
         transaction.commit()?;
         Ok(())
     }
 
     pub fn save_review_entry(&mut self, review_date: &str, mut input: ReviewEntryInput) -> AppResult<ReviewEntryDto> {
-        let is_today = validate_review_date(review_date)?;
+        let is_today = review_date == shanghai_today();
         if input.actual_minutes.is_some_and(|minutes| minutes < 0) {
             return Err(AppError::Schema("实际耗时不能小于 0 分钟".into()));
         }
@@ -3712,7 +3784,7 @@ impl Database {
         let transaction = self.connection.transaction()?;
         let (task_id, plan_date, task_status, current_remaining): (String, String, String, Option<i64>) = transaction
             .query_row(
-                "SELECT pb.task_id, dp.plan_date, task.status, task.remaining_workload_minutes
+                "SELECT pb.task_id, dp.plan_date, CASE WHEN task.deleted_at IS NOT NULL THEN 'deleted' ELSE task.status END, task.remaining_workload_minutes
                  FROM plan_blocks pb
                  JOIN daily_plans dp ON dp.id = pb.daily_plan_id
                  JOIN tasks task ON task.id = pb.task_id
@@ -3733,19 +3805,48 @@ impl Database {
             [&input.plan_block_id],
             |row| row.get(0),
         )?;
-        if already_saved {
-            return Err(AppError::Domain("该执行块的复盘事实已经保存，不能直接覆盖".into()));
+        let in_window = database_results::allow_capture(&transaction, review_date, &input.plan_block_id)?;
+        if in_window && task_status == "done" { database_results::require_task_window(&transaction, &task_id)?; }
+        if !is_today && input.remaining_workload_minutes.is_some() {
+            return Err(AppError::Domain("历史记录不能修改当前剩余工作量".into()));
         }
+        if already_saved {
+            let (actual, reason, remaining): (Option<i64>, Option<String>, Option<i64>) = transaction.query_row(
+                "SELECT actual_minutes, defer_reason, remaining_workload_minutes FROM review_entries WHERE plan_block_id = ?1",
+                [&input.plan_block_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+            if input.actual_minutes.is_some_and(|value| Some(value) != actual)
+                || input.defer_reason.as_ref().is_some_and(|value| Some(value) != reason.as_ref())
+                || input.remaining_workload_minutes.is_some_and(|value| Some(value) != remaining) {
+                return Err(AppError::Domain("已保存的独立复盘详情不能被结果修改覆盖".into()));
+            }
+            if in_window && task_status == "done" && input.outcome != ReviewOutcome::Completed {
+                database_execution::reopen_in_transaction(&transaction, &task_id, &plan_date)?;
+            }
+            transaction.execute("UPDATE review_entries SET outcome = ?2, notes = ?3 WHERE plan_block_id = ?1",
+                params![input.plan_block_id, input.outcome.as_str(), input.notes])?;
+            transaction.execute("UPDATE plan_blocks SET execution_status = ?2, execution_note = ?3,
+                execution_captured_at = ?4, updated_at = ?4 WHERE id = ?1",
+                params![input.plan_block_id, input.outcome.as_str(), input.notes, now()])?;
+            if in_window && task_status == "done" && input.outcome == ReviewOutcome::Completed {
+                let after = serde_json::to_string(&execution_snapshot(&transaction, &input.plan_block_id)?)?;
+                transaction.execute("UPDATE task_completion_snapshots SET block_after_json = ?2 WHERE task_id = ?1", params![task_id, after])?;
+            }
+            if !in_window { clear_review_draft(&transaction, review_date, "task", &input.plan_block_id)?; }
+            transaction.commit()?;
+            return self.get_review_entry_for_block(&input.plan_block_id);
+        }
+        let current_remaining = if in_window && task_status == "done" && input.outcome != ReviewOutcome::Completed {
+            database_execution::reopen_in_transaction(&transaction, &task_id, &plan_date)?;
+            load_task_dto_in_transaction(&transaction, &task_id)?.remaining_workload_minutes
+        } else { current_remaining };
+        database_results::freeze_block(&transaction, &input.plan_block_id)?;
         if is_today && task_status == TaskStatus::Done.as_str()
             && input.remaining_workload_minutes.is_some_and(|minutes| minutes > 0)
         {
             return Err(AppError::Domain("已完成任务的剩余工作量必须为 0".into()));
         }
 
-        if !is_today && input.remaining_workload_minutes.is_some() {
-            return Err(AppError::Domain("历史补录不能修改当前剩余工作量".into()));
-        }
-        validate_review_target(&transaction, review_date, "task", &input.plan_block_id)?;
+        // Historical details belong only to this block; existing review details are immutable above.
         if let Some(minutes) = input.actual_minutes {
             let accumulated: i64 = transaction.query_row("SELECT actual_minutes FROM tasks WHERE id = ?1", [&task_id], |row| row.get(0))?;
             if accumulated.checked_add(minutes).is_none() { return Err(AppError::Schema("累计实际耗时超过可保存范围".into())); }
@@ -3765,9 +3866,11 @@ impl Database {
         )?;
         transaction.execute(
             "UPDATE plan_blocks
-             SET execution_status = ?2, actual_minutes = ?3, review_required = 0, updated_at = ?4
+             SET execution_status = ?2, actual_minutes = ?3, review_required = 0, updated_at = ?4,
+                 execution_note = CASE WHEN ?5 THEN execution_note ELSE ?6 END,
+                 execution_captured_at = CASE WHEN ?5 THEN execution_captured_at ELSE ?4 END
              WHERE id = ?1",
-            params![input.plan_block_id, input.outcome.as_str(), input.actual_minutes, now()],
+            params![input.plan_block_id, input.outcome.as_str(), input.actual_minutes, now(), is_today, input.notes],
         )?;
         if is_today && current_remaining != input.remaining_workload_minutes && input.remaining_workload_minutes.is_some() {
             transaction.execute(
@@ -3784,9 +3887,6 @@ impl Database {
             let remaining = input.remaining_workload_minutes.or(current_remaining);
             transaction.execute("UPDATE tasks SET actual_minutes = actual_minutes + ?2, remaining_workload_minutes = ?3, updated_at = ?4 WHERE id = ?1",
                 params![task_id, input.actual_minutes.unwrap_or(0), remaining, now()])?;
-        } else if let Some(minutes) = input.actual_minutes {
-            transaction.execute("UPDATE tasks SET actual_minutes = actual_minutes + ?2, updated_at = ?3 WHERE id = ?1",
-                params![task_id, minutes, now()])?;
         }
         clear_review_draft(&transaction, review_date, "task", &input.plan_block_id)?;
         transaction.commit()?;
@@ -3806,8 +3906,11 @@ impl Database {
     }
 
     pub fn complete_task_from_review(&mut self, task_id: &str, review_date: &str, _confirmed: bool) -> AppResult<TaskDto> {
-        if !validate_review_date(review_date)? { return Err(AppError::Domain("历史记录不能完成当前任务".into())); }
-        self.complete_task(task_id, None)
+        parse_plan_date(review_date)?;
+        let block: Option<String> = self.connection.query_row("SELECT pb.id FROM plan_blocks pb JOIN daily_plans dp ON dp.id = pb.daily_plan_id
+            WHERE pb.task_id = ?1 AND dp.plan_date = ?2 ORDER BY pb.starts_at, pb.id LIMIT 1", params![task_id, review_date], |row| row.get(0)).optional()?;
+        if block.is_none() && review_date != shanghai_today() { return Err(AppError::Domain("历史完成缺少执行块上下文".into())); }
+        self.complete_task(task_id, block.as_deref())
     }
 
     pub fn list_review_form_drafts(&self, review_date: &str) -> AppResult<Vec<ReviewFormDraft>> {
@@ -4558,10 +4661,13 @@ fn shanghai_timestamp(date: NaiveDate, time: NaiveTime) -> AppResult<DateTime<Fi
 
 
 fn set_task_status(transaction: &Transaction<'_>, task_id: &str, target: TaskStatus, source: &str) -> AppResult<()> {
+    if target == TaskStatus::Done { return database_execution::complete_in_transaction(transaction, task_id, None, None); }
     let current: String = transaction.query_row("SELECT status FROM tasks WHERE id = ?1", [task_id], |row| row.get(0))?;
     let current = TaskStatus::parse(&current)?;
     if !current.can_transition_to(target) { return Err(AppError::Domain("任务状态转移不合法".into())); }
-    if current != target { database_followup::ensure_status_editable(transaction, task_id)?; }
+    if current == TaskStatus::Done && target != TaskStatus::Done && target != TaskStatus::Deleted {
+        database_results::require_task_window(transaction, task_id)?;
+    }
     transaction.execute("UPDATE tasks SET status = ?2, updated_at = ?3 WHERE id = ?1", params![task_id, target.as_str(), now()])?;
     record_task_change(transaction, task_id, "status_changed", Some(current.as_str()), Some(target.as_str()), source, None)
 }
@@ -4926,7 +5032,7 @@ fn parse_priority(value: &str) -> AppResult<Priority> {
 }
 
 fn load_task_draft_in_transaction(transaction: &Transaction<'_>, id: &str) -> AppResult<TaskDraftDto> {
-    let mut draft = transaction
+    let draft = transaction
         .query_row(
             "SELECT id, draft_kind, target_task_id, source_type, conversation_id,
                     title, notes, priority, earliest_start_date, earliest_start_time,
@@ -4940,7 +5046,6 @@ fn load_task_draft_in_transaction(transaction: &Transaction<'_>, id: &str) -> Ap
         )
         .optional()?
         .ok_or_else(|| AppError::NotFound(format!("任务草稿 {id}")))?;
-    draft.origin = database_followup::draft_origin(transaction, id)?;
     Ok(draft)
 }
 
@@ -4949,7 +5054,6 @@ fn task_draft_dto_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskDraf
     let recurrence_json: Option<String> = row.get(25)?;
     let recurring_settings_json: Option<String> = row.get(27)?;
     Ok(TaskDraftDto {
-        origin: None,
         item_type: row.get(26)?,
         recurring_settings: recurring_settings_json.map(|value| serde_json::from_str(&value)).transpose().map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(27, rusqlite::types::Type::Text, Box::new(error))
@@ -5224,10 +5328,24 @@ fn load_task_dto_in_transaction(transaction: &Transaction<'_>, id: &str) -> AppR
                                 OR COALESCE(fact.actual_minutes, 0) > 0
                                 OR EXISTS(SELECT 1 FROM review_entries review WHERE review.plan_block_id = fact.id))
                         ))
-                        , EXISTS(SELECT 1 FROM task_origins origin JOIN tasks child ON child.id = origin.task_id
-                            WHERE origin.source_task_id = task.id AND child.status <> 'deleted' AND child.deleted_at IS NULL)
+                        , task.result_date, task.result_ends_at
+                        , task.status IN ('open', 'scheduled') AND task.deleted_at IS NULL AND COALESCE((
+                            SELECT COALESCE(review.outcome, fact.execution_status) IN ('not_started', 'partial', 'blocked', 'cancelled')
+                                AND NOT EXISTS (
+                                    SELECT 1 FROM plan_blocks pending JOIN daily_plans future ON future.id = pending.daily_plan_id
+                                    WHERE pending.task_id = task.id AND future.status = 'confirmed' AND future.plan_date >= ?2
+                                        AND pending.starts_at > fact.starts_at AND pending.execution_status = 'planned'
+                                        AND pending.execution_captured_at IS NULL AND COALESCE(pending.actual_minutes, 0) = 0
+                                        AND NOT EXISTS (SELECT 1 FROM review_entries resolved WHERE resolved.plan_block_id = pending.id)
+                                )
+                            FROM plan_blocks fact JOIN daily_plans recorded ON recorded.id = fact.daily_plan_id
+                            LEFT JOIN review_entries review ON review.plan_block_id = fact.id
+                            WHERE fact.task_id = task.id AND recorded.status = 'confirmed'
+                                AND COALESCE(review.outcome, fact.execution_status) <> 'planned'
+                            ORDER BY fact.starts_at DESC, fact.id LIMIT 1
+                        ), 0)
              FROM tasks task WHERE task.id = ?1",
-            [id],
+            params![id, shanghai_today()],
             task_dto_from_row,
         )
         .optional()?
@@ -5268,8 +5386,10 @@ fn task_dto_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskDto> {
         reserved_minutes: row.get(21)?,
         scheduled_dates,
         tags,
-        execution_locked: row.get(24)?,
-        status_locked: row.get(25)?,
+        execution_locked: row.get::<_, bool>(24)? || row.get::<_, Option<String>>(25)?.is_some_and(|date| date < shanghai_today()),
+        result_date: row.get(25)?,
+        result_ends_at: row.get(26)?,
+        is_incomplete: row.get(27)?,
     })
 }
 
@@ -5392,7 +5512,7 @@ fn record_undo_entry(
     expected_updated_at: Option<&str>,
 ) -> AppResult<String> {
     let id = Uuid::new_v4().to_string();
-    let created_at = Utc::now();
+    let created_at = DateTime::parse_from_rfc3339(&now()).expect("backend timestamp").with_timezone(&Utc);
     transaction.execute(
         "UPDATE undo_entries SET status = 'expired'
          WHERE status = 'available' AND expires_at < ?1",
@@ -5506,7 +5626,45 @@ fn normalize_review_text(value: Option<String>, maximum_length: usize, label: &s
     Ok(value)
 }
 
-fn now() -> String { Utc::now().to_rfc3339() }
+fn clock_now() -> DateTime<Utc> {
+    #[cfg(test)]
+    {
+        if let Some(timestamp) = TEST_NOW.with(|value| value.borrow().clone()) { return timestamp; }
+        if let Some(date) = TEST_TODAY.with(|value| value.borrow().clone()) {
+            return DateTime::parse_from_rfc3339(&format!("{date}T12:00:00+08:00")).unwrap().with_timezone(&Utc);
+        }
+    }
+    Utc::now()
+}
+
+fn now() -> String {
+    #[cfg(test)]
+    {
+        // Audit revisions remain unique even with a frozen policy clock.
+        thread_local! { static REVISION: std::cell::Cell<i64> = const { std::cell::Cell::new(0) }; }
+        return REVISION.with(|revision| {
+            revision.set(revision.get() + 1);
+            (clock_now() + Duration::nanoseconds(revision.get())).to_rfc3339_opts(chrono::SecondsFormat::Nanos, false)
+        });
+    }
+    #[cfg(not(test))]
+    clock_now().to_rfc3339()
+}
+
+#[cfg(test)]
+thread_local! { static TEST_NOW: std::cell::RefCell<Option<DateTime<Utc>>> = const { std::cell::RefCell::new(None) }; }
+#[cfg(test)]
+struct TestNow(Option<DateTime<Utc>>);
+#[cfg(test)]
+impl TestNow {
+    fn new(timestamp: &str) -> Self {
+        Self(TEST_NOW.with(|value| value.replace(Some(DateTime::parse_from_rfc3339(timestamp).unwrap().with_timezone(&Utc)))))
+    }
+}
+#[cfg(test)]
+impl Drop for TestNow {
+    fn drop(&mut self) { TEST_NOW.with(|value| value.replace(self.0.take())); }
+}
 
 #[cfg(test)]
 thread_local! { static TEST_TODAY: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) }; }
@@ -5523,9 +5681,7 @@ impl Drop for TestToday {
 }
 
 fn shanghai_today() -> String {
-    #[cfg(test)]
-    if let Some(date) = TEST_TODAY.with(|value| value.borrow().clone()) { return date; }
-    Utc::now()
+    clock_now()
         .with_timezone(&FixedOffset::east_opt(8 * 3600).expect("fixed Shanghai offset"))
         .format("%Y-%m-%d")
         .to_string()
@@ -6040,6 +6196,20 @@ const MIGRATIONS: &[(i64, &str)] = &[
             block_after_json TEXT
         );
     "#),
+    (26, r#"
+        ALTER TABLE tasks ADD COLUMN result_date TEXT;
+        ALTER TABLE tasks ADD COLUMN result_ends_at TEXT;
+        ALTER TABLE tasks ADD COLUMN result_block_id TEXT;
+        ALTER TABLE plan_blocks ADD COLUMN result_ends_at TEXT;
+        ALTER TABLE plan_blocks ADD COLUMN result_date TEXT;
+        UPDATE plan_blocks SET result_ends_at = ends_at
+        WHERE execution_captured_at IS NOT NULL OR execution_status <> 'planned'
+            OR EXISTS(SELECT 1 FROM review_entries r WHERE r.plan_block_id = plan_blocks.id);
+        UPDATE plan_blocks SET result_date = (SELECT plan_date FROM daily_plans WHERE id = plan_blocks.daily_plan_id)
+        WHERE result_ends_at IS NOT NULL;
+        -- A durable completion snapshot identifies the original execution, not the last edit.
+        -- Completion contexts are recovered conservatively by the versioned Rust migration.
+    "#),
 ];
 
 #[cfg(test)]
@@ -6460,8 +6630,8 @@ mod tests {
         assert_eq!(database.get_task(&task.id).unwrap().earliest_start_time.as_deref(), Some("07:00"));
         assert_eq!(database.get_task(&task.id).unwrap().total_workload_minutes, before.total_workload_minutes);
         assert_eq!(serde_json::to_value(database.get_day_schedule(&next).unwrap().task_blocks.remove(0)).unwrap(), captured);
-        let undo = database.latest_undo().unwrap().unwrap();
-        database.apply_undo(&undo.id).unwrap();
+        let undo_id: String = database.connection.query_row("SELECT id FROM undo_entries WHERE target_type = 'task' AND target_id = ?1 ORDER BY rowid DESC LIMIT 1", [&task.id], |row| row.get(0)).unwrap();
+        database.apply_undo(&undo_id).unwrap();
         assert_eq!(database.get_task(&task.id).unwrap().earliest_start_at, before.earliest_start_at);
         assert_eq!(database.get_day_schedule(&date).unwrap().task_blocks[0].starts_at, original.starts_at);
         assert_eq!(serde_json::to_value(database.get_day_schedule(&next).unwrap().task_blocks.remove(0)).unwrap(), captured);
@@ -7327,6 +7497,7 @@ mod tests {
 
     #[test]
     fn confirmed_plan_is_atomic_and_draft_preview_creates_no_plan_blocks() {
+        let _clock = TestToday::new("2026-08-15");
         let mut database = Database::in_memory().unwrap();
         let task_id = database.create_manual_task("专注开发").unwrap();
         database.update_manual_task(&task_id, ManualTaskUpdate {
@@ -7353,6 +7524,7 @@ mod tests {
         assert_eq!(database.get_day_schedule("2026-08-14").unwrap().task_blocks[0].task_status, "scheduled");
         let changes_before_status_round_trip = database.count("task_changes").unwrap();
 
+        let _completion_clock = TestToday::new("2026-08-14");
         database.transition_manual_task(&task_id, TaskStatus::Done).unwrap();
         assert_eq!(database.task_status(&task_id).unwrap(), "done");
         assert_eq!(database.get_day_schedule("2026-08-14").unwrap().task_blocks[0].task_status, "done");
@@ -8813,7 +8985,7 @@ mod tests {
         }).unwrap();
         assert!(database.save_execution_capture("2026-08-14", ExecutionCaptureInput {
             plan_block_id: block_id.clone(), outcome: ReviewOutcome::Completed, note: None,
-        }).is_err(), "最终复盘确认后不得用轻量记录覆盖");
+        }).is_ok(), "窗口内只修正结果，保留独立复盘详情");
         assert!(database.clear_execution_capture("2026-08-14", &block_id).is_err(), "最终复盘确认后不得取消已完成");
         let reviewed_task = database.get_task(&task_id).unwrap();
         assert_eq!(reviewed_task.actual_minutes, 40);
@@ -8838,8 +9010,8 @@ mod tests {
         assert_eq!(database.count("review_entries").unwrap(), 0);
         assert_eq!(database.count("plan_blocks").unwrap(), 1);
         assert_eq!(database.get_day_schedule("2026-08-14").unwrap().task_blocks[0].execution_status, "completed");
-        let undo = database.latest_undo().unwrap().unwrap();
-        database.apply_undo(&undo.id).unwrap();
+        let undo_id: String = database.connection.query_row("SELECT id FROM undo_entries WHERE target_type = 'task_completion' AND target_id = ?1 ORDER BY rowid DESC LIMIT 1", [&task_id], |row| row.get(0)).unwrap();
+        database.apply_undo(&undo_id).unwrap();
         assert_eq!(database.get_task(&task_id).unwrap().remaining_workload_minutes, Some(60));
         assert_eq!(database.get_day_schedule("2026-08-14").unwrap().task_blocks[0].id, schedule.task_blocks[0].id);
         assert_eq!(database.get_day_schedule("2026-08-14").unwrap().task_blocks[0].execution_status, "planned");
@@ -9196,3 +9368,7 @@ mod followup_tests;
 #[cfg(test)]
 #[path = "database_task_state_tests.rs"]
 mod task_state_tests;
+
+#[cfg(test)]
+#[path = "database_results_tests.rs"]
+mod results_tests;

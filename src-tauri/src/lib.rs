@@ -90,11 +90,6 @@ fn list_task_drafts(
 }
 
 #[tauri::command]
-fn prepare_task_followup(state: State<'_, AppState>, source_task_id: String) -> Result<database::FollowupPreparation, String> {
-    with_database(&state, |database| database.prepare_task_followup(&source_task_id))
-}
-
-#[tauri::command]
 fn confirm_task_draft(
     state: State<'_, AppState>,
     draft_id: String,
@@ -929,7 +924,6 @@ pub fn run() {
             save_task_draft,
             list_task_drafts,
             confirm_task_draft,
-            prepare_task_followup,
             confirm_creation_draft,
             import_legacy_recurring_draft,
             discard_task_draft,

@@ -14,18 +14,6 @@ fn task(db: &mut Database) -> (String, String) {
     (saved.id, block.id)
 }
 
-fn child(db: &mut Database, id: &str) -> TaskDto {
-    let draft = match db.prepare_task_followup(id).unwrap() { FollowupPreparation::Draft { draft } => draft, _ => panic!("expected draft") };
-    db.confirm_task_draft(&draft.id, &draft.confirmation_token).unwrap()
-}
-
-fn assert_status_lock(db: &Database, id: &str, expected: bool) {
-    assert_eq!(db.get_task(id).unwrap().status_locked, expected);
-    assert_eq!(db.list_tasks(true, None).unwrap().iter().find(|task| task.id == id).unwrap().status_locked, expected);
-    let transaction = db.connection.unchecked_transaction().unwrap();
-    assert_eq!(load_task_dto_in_transaction(&transaction, id).unwrap().status_locked, expected);
-    transaction.rollback().unwrap();
-}
 
 #[test]
 fn completion_reopens_after_undo_expiry_restoring_workload_and_only_its_capture() {
@@ -35,7 +23,6 @@ fn completion_reopens_after_undo_expiry_restoring_workload_and_only_its_capture(
     let before = execution_snapshot(&db.connection, &block).unwrap();
     db.complete_task_with_note(&id, Some(&block), Some("完成备注".into())).unwrap();
     assert!(db.get_task(&id).unwrap().execution_locked);
-    assert_status_lock(&db, &id, false);
     db.connection.execute("UPDATE undo_entries SET expires_at = '2000-01-01T00:00:00Z'", []).unwrap();
     let reopened = db.reopen_manual_task(&id, TODAY).unwrap();
     assert_eq!(reopened.status, "scheduled");
@@ -50,43 +37,30 @@ fn completion_reopens_after_undo_expiry_restoring_workload_and_only_its_capture(
 }
 
 #[test]
-fn any_non_deleted_child_locks_source_status_until_child_is_deleted() {
+fn old_multiple_relationships_never_lock_status_even_after_children_complete_or_restore() {
     let _clock = TestToday::new(TODAY);
     let mut db = Database::in_memory().unwrap();
-    let (id, block) = task(&mut db);
-    let resolution = |db: &Database| TaskExecutionResolutionInput {
-        plan_block_id: block.clone(), expected_task_updated_at: db.get_task(&id).unwrap().updated_at,
-        outcome: ReviewOutcome::NotStarted, note: Some("未完成原因".into()), next_action: None,
-        starts_at: None, ends_at: None, remaining_workload_minutes: None,
-    };
-    db.resolve_task_execution(TODAY, resolution(&db)).unwrap();
-    assert!(db.get_task(&id).unwrap().execution_locked);
-    assert_status_lock(&db, &id, false);
-    let draft = match db.prepare_task_followup(&id).unwrap() { FollowupPreparation::Draft { draft } => draft, _ => panic!() };
-    assert_status_lock(&db, &id, false);
+    let (id, _) = task(&mut db);
+    let mut children = Vec::new();
+    for status in ["open", "scheduled", "done"] {
+        let child = db.create_manual_task("历史关联任务").unwrap();
+        db.connection.execute("UPDATE tasks SET status = ?2 WHERE id = ?1", params![child, status]).unwrap();
+        db.connection.execute("INSERT INTO task_origins VALUES (?1,?2,'source',?3)", params![child,id,now()]).unwrap();
+        children.push(child);
+    }
+    db.complete_task(&id, None).unwrap();
+    let undo = db.latest_undo().unwrap().unwrap();
+    db.apply_undo(&undo.id).unwrap();
+    db.complete_task(&id, None).unwrap();
+    assert_eq!(db.reopen_manual_task(&id, TODAY).unwrap().remaining_workload_minutes, Some(60));
+    for child in children {
+        db.soft_delete_manual_task(&child, true).unwrap();
+        db.restore_task(&child).unwrap();
+    }
     db.complete_task(&id, None).unwrap();
     db.reopen_manual_task(&id, TODAY).unwrap();
-    assert_eq!(execution_snapshot(&db.connection, &block).unwrap().execution_status, "not_started");
-    let child = db.confirm_task_draft(&draft.id, &draft.confirmation_token).unwrap();
-    assert_status_lock(&db, &id, true);
-    let facts = fact_fingerprint(&db.connection, "task_completion", &id).unwrap();
-    assert!(db.complete_task(&id, None).is_err());
-    assert!(db.resolve_task_execution(TODAY, resolution(&db)).is_err());
-    assert_eq!(facts, fact_fingerprint(&db.connection, "task_completion", &id).unwrap());
-    db.complete_task(&child.id, None).unwrap();
-    assert_status_lock(&db, &id, true);
-    assert!(db.complete_task(&id, None).is_err());
-    assert!(db.reopen_manual_task(&id, TODAY).is_err());
-    db.soft_delete_manual_task(&child.id, true).unwrap();
-    assert_status_lock(&db, &id, false);
-    db.complete_task(&id, None).unwrap();
-    db.restore_task(&child.id).unwrap();
-    assert_status_lock(&db, &id, true);
-    assert!(db.reopen_manual_task(&id, TODAY).is_err());
-    db.soft_delete_manual_task(&child.id, true).unwrap();
-    db.permanently_delete_task(&child.id, true).unwrap();
-    assert_status_lock(&db, &id, false);
-    assert_eq!(db.reopen_manual_task(&id, TODAY).unwrap().remaining_workload_minutes, Some(60));
+    let dto = serde_json::to_value(db.get_task(&id).unwrap()).unwrap();
+    assert!(dto.get("status_locked").is_none());
 }
 
 #[test]
@@ -114,25 +88,6 @@ fn legacy_completion_payload_is_used_without_new_snapshot_or_active_undo() {
     assert_eq!(execution_snapshot(&db.connection, &block).unwrap().execution_status, "planned");
 }
 
-#[test]
-fn creating_child_blocks_old_completion_undo_and_pending_draft_does_not() {
-    let _clock = TestToday::new(TODAY);
-    let mut db = Database::in_memory().unwrap();
-    let (id, _) = task(&mut db);
-    let draft = match db.prepare_task_followup(&id).unwrap() { FollowupPreparation::Draft { draft } => draft, _ => panic!() };
-    db.complete_task(&id, None).unwrap();
-    let undo = db.latest_undo().unwrap().unwrap();
-    let descendant = db.confirm_task_draft(&draft.id, &draft.confirmation_token).unwrap();
-    assert!(db.apply_undo(&undo.id).is_err());
-    db.soft_delete_manual_task(&descendant.id, true).unwrap();
-    db.apply_undo(&undo.id).unwrap();
-    assert_eq!(db.get_task(&id).unwrap().remaining_workload_minutes, Some(60));
-    assert_status_lock(&db, &id, false);
-    let second = child(&mut db, &id);
-    assert_status_lock(&db, &id, true);
-    db.soft_delete_manual_task(&second.id, true).unwrap();
-    assert_status_lock(&db, &id, false);
-}
 
 #[test]
 fn tag_colors_and_completion_restore_survive_database_reopen() {
@@ -160,11 +115,12 @@ fn tag_colors_and_completion_restore_survive_database_reopen() {
 }
 
 #[test]
-fn legacy_done_task_without_completion_payload_keeps_known_remaining_workload() {
+fn legacy_done_task_without_completion_context_is_read_only_and_keeps_workload() {
     let _clock = TestToday::new(TODAY);
     let mut db = Database::in_memory().unwrap();
     let id = db.create_manual_task("旧版完成任务").unwrap();
     db.connection.execute("UPDATE tasks SET status = 'done', total_workload_minutes = 180,
         estimated_minutes = 180, remaining_workload_minutes = 45 WHERE id = ?1", [&id]).unwrap();
-    assert_eq!(db.reopen_manual_task(&id, TODAY).unwrap().remaining_workload_minutes, Some(45));
+    assert!(db.reopen_manual_task(&id, TODAY).is_err(), "unknown legacy completion context is conservatively read-only");
+    assert_eq!(db.get_task(&id).unwrap().remaining_workload_minutes, Some(45));
 }

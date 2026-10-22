@@ -1,5 +1,12 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="812" height="684"
+<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 512 512" role="img" aria-labelledby="tile-title"><title id="tile-title">今序 · Dayweave</title><defs>
+<linearGradient id="tile-fill" x1="0" y1="0" x2="1" y2="1"><stop offset=".04" stop-color="#ffffff"/><stop offset=".37" stop-color="#fcfcfd"/><stop offset=".75" stop-color="#f2f3f6"/><stop offset="1" stop-color="#e9ebf0"/></linearGradient>
+<linearGradient id="tile-edge" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#ffffff" stop-opacity=".15"/><stop offset="1" stop-color="#ffffff" stop-opacity=".72"/></linearGradient>
+<filter id="tile-shadow" filterUnits="userSpaceOnUse" x="2" y="2" width="508" height="508" color-interpolation-filters="sRGB"><feDropShadow dx="0" dy="16.72" stdDeviation="14.96" flood-color="#283044" flood-opacity=".20"/></filter>
+<filter id="mark-shadow" filterUnits="userSpaceOnUse" x="0" y="0" width="512" height="512" color-interpolation-filters="sRGB"><feDropShadow dx="0" dy="0.9" stdDeviation="0.6" flood-color="#203346" flood-opacity="0.12"/></filter>
+</defs><rect id="logo-tile" x="36" y="22" width="440" height="440" rx="101.2" fill="url(#tile-fill)" filter="url(#tile-shadow)"/>
+<rect x="36.66" y="22.66" width="438.68" height="438.68" rx="100.54" fill="none" stroke="#ffffff" stroke-opacity=".85" stroke-width="1.32"/>
+<rect x="38.64" y="24.64" width="434.72" height="434.72" rx="98.56" fill="none" stroke="url(#tile-edge)" stroke-width=".88"/>
+<g filter="url(#mark-shadow)"><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="98.17435602551302" y="85.4167194567018" width="369.59999999999997" height="313.40350877192975"
      viewBox="12 24 171 145" role="img" aria-labelledby="logo-title logo-desc">
   <title id="logo-title">交织圆环对勾 Logo · 精修版</title>
   <desc id="logo-desc">基于已确认版本精修：保留圆环交织结构和三层对勾比例，统一末端切线，修顺留白尖端，优化暖冷渐变，并加入细微矢量光泽。透明背景，可编辑纯矢量。</desc>
@@ -100,8 +107,8 @@
       L 159.4,46.2 C 166.0,39.4 171.0,36.5 178.2,35.8
       L 92.6,123.9 C 85.7,131.0 78.90,133.56 71.6,125.5
       Z"/>
-  </defs>
-  <g id="ring" aria-label="交织圆环">
+  <mask id="thin-ring" maskUnits="userSpaceOnUse" x="0" y="0" width="203" height="171" mask-type="luminance"><rect width="203" height="171" fill="white"/><use href="#woven-ring" fill="none" stroke="black" stroke-width="0.6" stroke-linejoin="round"/></mask><mask id="thin-short-orange-check" maskUnits="userSpaceOnUse" x="0" y="0" width="203" height="171" mask-type="luminance"><rect width="203" height="171" fill="white"/><use href="#orange-check-shape" fill="none" stroke="black" stroke-width="0.6" stroke-linejoin="round"/></mask><mask id="thin-middle-gold-check" maskUnits="userSpaceOnUse" x="0" y="0" width="203" height="171" mask-type="luminance"><rect width="203" height="171" fill="white"/><use href="#gold-check-shape" fill="none" stroke="black" stroke-width="0.6" stroke-linejoin="round"/></mask><mask id="thin-main-blue-check" maskUnits="userSpaceOnUse" x="0" y="0" width="203" height="171" mask-type="luminance"><rect width="203" height="171" fill="white"/><use href="#blue-check-shape" fill="none" stroke="black" stroke-width="0.6" stroke-linejoin="round"/></mask></defs>
+  <g id="ring" mask="url(#thin-ring)" aria-label="交织圆环">
     <use href="#woven-ring" xlink:href="#woven-ring" fill="url(#ring-warm-to-blue)"/>
     <use href="#woven-ring" xlink:href="#woven-ring" fill="url(#ring-orange)"/>
     <use href="#woven-ring" xlink:href="#woven-ring" fill="url(#ring-mint)" mask="url(#mint-region)"/>
@@ -109,16 +116,17 @@
     <use href="#woven-ring" xlink:href="#woven-ring" fill="url(#ring-cool-light)"/>
   </g>
   <g id="checkmarks" aria-label="三层渐变对勾">
-    <g id="short-orange-check">
+    <g id="short-orange-check" mask="url(#thin-short-orange-check)">
       <use href="#orange-check-shape" xlink:href="#orange-check-shape" fill="url(#check-orange)"/>
     </g>
-    <g id="middle-gold-check">
+    <g id="middle-gold-check" mask="url(#thin-middle-gold-check)">
       <use href="#gold-check-shape" xlink:href="#gold-check-shape" fill="url(#check-gold)"/>
       <use href="#gold-check-shape" xlink:href="#gold-check-shape" fill="url(#gold-satin)"/>
     </g>
-    <g id="main-blue-check">
+    <g id="main-blue-check" mask="url(#thin-main-blue-check)">
       <use href="#blue-check-shape" xlink:href="#blue-check-shape" fill="url(#check-blue)"/>
       <use href="#blue-check-shape" xlink:href="#blue-check-shape" fill="url(#blue-satin)"/>
     </g>
   </g>
 </svg>
+</g></svg>

@@ -32,3 +32,12 @@ export function recycleRetentionMessage(deletedAt: string | null, nowMs = Date.n
     ? `${elapsedLabel(elapsedMs)}移入回收站，将在 ${remaining}被永久删除。`
     : `${elapsedLabel(elapsedMs)}移入回收站，已到永久删除期限。`;
 }
+
+export function recycleCleanupMessage(deletedAt: string | null, nowMs = Date.now()) {
+  const deletedAtMs = deletedAt ? Date.parse(deletedAt) : Number.NaN;
+  if (!Number.isFinite(deletedAtMs)) return `${RECYCLE_RETENTION_DAYS} 天保留期后自动清理`;
+  const expiresAt = deletedAtMs + RECYCLE_RETENTION_DAYS * DAY_MS;
+  if (nowMs >= expiresAt) return "已到自动清理期限";
+  const date = new Date(expiresAt + 8 * HOUR_MS).toISOString().slice(0, 10);
+  return `将于 ${date} 自动清理`;
+}

@@ -5,7 +5,7 @@ import vm from "node:vm";
 import ts from "typescript";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { timelineTaskDialogState, timelineTaskCompletionAction, resultWindowOpen, executionResultForOutcome } from "./task-result.ts";
+import { timelineTaskDialogState, timelineTaskCompletionAction, resultWindowOpen, executionResultForOutcome, taskResultEditable } from "./task-result.ts";
 import { canCaptureTaskResult } from "./review-workflow.ts";
 
 const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
@@ -21,17 +21,19 @@ collect(source);
 assert.ok(dialog, "test renders the production task-block dialog JSX");
 const compile = code => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
 
-export function createDialogHarness({ status = "executing", expired = false, deleted = false, busy = false } = {}) {
+export function createDialogHarness({ status = "executing", expired = false, deleted = false, busy = false, crossDay = false } = {}) {
   const today = "2026-10-20", date = expired ? "2026-10-18" : today;
   const now = Date.parse(`${today}T12:00:00+08:00`);
   const outcome = status === "completed" ? "completed" : status === "not_completed" ? "not_started" : "planned";
   const taskStatus = deleted ? "deleted" : status === "completed" ? "done" : "scheduled";
   const block = { id: "block", task_id: "task", task_title: "1020", task_status: taskStatus, starts_at: `${date}T09:00:00+08:00`, ends_at: `${date}T10:00:00+08:00`, execution_status: outcome, execution_note: null, execution_captured_at: outcome === "planned" ? null : `${date}T10:00:00+08:00`, actual_minutes: null, review: null };
   const task = { id: "task", title: "1020", priority: "medium", tags: ["工作"], status: taskStatus, result_date: status === "completed" ? date : null, result_ends_at: block.ends_at };
+  task.earliest_start_date = date;
+  task.due_date = crossDay ? "2026-10-22" : date;
   const calls = [];
   const state = {
-    React, selectedBlock: block, selectedTask: task,
-    selectedBlockDialog: timelineTaskDialogState(block, date < today),
+    React, selectedBlock: block, selectedTask: task, taskResultEditable, clock: { getTime: () => now },
+    selectedBlockDialog: timelineTaskDialogState(block),
     selectedBlockCompletionAction: timelineTaskCompletionAction(block, task, date, today, now),
     canRecordSelectedBlock: canCaptureTaskResult(date, today, block, now),
     canAdjustSelectedBlock: outcome === "planned" && !expired && !deleted,
@@ -44,6 +46,7 @@ export function createDialogHarness({ status = "executing", expired = false, del
     timeRangeLabel: (start, end) => `${start.slice(11, 16)} - ${end.slice(11, 16)}`,
     closeTimelinePanel() { calls.push(["close"]); },
     openTimelineTask(...args) { calls.push(["open", ...args]); },
+    requestTimelineTaskCompletion() { calls.push(["complete-task", task.id]); },
     adjustSelectedBlockTime() { calls.push(["adjust"]); },
     removeSelectedBlock() { calls.push(["remove", block.id]); },
     quickCompleteTimelineBlock(block) { calls.push(["reopen", block.id]); },
@@ -65,7 +68,7 @@ export function createDialogHarness({ status = "executing", expired = false, del
 const button = (current, className) => current.elements().find(node => node.type === "button" && node.props.className?.split(" ").includes(className));
 
 test("saved states show exactly the requested left-footer action", () => {
-  for (const [status, label, reopen, create] of [["completed", "已完成", true, false], ["not_completed", "未完成", false, true], ["executing", "执行中", false, false]]) {
+  for (const [status, label, reopen, create] of [["completed", "当天已完成", true, false], ["not_completed", "未完成", false, true], ["executing", "执行中", false, false]]) {
     const current = createDialogHarness({ status });
     assert.match(current.markup(), new RegExp(`execution-status-badge status-${status}[^>]*>${label}`));
     assert.equal(Boolean(button(current, "execution-reopen-task")), reopen);
@@ -117,11 +120,11 @@ test("historical results stay editable and cancel only that blocks completion", 
   assert.equal(createDialogHarness({ deleted: true }).elements().some(node => node.props.className?.includes("execution-new-task")), false);
 });
 
-test("historical dialog ignores global done status when determining this block state", () => {
+test("daily dialog ignores global done status when determining this block state", () => {
   for (const task_status of ["scheduled", "done"]) {
-    assert.equal(timelineTaskDialogState({ task_status, execution_status:"completed", review:null },true).action,"uncomplete-block");
-    assert.equal(timelineTaskDialogState({ task_status, execution_status:"planned", review:null },true).status,"executing");
-    assert.equal(timelineTaskDialogState({ task_status, execution_status:"not_started", review:null },true).status,"not_completed");
+    assert.equal(timelineTaskDialogState({ task_status, execution_status:"completed", review:null }).action,"uncomplete-block");
+    assert.equal(timelineTaskDialogState({ task_status, execution_status:"planned", review:null }).status,"executing");
+    assert.equal(timelineTaskDialogState({ task_status, execution_status:"not_started", review:null }).status,"not_completed");
   }
 });
 
@@ -150,9 +153,9 @@ test("plan-time adjustment, task navigation and cancel remain wired", () => {
 test("dialog state handles legacy incomplete facts without conflicting actions", () => {
   for (const outcome of ["partial", "blocked", "cancelled", "not_started"]) {
     assert.equal(timelineTaskDialogState({ task_status: "scheduled", execution_status: "planned", review: { outcome } }).action, "new-task");
-    assert.equal(timelineTaskDialogState({ task_status: "done", execution_status: outcome, review: null }).action, "reopen");
+    assert.equal(timelineTaskDialogState({ task_status: "done", execution_status: outcome, review: null }).action, "new-task");
   }
-  assert.equal(timelineTaskDialogState({ task_status: "scheduled", execution_status: "completed", review: null }).action, null, "historical completion must not complete the current task via a reopen button");
+  assert.equal(timelineTaskDialogState({ task_status: "scheduled", execution_status: "completed", review: null }).action, "uncomplete-block", "cancellation applies only to this block even while the task remains scheduled");
 });
 
 test("current planned blocks expose direct removal and protected records do not", () => {
@@ -166,5 +169,46 @@ test("current planned blocks expose direct removal and protected records do not"
     const current = createDialogHarness();
     Object.assign(current.state, flags);
     assert.equal(Boolean(button(current, "execution-remove-today").props.disabled), true);
+  }
+});
+
+test("daily completion and whole-task completion have distinct visible actions", () => {
+  const current = createDialogHarness({ crossDay: true });
+  const choose = current.elements().find(node => node.props["data-outcome"] === "completed");
+  choose.props.onClick();
+  assert.match(renderToStaticMarkup(button(current, "primary-action")), />完成当天</);
+  assert.match(current.markup(), /全部日期完成后，任务自动完成/);
+  const complete = current.elements().find(node => node.props["data-action"] === "complete-task");
+  assert.ok(complete);
+  assert.equal(complete.props.disabled, false);
+  complete.props.onClick();
+  assert.deepEqual(current.calls, [["complete-task", "task"]]);
+  for (const options of [{ status: "completed", crossDay: true }, { deleted: true, crossDay: true }, { crossDay: false }]) {
+    assert.equal(createDialogHarness(options).elements().some(node => node.props["data-action"] === "complete-task"), false);
+  }
+  const completed = createDialogHarness({ status: "completed" });
+  assert.match(renderToStaticMarkup(button(completed, "execution-reopen-task")), /取消当天完成/);
+});
+
+test("a completed day of an active cross-day task still exposes whole-task completion", () => {
+  const current = createDialogHarness({ status: "completed", crossDay: true });
+  current.state.selectedTask.status = "scheduled";
+  current.state.selectedTask.result_date = null;
+  current.state.selectedTask.execution_locked = true;
+  current.state.selectedBlock.task_status = "scheduled";
+  const whole = current.elements().find(node => node.props["data-action"] === "complete-task");
+  assert.ok(whole);
+  assert.equal(whole.props.disabled, false);
+  assert.ok(button(current, "execution-reopen-task"));
+});
+
+test("whole-task completion is the third existing outcome-row button only for cross-day tasks", () => {
+  for (const crossDay of [false, true]) {
+    const current = createDialogHarness({ crossDay });
+    const group = current.elements().find(node => node.props.className === "floating-outcomes");
+    assert.equal(group.props.style?.gridTemplateColumns, crossDay ? "repeat(3, minmax(0, 1fr))" : undefined);
+    const labels = React.Children.toArray(group.props.children).map(child => child.props.children).flat().filter(child => typeof child === "string");
+    assert.deepEqual(labels, crossDay ? ["完成", "未完成", "完成整个任务"] : ["完成", "未完成"]);
+    assert.doesNotMatch(current.markup(), /execution-whole-task-action|已完成全部工作/);
   }
 });

@@ -14,7 +14,7 @@ const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const handlers = new Map();
 const renderExpressions = new Map();
-const names = ["quickCompleteTimelineBlock", "saveSelectedBlockExecution", "CompletedTaskDetails", "reopen", "requestTaskChange", "applyTaskChange", "openIndependentDraft"];
+const names = ["quickCompleteTimelineBlock", "saveSelectedBlockExecution", "requestTimelineTaskCompletion", "completeTimelineTask", "CompletedTaskDetails", "reopen", "requestTaskChange", "applyTaskChange", "openIndependentDraft"];
 let checkbox, dialogReopen;
 function collect(node) {
   if (ts.isFunctionDeclaration(node) && names.includes(node.name?.text)) handlers.set(node.name.text, node.getText(source));
@@ -46,20 +46,23 @@ function harness({ task = baseTask, block = baseBlock, selectedDate = previous, 
     independentTaskDraft, shanghaiDateValue: () => rules.resultToday(clock.value),
     quickCompletingBlockId: null, savingExecution: false, busy: false, loading: false,
     savingDraggedBlock: false, timelineDrag: null, preview: null, draftSaving: false, creating: false,
+    timelineCompletionTask: null, timelineCompletionNote: "", timelineCompletionError: null,
     hasUnsavedChanges: false, preferredSelection: { current: null }, preparingIndependent: { current: false },
     taskDrafts: [], effectiveOutcome, taskCompleted: false, blockHasFact: false, blockIsSaving: false,
-    selectedBlockDialog: rules.timelineTaskDialogState(block, selectedDate < today),
+    selectedBlockDialog: rules.timelineTaskDialogState(block),
     selectedBlockCompletionAction: rules.timelineTaskCompletionAction(block, task, selectedDate, today, clock.value),
     completionAction: rules.timelineTaskCompletionAction(block, task, selectedDate, today, clock.value),
     canRecordSelectedBlock: canCaptureTaskResult(selectedDate, today, block, clock.value),
     executionDraft: { outcome: "not_started", result: "not_completed", note: "已更新的备注" },
     Icon: () => null, TaskTagList: () => null, priorityCopy: {},
+    TaskDetailContent: ({ children }) => React.createElement("section", null, React.createElement("footer", null, children)),
     statusCopy: { open: "待处理", scheduled: "已安排", not_completed: "未完成", done: "已完成", deleted: "回收站" },
     timelineSelectionTriggerRef: { current: null }, window: { requestAnimationFrame(fn) { fn(); } },
     async reopenManualTask(id, date) { calls.push(["reopen", id, date]); return { ...task, status: "scheduled", remaining_workload_minutes: 60 }; },
     async resolveTaskExecution(date, input) { calls.push(["result", date, input]); },
     async saveExecutionCapture(date, input) { calls.push(["history", date, input]); },
     async clearExecutionCapture(date, blockId) { calls.push(["clear", date, blockId]); },
+    async completeTask(...args) { calls.push(["complete-task", ...args]); },
     async latestUndo() { return { id: "undo", target_type: "task_completion", target_id: task.id }; },
     async onFactsChanged() { calls.push(["refresh"]); },
     async onReload() { calls.push(["reload"]); },
@@ -72,7 +75,7 @@ function harness({ task = baseTask, block = baseBlock, selectedDate = previous, 
     async saveNewTaskBeforeLeaving() { return true; },
     clearNewTaskForm() { state.creating = false; }
   };
-  for (const key of ["quickCompletingBlockId", "busy", "feedback", "view", "selectedId", "pendingTaskChange", "savingExecution", "executionMessage", "selection", "planDraftTimeEdit", "taskDrafts", "search", "tagFilter", "compactTaskEditorDismissed"]) state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = typeof value === "function" ? value(state[key]) : value; };
+  for (const key of ["timelineCompletionTask", "timelineCompletionNote", "timelineCompletionError", "quickCompletingBlockId", "busy", "feedback", "view", "selectedId", "pendingTaskChange", "savingExecution", "executionMessage", "selection", "planDraftTimeEdit", "taskDrafts", "search", "tagFilter", "compactTaskEditorDismissed"]) state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = typeof value === "function" ? value(state[key]) : value; };
   const context = vm.createContext(state);
   for (const [name, expression] of renderExpressions) vm.runInContext(compile(`${name} = ${expression};`), context);
   for (const name of names) vm.runInContext(compile(handlers.get(name)), context);
@@ -87,8 +90,8 @@ test("historical completion cancels only the block from checkbox and dialog, ins
     assert.equal(Boolean(button.props.disabled), false);
     button.props.onClick({ stopPropagation() {} });
     await settle();
-    assert.deepEqual(JSON.parse(JSON.stringify(current.calls[0])), ["history", previous, { plan_block_id:"block", outcome:"not_started", note:null }]);
-    assert.equal(current.calls.some(([type]) => ["reopen","result","clear"].includes(type)),false);
+    assert.deepEqual(JSON.parse(JSON.stringify(current.calls[0])), ["clear", previous, "block"]);
+    assert.equal(current.calls.some(([type]) => ["reopen","result","history"].includes(type)),false);
     assert.ok(current.calls.some(([type, title]) => type === "toast" && title === "已取消本次完成"));
     assert.equal(current.state.quickCompletingBlockId, null);
   }
@@ -111,10 +114,13 @@ test("historical checkbox cancels incomplete facts instead of completing them, r
       assert.deepEqual(current.calls[0],["clear",previous,"block"]);
       assert.equal(current.calls.some(([type]) => ["history","result","reopen"].includes(type)),false);
       assert.ok(current.calls.some(([type,title]) => type === "toast" && title === "已取消本次未完成"));
+    } else if (outcome === "completed") {
+      assert.deepEqual(current.calls[0],["clear",previous,"block"]);
+      assert.equal(current.calls.some(([type]) => ["history","result","reopen"].includes(type)),false);
     } else {
       assert.equal(current.calls[0][0],"history");
       assert.equal(current.calls[0][1],previous);
-      assert.equal(current.calls[0][2].outcome,outcome === "completed"?"not_started":"completed");
+      assert.equal(current.calls[0][2].outcome,"completed");
       assert.equal(current.calls[0][2].note,reviewed?"复盘备注":null);
       assert.equal(current.calls.some(([type]) => ["reopen","result","clear"].includes(type)),false);
     }
@@ -143,16 +149,16 @@ test("correcting historical done to incomplete preserves its date and note witho
   assert.equal(current.calls.some(([type])=>["reopen","result"].includes(type)),false);
 });
 
-test("today keeps whole-task reopen, completion and incomplete-clear behavior", async () => {
+test("today completion and cancellation use the daily API and never reopen the whole task", async () => {
   const end=`${today}T23:30:00+08:00`;
-  for (const outcome of ["completed","not_started","planned"]) {
-    const status=outcome==="completed"?"done":"scheduled";
+  for (const outcome of ["completed","not_started","planned"]) for (const status of ["scheduled","done"]) {
     const task={...baseTask,status,result_date:today,result_ends_at:end};
     const block={...baseBlock,task_status:status,execution_status:outcome,result_date:today,result_ends_at:end,ends_at:end};
     const current=harness({task,block,selectedDate:today});
     await current.state.quickCompleteTimelineBlock(block);
-    assert.equal(current.calls[0][0],outcome==="completed"?"reopen":outcome==="not_started"?"clear":"result");
-    assert.equal(current.calls.some(([type])=>type==="history"),false);
+    assert.equal(current.calls[0][0],outcome === "planned" ? "history" : "clear");
+    if (outcome === "planned") assert.equal(current.calls[0][2].outcome,"completed");
+    assert.equal(current.calls.some(([type])=>["reopen","result"].includes(type)),false);
   }
 });
 
@@ -179,10 +185,12 @@ test("historical dialog save always uses the block-only API even for existing re
 test("task details share the same grace window and keep history read-only afterwards", async () => {
   for (const [now, allowed] of [[`${today}T05:00:00+08:00`,true],[`${today}T05:30:01+08:00`,false]]) {
     const { state, calls, clock } = harness({ now });
-    const tree = state.CompletedTaskDetails({ task: baseTask, busy: false, now: clock.value, onReopen: () => state.requestTaskChange({ kind: "reopen" }), onComplete() {}, onTrash() {} });
+    const detail = state.CompletedTaskDetails({ task: baseTask, busy: false, now: clock.value, onReopen: () => state.requestTaskChange({ kind: "reopen" }), onComplete() {}, onTrash() {} });
+    const tree = detail.type(detail.props);
     const markup = renderToStaticMarkup(tree);
     const footer = React.Children.toArray(tree.props.children).find(child => child.type === "footer");
-    const button = React.Children.toArray(footer.props.children)[0];
+    const primaryActions = React.Children.toArray(footer.props.children)[0];
+    const button = React.Children.toArray(primaryActions.props.children)[0];
     assert.equal(!button.props.disabled, allowed);
     if (allowed) { button.props.onClick(); await settle(); assert.deepEqual(calls[0], ["reopen", "task", today]); }
     else assert.match(markup,/已超过结果修改时间/);
@@ -241,7 +249,7 @@ test("future, invalid, mismatched and deleted history remain protected on submis
 
 test("history save failure leaves block and task facts intact and permits retry", async () => {
   const current = harness();
-  current.state.saveExecutionCapture = async () => { throw new Error("保存失败"); };
+  current.state.clearExecutionCapture = async () => { throw new Error("保存失败"); };
   await current.state.quickCompleteTimelineBlock(current.state.block);
   assert.equal(current.state.block.execution_status,"completed");
   assert.equal(current.state.task.status,"done");
@@ -308,4 +316,130 @@ test("quick completion and cancellation show one result sentence without redunda
     assert.equal(toasts[0][2], "");
     assert.equal(toasts[0][3], "check");
   }
+});
+
+test("today checkbox reflects daily result rather than the parent task completion", () => {
+  for (const status of ["scheduled", "done"]) for (const outcome of ["planned", "completed", "not_started"]) {
+    const end = `${today}T23:30:00+08:00`;
+    const task = { ...baseTask, status, result_date: null, result_ends_at: null };
+    const block = { ...baseBlock, task_status: status, execution_status: outcome, result_date: today, result_ends_at: end, ends_at: end };
+    const current = harness({ task, block, selectedDate: today });
+    const button = current.checkbox();
+    assert.equal(button.props.disabled, false);
+    assert.equal(button.props.className.includes(" done"), outcome === "completed");
+    assert.equal(button.props["aria-pressed"], outcome !== "planned");
+    assert.equal(button.props.title, outcome === "completed" ? "取消当天完成" : outcome === "not_started" ? "取消未完成" : "完成当天");
+  }
+});
+
+test("daily result save never offers a stale whole-task undo", async () => {
+  const end = `${today}T23:30:00+08:00`;
+  const task = { ...baseTask, status: "scheduled", result_date: null };
+  const block = { ...baseBlock, task_status: "scheduled", execution_status: "planned", result_date: today, ends_at: end };
+  const current = harness({ task, block, selectedDate: today });
+  current.state.executionDraft = { outcome: "completed", result: "completed", note: "今天的工作已完成" };
+  await current.state.saveSelectedBlockExecution();
+  assert.equal(current.calls[0][0], "result");
+  const toast = current.calls.find(([type]) => type === "toast");
+  assert.equal(toast[1], "当天结果已保存");
+  assert.equal(toast[4], undefined);
+});
+
+test("daily progress counts completed blocks rather than completed parent tasks", () => {
+  let countExpression;
+  function find(node) {
+    if (ts.isVariableDeclaration(node) && node.name.getText(source) === "completedPlannedTaskCount") countExpression = node.initializer.getText(source);
+    ts.forEachChild(node, find);
+  }
+  find(source);
+  assert.ok(countExpression);
+  const summaryTaskBlocks = [
+    { ...baseBlock, task_status: "scheduled", execution_status: "completed" },
+    { ...baseBlock, task_status: "done", execution_status: "not_started" },
+    { ...baseBlock, task_status: "scheduled", execution_status: "planned", review: { outcome: "completed" } },
+    { ...baseBlock, task_status: "done", execution_status: "completed", review: { outcome: "not_started" } }
+  ];
+  assert.equal(vm.runInNewContext(countExpression, { summaryTaskBlocks }), 2);
+});
+
+test("daily completion toast offers only the newly created block-result undo", async () => {
+  for (const entry of ["checkbox", "dialog"]) for (const kind of ["new-daily", "old-daily", "whole-task", "other-task"]) {
+    const end = `${today}T23:30:00+08:00`;
+    const task = { ...baseTask, status: "scheduled", result_date: null };
+    const block = { ...baseBlock, task_status: "scheduled", execution_status: "planned", result_date: today, ends_at: end };
+    const current = harness({ task, block, selectedDate: today });
+    let reads = 0;
+    current.state.latestUndo = async () => {
+      reads += 1;
+      return {
+        id: reads === 1 || kind === "old-daily" ? "previous" : "new-result",
+        target_type: kind === "whole-task" ? "task_completion" : "execution_capture",
+        target_id: kind === "other-task" ? "another-task" : task.id
+      };
+    };
+    if (entry === "checkbox") await current.state.quickCompleteTimelineBlock(block);
+    else {
+      current.state.executionDraft = { outcome: "completed", result: "completed", note: "当天备注" };
+      await current.state.saveSelectedBlockExecution();
+    }
+    const toast = current.calls.find(([type]) => type === "toast");
+    assert.equal(toast[4], kind === "new-daily" ? "new-result" : undefined, `${entry}/${kind}`);
+  }
+});
+
+test("cancel completion clears the fact and returns the block dialog to executing", async () => {
+  for (const reviewed of [false, true]) {
+    const block = { ...baseBlock, review: reviewed ? { outcome: "completed", notes: "独立复盘" } : null };
+    const current = harness({ block });
+    current.state.clearExecutionCapture = async (date, id) => {
+      current.calls.push(["clear", date, id]);
+      block.execution_status = "planned";
+      block.review = null;
+    };
+    await current.state.quickCompleteTimelineBlock(block);
+    assert.equal(rules.timelineTaskDialogState(block).label, "执行中");
+    assert.equal(current.calls.some(([type]) => ["history", "result", "reopen"].includes(type)), false);
+  }
+});
+
+test("whole-task action opens confirmation before saving and uses the explicit completion API", async () => {
+  const task = { ...baseTask, status: "scheduled", result_date: null, execution_locked: true, earliest_start_date: previous, due_date: today };
+  const current = harness({ task });
+  current.state.requestTimelineTaskCompletion();
+  assert.equal(current.state.timelineCompletionTask.id, task.id);
+  assert.deepEqual(current.calls, []);
+  current.state.timelineCompletionNote = "  全部工作已结束  ";
+  await current.state.completeTimelineTask();
+  assert.deepEqual(current.calls[0], ["complete-task", task.id, null, "全部工作已结束"]);
+  assert.equal(current.calls.some(([type]) => ["history", "result", "clear"].includes(type)), false);
+  assert.equal(current.state.timelineCompletionTask, null);
+  assert.equal(current.state.savingExecution, false);
+});
+
+test("whole-task completion guards stale or busy state and preserves confirmation after failure", async () => {
+  for (const update of [{ busy: true }, { savingExecution: true }, { loading: true }, { quickCompletingBlockId: "block" }, { tasks: [] }]) {
+    const task = { ...baseTask, status: "scheduled", result_date: null, earliest_start_date: previous, due_date: today };
+    const current = harness({ task });
+    current.state.requestTimelineTaskCompletion();
+    Object.assign(current.state, update);
+    await current.state.completeTimelineTask();
+    assert.deepEqual(current.calls, []);
+  }
+  const task = { ...baseTask, status: "scheduled", result_date: null, earliest_start_date: previous, due_date: today };
+  const current = harness({ task });
+  current.state.requestTimelineTaskCompletion();
+  current.state.completeTask = async () => { throw new Error("保存失败"); };
+  await current.state.completeTimelineTask();
+  assert.equal(current.state.timelineCompletionTask.id, task.id);
+  assert.match(current.state.timelineCompletionError, /保存失败/);
+  assert.equal(current.state.savingExecution, false);
+  assert.equal(current.calls.some(([type]) => type === "refresh"), false);
+});
+
+test("single-day task cannot open the timeline whole-task completion action", () => {
+  const task = { ...baseTask, status: "scheduled", result_date: null, earliest_start_date: today, due_date: today };
+  const current = harness({ task });
+  current.state.requestTimelineTaskCompletion();
+  assert.equal(current.state.timelineCompletionTask, null);
+  assert.deepEqual(current.calls, []);
 });

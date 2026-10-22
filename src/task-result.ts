@@ -37,9 +37,19 @@ export function blockResultEditable(date: string | null | undefined, now = Date.
 
 export function taskResultEditable(task: Task | null | undefined, now = Date.now(), metadata?: TaskMetadata | null) {
   if (!task || task.status === "deleted" || task.deleted_at) return false;
+  if (metadata?.task_id === task.id) {
+    if (task.status !== "done" && metadata.completion_backfill_allowed) return true;
+    if (task.status === "done" && metadata.completion_recorded_at) {
+      const recorded = Date.parse(metadata.completion_recorded_at);
+      return Number.isFinite(recorded) && recorded <= now && now <= recorded + RESULT_GRACE_MS;
+    }
+  }
+  const today = resultToday(now);
+  if (task.status !== "done" && task.earliest_start_date && task.due_date
+    && task.earliest_start_date < task.due_date && task.earliest_start_date <= today) return true;
   if (task.status !== "done" && metadata?.completion_date) return resultWindowOpen(metadata.completion_date, metadata.completion_ends_at, now);
   if (task.result_date) return resultWindowOpen(task.result_date, task.result_ends_at, now);
-  return task.status !== "done" && !task.execution_locked;
+  return task.status !== "done";
 }
 
 export function executionResultForOutcome(outcome: string | null): ExecutionResult | null {
@@ -62,24 +72,17 @@ export function timelineTaskCompletionAction(block: PlanBlock | null, task: Task
   if (!block || !task || task.id !== block.task_id || task.status !== block.task_status || task.deleted_at) return null;
   const recordDate = block.result_date ?? date;
   if (!blockResultEditable(recordDate, now) || recordDate !== date) return null;
-  if (recordDate < resultToday(now)) {
-    if (!["open", "scheduled", "done"].includes(task.status)) return null;
-    const outcome = block.review?.outcome ?? block.execution_status;
-    if (outcome !== "planned" && outcome !== "completed") return block.review ? null : "clear";
-    return outcome === "completed" ? "uncomplete-block" : "complete-block";
-  }
-  if (task.status === "done") return taskResultEditable(task, now) ? "reopen" : null;
-  if (!["open", "scheduled"].includes(task.status)) return null;
+  if (!["open", "scheduled", "done"].includes(task.status)) return null;
   const outcome = block.review?.outcome ?? block.execution_status;
   if (outcome !== "planned" && outcome !== "completed") return block.review ? null : "clear";
-  return "complete";
+  return outcome === "completed" ? "uncomplete-block" : "complete-block";
 }
 
-export function timelineTaskDialogState(block: Pick<PlanBlock, "task_status" | "execution_status" | "review">, historical = false) {
+export function timelineTaskDialogState(block: Pick<PlanBlock, "task_status" | "execution_status" | "review">) {
   const outcome = block.review?.outcome ?? block.execution_status;
   if (block.task_status === "deleted") return { status: "deleted", label: "已删除", action: null } as const;
-  if ((!historical && block.task_status === "done") || outcome === "completed") {
-    return { status: "completed", label: "已完成", action: historical ? "uncomplete-block" : block.task_status === "done" ? "reopen" : null } as const;
+  if (outcome === "completed") {
+    return { status: "completed", label: "当天已完成", action: "uncomplete-block" } as const;
   }
   if (outcome !== "planned") return { status: "not_completed", label: "未完成", action: "new-task" } as const;
   return { status: "executing", label: "执行中", action: null } as const;

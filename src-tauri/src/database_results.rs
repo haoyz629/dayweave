@@ -32,7 +32,8 @@ pub(super) fn require_block_window(connection: &Connection, id: &str) -> AppResu
 pub(super) fn require_task_window(connection: &Connection, id: &str) -> AppResult<()> {
     let (date, end): (Option<String>, Option<String>) = connection.query_row(
         "SELECT result_date, result_ends_at FROM tasks WHERE id = ?1", [id], |row| Ok((row.get(0)?, row.get(1)?)))?;
-    if !window(date.as_deref(), end.as_deref()) { return Err(expired()); }
+    if !window(date.as_deref(), end.as_deref()) && !historical_completion_recorded_at(connection, id)?
+        .as_deref().is_some_and(recorded_window) { return Err(expired()); }
     Ok(())
 }
 
@@ -42,14 +43,63 @@ pub(super) fn freeze_block(connection: &Connection, id: &str) -> AppResult<()> {
     Ok(())
 }
 
+// A backfill is a new fact about a past single day, not permission to rewrite an old whole-task result.
+pub(super) fn historical_single_day(task: &TaskDto) -> Option<String> {
+    let (date, minutes) = single_day_range(task.earliest_start_at.as_deref(), task.due_at.as_deref()).ok().flatten()?;
+    (date < shanghai_today() && minutes >= MIN_TASK_BLOCK_MINUTES
+        && task.earliest_start_date.as_deref() == Some(date.as_str())
+        && task.due_date.as_deref() == Some(date.as_str())).then_some(date)
+}
+
+pub(super) fn historical_completion_recorded_at(connection: &Connection, task_id: &str) -> AppResult<Option<String>> {
+    let json: Option<String> = connection.query_row("SELECT before_json FROM task_completion_snapshots WHERE task_id = ?1",
+        [task_id], |row| row.get(0)).optional()?;
+    Ok(json.and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+        .and_then(|value| value["historical_completion_recorded_at"].as_str().map(str::to_owned)))
+}
+
+fn recorded_window(recorded_at: &str) -> bool {
+    DateTime::parse_from_rfc3339(recorded_at).ok().is_some_and(|recorded| {
+        let elapsed = clock_now().signed_duration_since(recorded);
+        elapsed >= Duration::zero() && elapsed <= Duration::hours(6)
+    })
+}
+
+pub(super) fn can_backfill_completion(connection: &Connection, task: &TaskDto) -> AppResult<bool> {
+    let Some(date) = historical_single_day(task) else { return Ok(false); };
+    if !matches!(task.status.as_str(), "open" | "scheduled") || task.deleted_at.is_some() { return Ok(false); }
+    if task.result_date.is_some() && historical_completion_recorded_at(connection, &task.id)?.is_none() { return Ok(false); }
+    let other_dates: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM plan_blocks pb
+        JOIN daily_plans dp ON dp.id = pb.daily_plan_id WHERE pb.task_id = ?1 AND dp.status = 'confirmed' AND dp.plan_date <> ?2)",
+        params![task.id, date], |row| row.get(0))?;
+    Ok(!other_dates)
+}
+
+// An unfinished cross-day task is an active task today even without a reservation
+// today. Its explicit completion must not edit a future or expired historical block.
+fn active_cross_day(connection: &Connection, task_id: &str) -> AppResult<bool> {
+    Ok(connection.query_row("SELECT status IN ('open', 'scheduled') AND deleted_at IS NULL
+        AND earliest_start_date < due_date AND earliest_start_date <= ?2
+        FROM tasks WHERE id = ?1", params![task_id, shanghai_today()],
+        |row| Ok(row.get::<_, Option<bool>>(0)?.unwrap_or(false)))?)
+}
+
 // Context survives reopen, undo and trash restore. Only a genuinely different execution can replace it.
 pub(super) fn completion_context(connection: &Connection, task: &TaskDto, block: Option<&str>) -> AppResult<()> {
     let saved_block: Option<String> = connection.query_row("SELECT result_block_id FROM tasks WHERE id = ?1", [&task.id], |row| row.get(0))?;
     if task.status == "done" && block != saved_block.as_deref() {
         return Err(AppError::Domain("不能借其他执行块修改已有整项完成结果".into()));
     }
-    if task.status == "done" || (task.result_date.is_some() && (block.is_none() || block == saved_block.as_deref())) {
-        if let Some(block) = block { require_block_window(connection, block)?; }
+    let active = active_cross_day(connection, &task.id)?;
+    if active && block.is_none() {
+        connection.execute("UPDATE tasks SET result_date = ?2, result_ends_at = ?3, result_block_id = NULL WHERE id = ?1",
+            params![task.id, shanghai_today(), now()])?;
+        return Ok(());
+    }
+    if task.status == "done" || (!active && task.result_date.is_some() && (block.is_none() || block == saved_block.as_deref())) {
+        if historical_completion_recorded_at(connection, &task.id)?.is_none() {
+            if let Some(block) = block { require_block_window(connection, block)?; }
+        }
         return require_task_window(connection, &task.id);
     }
     let (date, end) = if let Some(block) = block {
@@ -57,7 +107,7 @@ pub(super) fn completion_context(connection: &Connection, task: &TaskDto, block:
         if owner != task.id { return Err(AppError::Domain("执行块不属于该任务".into())); }
         require_block_window(connection, block)?;
         // Never use another old result to reset the task's original completion context.
-        if task.result_date.is_some() {
+        if task.result_date.is_some() && !active {
             let recorded: bool = connection.query_row("SELECT result_ends_at IS NOT NULL FROM plan_blocks WHERE id = ?1", [block], |row| row.get(0))?;
             if recorded && task.result_date.as_deref().is_some_and(|old| date.as_str() <= old) { return Err(expired()); }
         }
@@ -71,7 +121,7 @@ pub(super) fn completion_context(connection: &Connection, task: &TaskDto, block:
     Ok(())
 }
 
-// Historical block results are always record-only, even inside the whole-task grace window.
+// Return whether today's workflow applies; historical lifecycle sync is handled after the block write.
 pub(super) fn allow_capture(connection: &Connection, date: &str, id: &str) -> AppResult<bool> {
     let (_, actual_date, _) = block_context(connection, id)?;
     if actual_date != date { return Err(AppError::Domain("执行日期必须与执行块所属日期一致".into())); }
@@ -190,6 +240,11 @@ pub(super) fn completion_candidate(connection: &Connection, task_id: &str) -> Ap
         "SELECT status, result_date, result_block_id FROM tasks WHERE id = ?1", [task_id],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
     let today = shanghai_today();
+    if active_cross_day(connection, task_id)? {
+        return Ok(connection.query_row("SELECT pb.id FROM plan_blocks pb JOIN daily_plans dp ON dp.id = pb.daily_plan_id
+            WHERE pb.task_id = ?1 AND dp.plan_date = ?2 AND dp.status = 'confirmed'
+            ORDER BY pb.starts_at DESC, pb.id LIMIT 1", params![task_id, today], |row| row.get(0)).optional()?);
+    }
     if result_date.is_some() {
         let fresh = if status != "done" {
             connection.query_row("SELECT pb.id FROM plan_blocks pb JOIN daily_plans dp ON dp.id = pb.daily_plan_id
@@ -211,10 +266,12 @@ pub(super) fn candidate_context(connection: &Connection, task_id: &str) -> AppRe
         "SELECT status, result_date, result_ends_at, result_block_id, due_at FROM tasks WHERE id = ?1", [task_id],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)))?;
     let candidate = completion_candidate(connection, task_id)?;
-    if status == "done" || (date.is_some() && candidate == saved) { return Ok((date, end)); }
+    let task = load_task_dto_in_transaction(connection, task_id)?;
+    if can_backfill_completion(connection, &task)? { return Ok((historical_single_day(&task), task.due_at)); }
+    if status == "done" || (!active_cross_day(connection, task_id)? && date.is_some() && candidate == saved) { return Ok((date, end)); }
     if let Some(block) = candidate {
         let (_, date, end) = block_context(connection, &block)?;
         return Ok((Some(date), Some(end)));
     }
-    Ok((Some(shanghai_today()), due))
+    Ok((Some(shanghai_today()), if active_cross_day(connection, task_id)? { Some(now()) } else { due }))
 }

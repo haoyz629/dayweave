@@ -1,7 +1,7 @@
 import navigationLogo from "./assets/logo-light.svg";
 import windowsLogo from "./assets/logo-windows.png";
 
-// Supplied transparent SVG in-app; native/favicons use the separate shadowed render.
+// Shared porcelain tile: the SVG already includes its border and shadows.
 // Accept the old preview prop without reintroducing a theme-dependent icon.
 export function Logo(_props: { mode?: "light" | "dark" } = {}) {
   return <span className="dayweave-logo" aria-hidden="true">

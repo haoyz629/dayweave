@@ -173,22 +173,27 @@ fn no_block_completion_uses_first_operation_day_and_original_due_end() {
 }
 
 #[test]
-fn historical_backfill_and_repeated_corrections_never_change_task() {
+fn latest_historical_corrections_sync_status_without_changing_task_contents() {
     let _clock = TestNow::new("2026-10-17T12:00:00+08:00");
-    for entry in ["capture","resolve","review"] {
+    for action in ["capture", "resolve", "review"] {
         let mut db = Database::in_memory().unwrap();
         let (id, block) = fixture(&mut db);
-        let before = fact_rows(&db.connection,"SELECT * FROM tasks WHERE id = ?1",&id).unwrap();
-        match entry {
-            "capture" => db.save_execution_capture(DATE,ExecutionCaptureInput { plan_block_id:block.clone(),outcome:ReviewOutcome::Completed,note:None }).unwrap(),
-            "resolve" => { db.resolve_task_execution(DATE,resolution(&db,&id,&block,ReviewOutcome::Completed)).unwrap(); },
-            "review" => { db.save_review_entry(DATE,review(&block)).unwrap(); },
-            _ => unreachable!(),
+        let content_sql = "SELECT title, notes, priority, earliest_start_at, due_at, total_workload_minutes, actual_minutes FROM tasks WHERE id = ?1";
+        let before = fact_rows(&db.connection, content_sql, &id).unwrap();
+        for outcome in [ReviewOutcome::Completed, ReviewOutcome::NotStarted, ReviewOutcome::Completed, ReviewOutcome::NotStarted] {
+            correct_result(&mut db, action, DATE, &id, &block, outcome, Some("历史修正备注".into())).unwrap();
+            let task = db.get_task(&id).unwrap();
+            let completed = outcome == ReviewOutcome::Completed;
+            assert_eq!(task.status == "done", completed, "{action}/{outcome:?}");
+            assert_eq!(task.remaining_workload_minutes, Some(if completed { 0 } else { 75 }));
+            assert_incomplete_classification(&mut db, &id, !completed);
+            assert_eq!(fact_rows(&db.connection, content_sql, &id).unwrap(), before);
+            let saved = db.get_day_schedule(DATE).unwrap().task_blocks.remove(0);
+            assert_eq!(saved.task_status, task.status);
+            assert_eq!(saved.execution_status, outcome.as_str());
+            assert_eq!(saved.execution_note.as_deref(), Some("历史修正备注"));
+            assert_eq!(saved.ends_at, END);
         }
-        assert_eq!(fact_rows(&db.connection,"SELECT * FROM tasks WHERE id = ?1",&id).unwrap(),before,"{entry}");
-        db.resolve_task_execution(DATE,resolution(&db,&id,&block,ReviewOutcome::NotStarted)).unwrap();
-        db.save_review_entry(DATE,review(&block)).unwrap();
-        assert_eq!(fact_rows(&db.connection,"SELECT * FROM tasks WHERE id = ?1",&id).unwrap(),before,"repeated {entry}");
     }
 }
 
@@ -215,6 +220,7 @@ fn result_corrections_preserve_independent_review_fields_and_audit() {
     assert_eq!(saved.updated_at,original.updated_at);
     assert_eq!(db.get_task(&id).unwrap().remaining_workload_minutes,Some(0));
     assert_eq!(db.get_task(&id).unwrap().status,"done");
+    assert_incomplete_classification(&mut db, &id, false);
     assert_eq!(db.get_task(&id).unwrap().actual_minutes,25);
     let mut forbidden = review(&block);
     forbidden.actual_minutes = Some(99);
@@ -403,7 +409,7 @@ fn historical_backfill_is_not_the_completion_candidate_when_today_has_an_executi
 }
 
 #[test]
-fn explicit_completion_note_clear_persists_null_and_preserves_reopen_snapshot() {
+fn daily_completion_note_clear_persists_null_and_whole_reopen_does_not_replay_facts() {
     let _clock = TestNow::new("2026-10-16T23:40:00+08:00");
     for final_review in [false, true] {
         let mut db = Database::in_memory().unwrap();
@@ -423,10 +429,10 @@ fn explicit_completion_note_clear_persists_null_and_preserves_reopen_snapshot() 
         let after: String = db.connection.query_row("SELECT before_json FROM task_completion_snapshots WHERE task_id = ?1", [&id], |row|row.get(0)).unwrap();
         assert_eq!(before, after);
         db.reopen_manual_task(&id, DATE).unwrap();
-        assert_eq!(execution_snapshot(&db.connection,&block).unwrap().execution_note.as_deref(), Some("原备注"));
+        assert_eq!(execution_snapshot(&db.connection,&block).unwrap().execution_note, None);
         if final_review {
             let review = db.get_review_entry_for_block(&block).unwrap();
-            assert_eq!(review.notes.as_deref(), Some("原备注"));
+            assert_eq!(review.notes, None);
             assert_eq!(review.actual_minutes, Some(17));
             assert_eq!(review.updated_at, "old");
         }
@@ -545,7 +551,8 @@ fn task_side_effects(db: &Database, task: &str, selected: &str) -> Vec<Vec<Vec<S
     [
         "SELECT * FROM tasks WHERE id = ?1",
         "SELECT * FROM task_estimates WHERE task_id = ?1 ORDER BY id",
-        "SELECT * FROM task_changes WHERE task_id = ?1 ORDER BY id",
+        // Durable history is the only permitted task-level addition for record-only corrections.
+        "SELECT * FROM task_changes WHERE task_id = ?1 AND change_kind <> 'history_snapshot' ORDER BY id",
         "SELECT * FROM task_completion_snapshots WHERE task_id = ?1",
         "SELECT * FROM undo_entries WHERE target_id = ?1 ORDER BY id",
         "SELECT * FROM task_tags WHERE task_id = ?1 ORDER BY tag_id",
@@ -557,7 +564,7 @@ fn task_side_effects(db: &Database, task: &str, selected: &str) -> Vec<Vec<Vec<S
 }
 
 #[test]
-fn historical_corrections_all_states_and_apis_are_repeatable_record_only_and_date_local() {
+fn older_corrections_all_states_and_apis_preserve_later_execution_and_other_dates() {
     for date in [DATE, "2026-09-01"] {
         for done in [false, true] {
             for state in ["planned", "not_started", "partial", "blocked", "cancelled", "completed", "reviewed"] {
@@ -573,6 +580,7 @@ fn historical_corrections_all_states_and_apis_are_repeatable_record_only_and_dat
                     let current = add_block(&db, &id, "2026-10-17", "2026-10-17T23:30:00+08:00");
                     add_block(&db, &id, "2026-10-18", "2026-10-18T23:30:00+08:00");
                     if done { db.complete_task(&id, Some(&current)).unwrap(); }
+                    else { db.connection.execute("UPDATE plan_blocks SET execution_status = 'not_started' WHERE id = ?1", [&current]).unwrap(); }
                     if state != "planned" {
                         database_results::freeze_block(&db.connection, &block).unwrap();
                         db.connection.execute("UPDATE plan_blocks SET execution_status = ?2, execution_note = 'original',
@@ -808,4 +816,128 @@ fn incomplete_classification_uses_latest_execution_not_backfill_order_and_does_n
     let mut legacy = serde_json::to_value(db.get_task(&id).unwrap()).unwrap();
     legacy.as_object_mut().unwrap().remove("is_incomplete");
     assert!(!serde_json::from_value::<TaskDto>(legacy).unwrap().is_incomplete);
+}
+
+#[test]
+fn latest_historical_done_to_incomplete_syncs_all_readers_and_preserves_locked_content() {
+    for action in ["capture", "resolve", "review"] {
+        for reviewed in [false, true] {
+            for time in ["2026-10-17T01:00:00+08:00", "2027-01-01T12:00:00+08:00"] {
+                let mut db = Database::in_memory().unwrap();
+                let (id, block) = {
+                    let _clock = TestNow::new("2026-10-16T23:40:00+08:00");
+                    let (id, block) = fixture(&mut db);
+                    db.connection.execute("UPDATE tasks SET notes = '任务备注', earliest_start_at = '2026-10-16T23:00:00+08:00', due_at = ?2 WHERE id = ?1", params![id, END]).unwrap();
+                    db.set_task_tags(&id, vec!["原标签".into()]).unwrap();
+                    if reviewed { db.save_review_entry(DATE, review(&block)).unwrap(); }
+                    db.resolve_task_execution(DATE, resolution(&db, &id, &block, ReviewOutcome::Completed)).unwrap();
+                    (id, block)
+                };
+                let _clock = TestNow::new(time);
+                let original = db.get_task(&id).unwrap();
+                let stale_undo: Option<String> = db.connection.query_row("SELECT id FROM undo_entries WHERE target_type = 'execution_capture' AND target_id = ?1 ORDER BY rowid DESC LIMIT 1", [&id], |row| row.get(0)).optional().unwrap();
+                correct_result(&mut db, action, DATE, &id, &block, ReviewOutcome::NotStarted, Some("改为未完成".into())).unwrap();
+                let saved = db.get_task(&id).unwrap();
+                assert_eq!(saved.status, "scheduled", "{action}/{reviewed}/{time}");
+                assert_eq!(saved.remaining_workload_minutes, Some(75));
+                assert_eq!(saved.notes, original.notes);
+                assert_eq!(saved.tags, original.tags);
+                assert_eq!(saved.earliest_start_at, original.earliest_start_at);
+                assert_eq!(saved.due_at, original.due_at);
+                assert_eq!(saved.result_date.as_deref(), Some(DATE));
+                assert_eq!(saved.result_ends_at.as_deref(), Some(END));
+                assert!(saved.execution_locked);
+                assert_incomplete_classification(&mut db, &id, true);
+                let listed = db.list_tasks(false, None).unwrap().into_iter().find(|task| task.id == id).unwrap();
+                assert_eq!(listed.status, saved.status);
+                let block = db.get_day_schedule(DATE).unwrap().task_blocks.remove(0);
+                assert_eq!(block.task_status, saved.status);
+                assert_eq!(block.execution_status, "not_started");
+                assert_eq!(block.execution_note.as_deref(), Some("改为未完成"));
+                if let Some(stale_undo) = stale_undo { assert!(db.apply_undo(&stale_undo).is_err()); }
+                assert_eq!(db.get_task(&id).unwrap().status, "scheduled");
+            }
+        }
+    }
+}
+
+#[test]
+fn earlier_same_day_correction_cannot_override_a_later_execution() {
+    for completed in [false, true] {
+        let mut db = Database::in_memory().unwrap();
+        let (id, old) = {
+            let _clock = TestNow::new("2026-10-16T23:40:00+08:00");
+            let (id, old) = fixture(&mut db);
+            db.connection.execute("UPDATE plan_blocks SET starts_at = '2026-10-16T09:00:00+08:00', ends_at = '2026-10-16T10:00:00+08:00' WHERE id = ?1", [&old]).unwrap();
+            let recent = add_block(&db, &id, DATE, END);
+            db.resolve_task_execution(DATE, resolution(&db, &id, &recent, if completed { ReviewOutcome::Completed } else { ReviewOutcome::NotStarted })).unwrap();
+            (id, old)
+        };
+        let _clock = TestNow::new("2026-10-18T12:00:00+08:00");
+        let before = task_side_effects(&db, &id, &old);
+        for action in ["capture", "resolve", "review"] {
+            correct_result(&mut db, action, DATE, &id, &old, if completed { ReviewOutcome::NotStarted } else { ReviewOutcome::Completed }, None).unwrap();
+            assert_eq!(task_side_effects(&db, &id, &old), before, "{action}/{completed}");
+        }
+    }
+}
+
+#[test]
+fn historical_task_sync_failure_rolls_back_result_review_and_audit() {
+    for action in ["capture", "resolve", "review"] {
+        let mut db = Database::in_memory().unwrap();
+        let (id, block) = {
+            let _clock = TestNow::new("2026-10-16T23:40:00+08:00");
+            let (id, block) = fixture(&mut db);
+            db.save_review_entry(DATE, review(&block)).unwrap();
+            db.resolve_task_execution(DATE, resolution(&db, &id, &block, ReviewOutcome::Completed)).unwrap();
+            (id, block)
+        };
+        let _clock = TestNow::new("2026-10-18T12:00:00+08:00");
+        db.connection.execute_batch("CREATE TRIGGER reject_task_sync BEFORE UPDATE ON tasks BEGIN SELECT RAISE(ABORT, 'test failure'); END;").unwrap();
+        let before = fact_fingerprint(&db.connection, "task_completion", &id).unwrap();
+        let effects = task_side_effects(&db, &id, &block);
+        assert!(correct_result(&mut db, action, DATE, &id, &block, ReviewOutcome::NotStarted, None).is_err());
+        assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), before);
+        assert_eq!(task_side_effects(&db, &id, &block), effects);
+    }
+}
+
+#[test]
+fn historical_sync_preserves_later_no_block_completion_and_handles_legacy_missing_snapshots() {
+    let mut db = Database::in_memory().unwrap();
+    let id = {
+        let _clock = TestNow::new("2026-10-17T23:40:00+08:00");
+        let id = db.create_manual_task("独立整项完成").unwrap();
+        db.complete_task(&id, None).unwrap();
+        id
+    };
+    let _clock = TestNow::new("2026-10-18T12:00:00+08:00");
+    let old = add_block(&db, &id, DATE, END);
+    let before = task_side_effects(&db, &id, &old);
+    db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id: old.clone(), outcome: ReviewOutcome::NotStarted, note: None }).unwrap();
+    assert_eq!(task_side_effects(&db, &id, &old), before);
+    let (legacy, block) = fixture(&mut db);
+    db.connection.execute("UPDATE tasks SET status = 'done', remaining_workload_minutes = 0 WHERE id = ?1", [&legacy]).unwrap();
+    db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id: block, outcome: ReviewOutcome::NotStarted, note: None }).unwrap();
+    assert_eq!(db.get_task(&legacy).unwrap().remaining_workload_minutes, Some(0));
+    assert_eq!(db.get_task(&legacy).unwrap().status, "done");
+    assert_incomplete_classification(&mut db, &legacy, false);
+}
+
+#[test]
+fn historical_sync_protects_legacy_explicit_completion_without_durable_snapshot() {
+    let mut db = Database::in_memory().unwrap();
+    let (id, block) = {
+        let _clock = TestNow::new("2026-10-16T23:40:00+08:00");
+        let (id, block) = fixture(&mut db);
+        db.complete_task(&id, Some(&block)).unwrap();
+        db.connection.execute("DELETE FROM task_completion_snapshots WHERE task_id = ?1", [&id]).unwrap();
+        (id, block)
+    };
+    let _clock = TestNow::new("2026-10-18T12:00:00+08:00");
+    db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id: block, outcome: ReviewOutcome::NotStarted, note: None }).unwrap();
+    assert_eq!(db.get_task(&id).unwrap().remaining_workload_minutes, Some(0));
+    assert_eq!(db.get_task(&id).unwrap().status, "done");
+    assert_incomplete_classification(&mut db, &id, false);
 }

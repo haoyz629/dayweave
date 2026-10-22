@@ -217,17 +217,43 @@ test("formal tasks require complete time and Inbox is no longer a product state"
   assert.match(appSource, /!editingTaskHasCompleteSchedule \|\| !editingTaskHasValidRange/);
 });
 
-test("recycle-bin capsules open full details with dynamic top-level recovery actions", () => {
+test("recycle-bin capsules open full details with state-specific recovery actions", () => {
   assert.match(appSource, /className="ledger-quick-action icon-only" data-tooltip="恢复"/);
   assert.match(appSource, /className="ledger-quick-action icon-only danger" data-tooltip="永久删除"/);
   assert.match(appSource, /\{recycleRetentionMessage\(deletedAt, nowMs\)\}/);
   assert.match(appSource, /window\.setInterval\(\(\) => setRecycleNow\(Date\.now\(\)\), 60 \* 1000\)/);
-  assert.match(appSource, /<RecycleBinBanner deletedAt=\{selectedTask\.deleted_at\} nowMs=\{recycleNow\}/);
+  assert.doesNotMatch(appSource, /<RecycleBinBanner deletedAt=\{selectedTask\.deleted_at\}/);
   assert.match(appSource, /<RecycleBinBanner deletedAt=\{selectedRecurringItem\.deleted_at\} nowMs=\{recycleNow\}/);
-  assert.match(appSource, /<DeletedTaskDetails task=\{selectedTask\} \/>/);
+  assert.match(appSource, /<DeletedTaskDetails task=\{selectedTask\} metadata=\{selectedMetadata\} busy=\{busy\} now=\{recycleNow\}/);
   assert.match(appSource, /<DeletedRecurringItemDetails item=\{selectedRecurringItem\} \/>/);
   assert.match(stylesSource, /\.recycle-bin-banner \{ position: sticky;/);
   assert.match(stylesSource, /\.ledger-quick-action\.icon-only:is\(:hover, :focus-visible\)::after/);
+});
+
+test("recycle cleanup stays beside permanent deletion and task headings omit event times", () => {
+  const deleted = appSource.slice(appSource.indexOf("function DeletedTaskDetails("), appSource.indexOf("function TaskStatusHistory("));
+  assert.match(deleted, /onClick=\{onRestore\}[\s\S]*?<div className="task-detail-delete-group">\s*<p[^>]*>[\s\S]*?recycleCleanupMessage\(task.deleted_at, now\)[\s\S]*?<button[^>]*onClick=\{onPermanentDelete\}/);
+  assert.match(stylesSource, /\.task-detail-delete-group \{[^}]*display: flex;[^}]*min-width: 0;[^}]*align-items: center;/);
+  const content = appSource.slice(appSource.indexOf("function TaskDetailContent("), appSource.indexOf("function DeletedTaskDetails("));
+  const heading = content.match(/<header>[\s\S]*?<\/header>/)?.[0];
+  assert.ok(heading);
+  assert.match(heading, /<h2>\{task.title\}<\/h2>/);
+  assert.doesNotMatch(heading, /<time\b|task\.(?:completed_at|deleted_at|updated_at)|完成时间|移入时间|事件时间/);
+  assert.match(content, /<dt><Icon name="clock" size=\{14\} \/>截止时间/);
+  assert.match(content, /<dt><Icon name="deadline" size=\{14\} \/>优先级/);
+});
+
+test("formal task details use real resources, history, completion notes and restored status", () => {
+  assert.match(appSource, /splitTaskNotes\(notes \?\? ""\)/);
+  assert.match(appSource, /navigator\.clipboard\.writeText\(url\)/);
+  assert.match(appSource, /await openUrl\(href\)/);
+  assert.match(appSource, /const history = metadata\?\.history \?\? \[\]/);
+  assert.match(appSource, /event\.review_note && event\.review_note !== event\.note/);
+  assert.match(appSource, /await completeTask\(selectedTask\.id, null, note\?\.trim\(\) \|\| null\)/);
+  assert.match(appSource, /<TaskCompletionDialog[^\n]*onConfirm=\{\(\) => void transition\("done", completionNote\)\}/);
+  assert.match(appSource, /const restored = await getTask\(target\.id\);\s*onTaskCommitted\(restored\);\s*setView\(taskListStatus\(restored\)\)/);
+  assert.match(appSource, /selectedTask\?\.execution_locked, taskMetadataRevision\]/);
+  assert.doesNotMatch(appSource, />更新状态<\/button>/);
 });
 
 test("confirmed plans expose direct operations without a separate adjustment mode", () => {
@@ -584,12 +610,13 @@ test("incomplete saves results and offers a plain independent draft from toast a
   assert.match(appSource, /\|\| savingExecution \|\| busy \|\| quickCompletingBlockId/);
   assert.match(appSource, /canCaptureTaskResult\(selectedDate, today, selectedBlock, Date\.now\(\)\)/);
   assert.match(appSource, /await resolveTaskExecution\(resultDate, input\)/);
-  assert.match(appSource, /补记或纠正当天结果，不改变其他日期的任务块和当前任务状态/);
+  assert.match(appSource, /仅记录当天结果，不改变其他日期的记录/);
+  assert.match(appSource, /全部日期完成后，任务自动完成/);
   assert.match(appSource, /await saveExecutionCapture\(resultDate/);
   assert.match(appSource, /label: "新建任务"/);
   assert.match(appSource, /requestNavigation\(\{ active: "任务", taskSeed: planToast.taskSeed \}\)/);
   assert.match(appSource, /createManualTaskDraft\(independentTaskDraft/);
-  assert.match(appSource, /<TaskExecutionRecord/);
+  assert.match(appSource, /<TaskStatusHistory/);
   assert.doesNotMatch(appSource, /followupSourceId|prepareTaskFollowup|TaskRelations|TaskOriginBanner|status_locked/);
 });
 
@@ -631,12 +658,12 @@ test("whole-task controls keep their result window while historical blocks have 
   const details = appSource.slice(appSource.indexOf("function CompletedTaskDetails("), appSource.indexOf("function TaskWorkspace("));
   assert.match(details, /taskResultEditable\(task, now, metadata\)/);
   assert.match(details, /disabled=\{busy \|\| !editable\}/);
-  assert.match(details, /task.status === "done" \? "取消完成" : "完成任务"/);
+  assert.match(details, /task.status === "done" \? "取消整体完成" : "完成整个任务"/);
   assert.match(appSource, /disabled=\{!completionAction \|\| Boolean\(quickCompletingBlockId\)/);
   assert.match(appSource, /selectedBlockCompletionAction !== selectedBlockDialog.action/);
   assert.match(appSource, /action === "complete-block" \|\| action === "uncomplete-block"/);
   assert.match(appSource, /resultDate === resultToday\(Date.now\(\)\)/);
-  assert.match(appSource, /timelineTaskDialogState\(selectedBlock, selectedDate < today\)/);
+  assert.match(appSource, /timelineTaskDialogState\(selectedBlock\)/);
 });
 
 test("tasks are independent and new drafts never use association fields", () => {

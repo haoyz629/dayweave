@@ -6,3 +6,13 @@ export function splitTaskNotes(value: string): { url: string; body: string } {
 export function joinTaskNotes(url: string, body: string): string {
   return url ? `URL: ${url}${body ? `\n\n${body}` : ""}` : body;
 }
+
+export function taskResourceUrl(value: string): string | null {
+  if (!value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}

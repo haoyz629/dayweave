@@ -18,6 +18,9 @@ pub use database_execution::TaskExecutionResolutionInput;
 #[path = "database_followup.rs"]
 mod database_followup;
 pub use database_followup::TaskExecutionFactDto;
+#[path = "database_history.rs"]
+mod database_history;
+pub use database_history::TaskHistoryEventDto;
 #[path = "database_results.rs"]
 mod database_results;
 #[path = "database_tags.rs"]
@@ -207,6 +210,9 @@ pub struct TaskMetadataDto {
     pub latest_execution: Option<TaskExecutionFactDto>,
     pub completion_date: Option<String>,
     pub completion_ends_at: Option<String>,
+    pub completion_backfill_allowed: bool,
+    pub completion_recorded_at: Option<String>,
+    pub history: Vec<TaskHistoryEventDto>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -1633,8 +1639,11 @@ impl Database {
             },
         ).optional()?;
         let (completion_date, completion_ends_at) = database_results::candidate_context(&self.connection, task_id)?;
+        let completion_backfill_allowed = database_results::can_backfill_completion(&self.connection, &self.get_task(task_id)?)?;
+        let completion_recorded_at = database_results::historical_completion_recorded_at(&self.connection, task_id)?;
         database_followup::enrich_metadata(&self.connection, TaskMetadataDto { task_id: task_id.to_string(), tags, recurrence,
-            latest_execution: None, completion_date, completion_ends_at })
+            latest_execution: None, completion_date, completion_ends_at, completion_backfill_allowed, completion_recorded_at,
+            history: database_history::load(&self.connection, task_id)? })
     }
 
     pub fn set_task_tags(&mut self, task_id: &str, tags: Vec<String>) -> AppResult<TaskMetadataDto> {
@@ -1776,6 +1785,10 @@ impl Database {
                 if !database_results::facts_match(&fact_fingerprint(&transaction, &target_type, &target_id)?, &payload.after_facts) {
                     return Err(AppError::Domain("目标已有后续修改、执行、复盘或删除，无法安全撤销".into()));
                 }
+                if matches!(target_type.as_str(), "task_completion" | "execution_capture") {
+                    // Archive only after the fingerprint check, before undo overwrites the result.
+                    database_history::preserve_current(&transaction, &target_id)?;
+                }
                 if let Some(task) = payload.task {
                     let current = load_task_dto_in_transaction(&transaction, &task.id)?;
                     transaction.execute("UPDATE tasks SET status = ?2, remaining_workload_minutes = ?3, updated_at = ?4 WHERE id = ?1",
@@ -1792,6 +1805,10 @@ impl Database {
                         execution_note = ?5, execution_captured_at = ?6, updated_at = ?7 WHERE id = ?1",
                         params![block.id, block.execution_status, block.actual_minutes, block.review_required,
                             block.execution_note, block.execution_captured_at, now()])?;
+                    if target_type == "execution_capture" {
+                        let (_, date, _) = database_results::block_context(&transaction, &block.id)?;
+                        database_history::record_cleared(&transaction, &target_id, &date)?;
+                    }
                 }
                 if let Some(review) = payload.review {
                     transaction.execute("UPDATE review_entries SET outcome = ?2, notes = ?3 WHERE id = ?1",
@@ -1800,6 +1817,12 @@ impl Database {
                 if let Some(occurrence) = payload.occurrence {
                     transaction.execute("UPDATE recurring_occurrences SET outcome = ?2, review_notes = ?3, reviewed_at = ?4, updated_at = ?5 WHERE id = ?1",
                         params![occurrence.id, occurrence.outcome, occurrence.review_notes, occurrence.reviewed_at, now()])?;
+                }
+                if target_type == "execution_capture" {
+                    let payload: FactUndo = serde_json::from_str(&before_json)?;
+                    if let Some(block) = payload.block {
+                        database_execution::sync_block_result(&transaction, &block.id)?;
+                    }
                 }
             }
             "task" => {
@@ -3688,14 +3711,7 @@ impl Database {
         }
         let in_window = database_results::allow_capture(&transaction, capture_date, &input.plan_block_id)?;
         let task_id: String = transaction.query_row("SELECT task_id FROM plan_blocks WHERE id = ?1", [&input.plan_block_id], |row| row.get(0))?;
-        if in_window && task_status == "done" {
-            if input.outcome == ReviewOutcome::Completed {
-                database_execution::complete_in_transaction(&transaction, &task_id, Some(&input.plan_block_id), input.note.as_deref())?;
-                transaction.commit()?;
-                return Ok(());
-            }
-            database_execution::reopen_in_transaction(&transaction, &task_id, &plan_date)?;
-        }
+        database_history::preserve_current(&transaction, &task_id)?;
         let before = execution_snapshot(&transaction, &input.plan_block_id)?;
         database_results::freeze_block(&transaction, &input.plan_block_id)?;
         if has_review {
@@ -3715,6 +3731,7 @@ impl Database {
         } else {
             clear_review_draft(&transaction, capture_date, "task", &input.plan_block_id)?;
         }
+        database_execution::sync_block_result(&transaction, &input.plan_block_id)?;
         if in_window && !has_review && task_status != "done" {
             let payload = FactUndo { task: None, block: Some(before), occurrence: None, review: None,
                 after_facts: fact_fingerprint(&transaction, "execution_capture", &task_id)? };
@@ -3732,7 +3749,7 @@ impl Database {
         if task.deleted_at.is_some() || task.status == "deleted" { return Err(AppError::Domain("回收站任务不能取消结果".into())); }
         let (plan_date, execution_status, has_review): (String, String, bool) = transaction
             .query_row(
-                "SELECT dp.plan_date, pb.execution_status,
+                "SELECT dp.plan_date, COALESCE((SELECT outcome FROM review_entries WHERE plan_block_id = pb.id), pb.execution_status),
                         EXISTS(SELECT 1 FROM review_entries review WHERE review.plan_block_id = pb.id)
                  FROM plan_blocks pb
                  JOIN daily_plans dp ON dp.id = pb.daily_plan_id
@@ -3745,27 +3762,44 @@ impl Database {
         if plan_date != capture_date {
             return Err(AppError::Domain("执行日期必须与执行块所属日期一致".into()));
         }
-        if in_window && task.status == "done" {
-            database_execution::reopen_in_transaction(&transaction, &task_id, &plan_date)?;
-            transaction.commit()?;
-            return Ok(());
-        }
-        if has_review {
-            return Err(AppError::Domain("该执行块已经完成每日复盘，不能撤销最终事实".into()));
+        if has_review && execution_status != "completed" {
+            return Err(AppError::Domain("该执行块已有未完成的最终复盘，不能撤销最终事实".into()));
         }
         if !matches!(execution_status.as_str(), "completed" | "not_started" | "partial" | "cancelled" | "blocked") {
             return Err(AppError::Domain("该执行块没有可取消的任务结果".into()));
         }
+        database_history::preserve_current(&transaction, &task_id)?;
         let timestamp = now();
+        clear_review_draft(&transaction, capture_date, "task", plan_block_id)?;
+        if has_review {
+            let review = transaction.query_row("SELECT actual_minutes, defer_reason, notes, remaining_workload_minutes
+                FROM review_entries WHERE plan_block_id = ?1", [plan_block_id], |row| {
+                Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?, row.get::<_, Option<i64>>(3)?))
+            })?;
+            // Final outcomes cannot represent planned. Keep the independent supplement
+            // in the existing form draft instead, with a new revision to reject stale saves.
+            let mut supplement = serde_json::Map::new();
+            for (key, value) in [("actual_minutes", review.0.map(|v| v.to_string())),
+                ("defer_reason", review.1), ("notes", review.2),
+                ("remaining_workload_minutes", review.3.map(|v| v.to_string()))] {
+                if let Some(value) = value { supplement.insert(key.into(), serde_json::Value::String(value)); }
+            }
+            transaction.execute("UPDATE review_form_drafts SET payload_json = ?3
+                WHERE review_date = ?1 AND item_type = 'task' AND item_id = ?2",
+                params![capture_date, plan_block_id, serde_json::to_string(&supplement)?])?;
+            transaction.execute("DELETE FROM review_entries WHERE plan_block_id = ?1", [plan_block_id])?;
+        }
         transaction.execute(
             "UPDATE plan_blocks
              SET execution_status = 'planned', execution_note = NULL, execution_captured_at = NULL,
-                 actual_minutes = NULL, review_required = 0, updated_at = ?2
+                 review_required = 0, updated_at = ?2
              WHERE id = ?1",
             params![plan_block_id, timestamp],
         )?;
         if in_window { transaction.execute("UPDATE tasks SET updated_at = ?2 WHERE id = ?1", params![task_id, timestamp])?; }
-        clear_review_draft(&transaction, capture_date, "task", plan_block_id)?;
+        database_history::record_cleared(&transaction, &task_id, capture_date)?;
+        database_execution::sync_block_result(&transaction, plan_block_id)?;
         transaction.commit()?;
         Ok(())
     }
@@ -3806,7 +3840,6 @@ impl Database {
             |row| row.get(0),
         )?;
         let in_window = database_results::allow_capture(&transaction, review_date, &input.plan_block_id)?;
-        if in_window && task_status == "done" { database_results::require_task_window(&transaction, &task_id)?; }
         if !is_today && input.remaining_workload_minutes.is_some() {
             return Err(AppError::Domain("历史记录不能修改当前剩余工作量".into()));
         }
@@ -3819,26 +3852,20 @@ impl Database {
                 || input.remaining_workload_minutes.is_some_and(|value| Some(value) != remaining) {
                 return Err(AppError::Domain("已保存的独立复盘详情不能被结果修改覆盖".into()));
             }
-            if in_window && task_status == "done" && input.outcome != ReviewOutcome::Completed {
-                database_execution::reopen_in_transaction(&transaction, &task_id, &plan_date)?;
-            }
+            database_history::preserve_current(&transaction, &task_id)?;
             transaction.execute("UPDATE review_entries SET outcome = ?2, notes = ?3 WHERE plan_block_id = ?1",
                 params![input.plan_block_id, input.outcome.as_str(), input.notes])?;
             transaction.execute("UPDATE plan_blocks SET execution_status = ?2, execution_note = ?3,
                 execution_captured_at = ?4, updated_at = ?4 WHERE id = ?1",
                 params![input.plan_block_id, input.outcome.as_str(), input.notes, now()])?;
-            if in_window && task_status == "done" && input.outcome == ReviewOutcome::Completed {
-                let after = serde_json::to_string(&execution_snapshot(&transaction, &input.plan_block_id)?)?;
-                transaction.execute("UPDATE task_completion_snapshots SET block_after_json = ?2 WHERE task_id = ?1", params![task_id, after])?;
+            if !in_window {
+                clear_review_draft(&transaction, review_date, "task", &input.plan_block_id)?;
             }
-            if !in_window { clear_review_draft(&transaction, review_date, "task", &input.plan_block_id)?; }
+            database_execution::sync_block_result(&transaction, &input.plan_block_id)?;
             transaction.commit()?;
             return self.get_review_entry_for_block(&input.plan_block_id);
         }
-        let current_remaining = if in_window && task_status == "done" && input.outcome != ReviewOutcome::Completed {
-            database_execution::reopen_in_transaction(&transaction, &task_id, &plan_date)?;
-            load_task_dto_in_transaction(&transaction, &task_id)?.remaining_workload_minutes
-        } else { current_remaining };
+        database_history::preserve_current(&transaction, &task_id)?;
         database_results::freeze_block(&transaction, &input.plan_block_id)?;
         if is_today && task_status == TaskStatus::Done.as_str()
             && input.remaining_workload_minutes.is_some_and(|minutes| minutes > 0)
@@ -3847,9 +3874,11 @@ impl Database {
         }
 
         // Historical details belong only to this block; existing review details are immutable above.
+        let credited: Option<i64> = transaction.query_row("SELECT actual_minutes FROM plan_blocks WHERE id = ?1",
+            [&input.plan_block_id], |row| row.get(0))?;
         if let Some(minutes) = input.actual_minutes {
             let accumulated: i64 = transaction.query_row("SELECT actual_minutes FROM tasks WHERE id = ?1", [&task_id], |row| row.get(0))?;
-            if accumulated.checked_add(minutes).is_none() { return Err(AppError::Schema("累计实际耗时超过可保存范围".into())); }
+            if accumulated.checked_add(minutes - credited.unwrap_or(0)).is_none() { return Err(AppError::Schema("累计实际耗时超过可保存范围".into())); }
         }
         let id = Uuid::new_v4().to_string();
         let timestamp = now();
@@ -3872,23 +3901,30 @@ impl Database {
              WHERE id = ?1",
             params![input.plan_block_id, input.outcome.as_str(), input.actual_minutes, now(), is_today, input.notes],
         )?;
-        if is_today && current_remaining != input.remaining_workload_minutes && input.remaining_workload_minutes.is_some() {
+        // A zero daily estimate is not whole-task completion; only the aggregate may zero it.
+        let reviewed_remaining = if task_status == "done" { current_remaining } else {
+            input.remaining_workload_minutes.filter(|minutes| *minutes > 0).or(current_remaining)
+        };
+        if is_today && current_remaining != reviewed_remaining {
             transaction.execute(
                 "INSERT INTO task_estimates
                     (id, task_id, estimate_kind, old_minutes, new_minutes, source, reason, created_at)
                  VALUES (?1, ?2, 'remaining', ?3, ?4, 'review', '执行块复盘重新估算', ?5)",
                 params![
                     Uuid::new_v4().to_string(), task_id, current_remaining,
-                    input.remaining_workload_minutes, now()
+                    reviewed_remaining, now()
                 ],
             )?;
         }
         if is_today {
-            let remaining = input.remaining_workload_minutes.or(current_remaining);
+            let remaining = reviewed_remaining;
+            // A cancelled completed review retains its independent block minutes. Reconfirming
+            // the supplement must not count the same work a second time.
             transaction.execute("UPDATE tasks SET actual_minutes = actual_minutes + ?2, remaining_workload_minutes = ?3, updated_at = ?4 WHERE id = ?1",
-                params![task_id, input.actual_minutes.unwrap_or(0), remaining, now()])?;
+                params![task_id, input.actual_minutes.unwrap_or(0) - credited.unwrap_or(0), remaining, now()])?;
         }
         clear_review_draft(&transaction, review_date, "task", &input.plan_block_id)?;
+        database_execution::sync_block_result(&transaction, &input.plan_block_id)?;
         transaction.commit()?;
         self.get_review_entry_for_block(&input.plan_block_id)
     }
@@ -5286,7 +5322,7 @@ fn update_task_from_draft_input(
     Ok(())
 }
 
-fn load_task_dto_in_transaction(transaction: &Transaction<'_>, id: &str) -> AppResult<TaskDto> {
+fn load_task_dto_in_transaction(transaction: &Connection, id: &str) -> AppResult<TaskDto> {
     transaction
         .query_row(
             "SELECT task.id, task.title, task.notes, task.priority, task.earliest_start_at, task.due_at, task.estimated_minutes,
@@ -6397,7 +6433,7 @@ mod tests {
         let first = database.include_plan_task(include_input(&task, &date, "09:00", "10:00")).unwrap();
         let undo = database.latest_undo().unwrap().unwrap();
         database.save_execution_capture(&date, ExecutionCaptureInput { plan_block_id: first.task_blocks[0].id.clone(),
-            outcome: ReviewOutcome::Completed, note: Some("已有执行记录".into()) }).unwrap();
+            outcome: ReviewOutcome::Partial, note: Some("已有执行记录".into()) }).unwrap();
         assert!(database.apply_undo(&undo.id).is_err());
         assert!(database.remove_plan_block(remove_input(&date, &first.task_blocks[0])).is_err());
         let current = database.get_task(&task.id).unwrap();
@@ -6406,7 +6442,7 @@ mod tests {
         database.remove_plan_block(remove_input(&date, editable)).unwrap();
         let undo_remove = database.latest_undo().unwrap().unwrap();
         database.apply_undo(&undo_remove.id).unwrap();
-        assert_eq!(database.get_day_schedule(&date).unwrap().task_blocks[0].execution_status, "completed");
+        assert_eq!(database.get_day_schedule(&date).unwrap().task_blocks[0].execution_status, "partial");
         database.remove_plan_block(remove_input(&date, editable)).unwrap();
         let undo_remove = database.latest_undo().unwrap().unwrap();
         let current = database.get_task(&task.id).unwrap();
@@ -7536,8 +7572,8 @@ mod tests {
         assert_eq!(database.task_status(&task_id).unwrap(), "scheduled");
         assert_eq!(database.get_day_schedule("2026-08-14").unwrap().task_blocks[0].task_status, "scheduled");
         assert_eq!(database.count("plan_blocks").unwrap(), 1, "取消完成不得删除或重复创建原时间块");
-        assert_eq!(database.count("task_changes").unwrap(), changes_before_status_round_trip + 2,
-            "完成与恢复两个状态变化都必须保留变更历史");
+        assert_eq!(database.count("task_changes").unwrap(), changes_before_status_round_trip + 3,
+            "完成与恢复两个状态变化，以及取消完成前的结果快照都必须保留");
     }
 
     #[test]
@@ -8709,6 +8745,7 @@ mod tests {
 
     #[test]
     fn stale_rule_plan_never_partially_commits_even_when_time_overlaps() {
+        let _clock = TestNow::new("2026-10-22T18:00:00+08:00");
         let mut database = Database::in_memory().unwrap();
         database.save_availability_settings(AvailabilitySettings {
             makeup_workdays_as_workdays: true,
@@ -8729,9 +8766,13 @@ mod tests {
         assert!(preview.unscheduled.is_empty());
         assert_eq!(preview.blocks[0].starts_at, preview.blocks[1].starts_at, "相同偏好时间应并列安排");
         database.transition_manual_task(&first, TaskStatus::Done).unwrap();
+        let before = fact_fingerprint(&database.connection, "task_completion", &first).unwrap();
+        let untouched = fact_fingerprint(&database.connection, "task_completion", &second).unwrap();
         assert!(database.confirm_rule_based_plan(preview).is_err());
-        assert_eq!(database.count("daily_plans").unwrap(), 0);
-        assert_eq!(database.count("plan_blocks").unwrap(), 0);
+        assert_eq!(database.count("daily_plans").unwrap(), 1, "only the completed historical task has a plan");
+        assert_eq!(database.count("plan_blocks").unwrap(), 1, "stale preview must not add its blocks");
+        assert_eq!(fact_fingerprint(&database.connection, "task_completion", &first).unwrap(), before);
+        assert_eq!(fact_fingerprint(&database.connection, "task_completion", &second).unwrap(), untouched);
         assert_eq!(database.task_status(&second).unwrap(), "open");
     }
 
@@ -8899,7 +8940,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_execution_block_persists_review_facts_without_completing_task() {
+    fn all_scheduled_execution_blocks_completed_persist_review_and_complete_task() {
         let mut database = Database::in_memory().unwrap();
         let task_id = database.create_manual_task("推进长期方案").unwrap();
         database.update_manual_task(&task_id, ManualTaskUpdate {
@@ -8921,9 +8962,9 @@ mod tests {
         assert_eq!(saved.outcome, "completed");
         assert_eq!(database.count("review_entries").unwrap(), 1);
         let task = database.get_task(&task_id).unwrap();
-        assert_eq!(task.status, "scheduled", "完成执行块不得自动完成整个任务");
+        assert_eq!(task.status, "done", "全部已确认排期块完成后自动完成任务");
         assert_eq!(task.actual_minutes, 45);
-        assert_eq!(task.remaining_workload_minutes, Some(75));
+        assert_eq!(task.remaining_workload_minutes, Some(0));
         let persisted = database.get_day_schedule("2026-08-14").unwrap();
         assert_eq!(persisted.task_blocks[0].execution_status, "completed");
         assert_eq!(persisted.task_blocks[0].actual_minutes, Some(45));
@@ -8962,7 +9003,7 @@ mod tests {
         assert!(captured.task_blocks[0].review.is_none(), "轻量执行记录不得提前创建最终复盘事实");
         let task = database.get_task(&task_id).unwrap();
         assert_eq!(task.actual_minutes, 0);
-        assert_eq!(task.remaining_workload_minutes, Some(120));
+        assert_eq!(task.remaining_workload_minutes, Some(0));
 
         database.clear_execution_capture("2026-08-14", &block_id).unwrap();
         let cleared = database.get_day_schedule("2026-08-14").unwrap();
@@ -8983,13 +9024,13 @@ mod tests {
             actual_minutes: Some(40), defer_reason: None, notes: Some("复盘后确认".into()),
             remaining_workload_minutes: Some(80),
         }).unwrap();
+        assert!(database.clear_execution_capture("2026-08-14", &block_id).is_err(), "未完成的最终复盘仍不可清除");
         assert!(database.save_execution_capture("2026-08-14", ExecutionCaptureInput {
             plan_block_id: block_id.clone(), outcome: ReviewOutcome::Completed, note: None,
         }).is_ok(), "窗口内只修正结果，保留独立复盘详情");
-        assert!(database.clear_execution_capture("2026-08-14", &block_id).is_err(), "最终复盘确认后不得取消已完成");
         let reviewed_task = database.get_task(&task_id).unwrap();
         assert_eq!(reviewed_task.actual_minutes, 40);
-        assert_eq!(reviewed_task.remaining_workload_minutes, Some(80));
+        assert_eq!(reviewed_task.remaining_workload_minutes, Some(0));
     }
 
     #[test]
@@ -9372,3 +9413,7 @@ mod task_state_tests;
 #[cfg(test)]
 #[path = "database_results_tests.rs"]
 mod results_tests;
+
+#[cfg(test)]
+#[path = "database_completion_tests.rs"]
+mod completion_tests;

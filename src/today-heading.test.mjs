@@ -13,6 +13,9 @@ test("today schedule date has a prominent responsive heading", () => {
 test("weekday, lunar date and solar term remain readable beneath the date", () => {
   assert.match(styles, /\.today-page \.timeline-date-meta\.timeline-day-subline \{[^}]*gap: 8px; margin-top: 6px; color: var\(--jx-ink-soft\); font: 500 14px\/1\.5 var\(--jx-font-sans\)/);
   assert.match(styles, /\.today-page \.timeline-day-subline > span \{ font: inherit; color: inherit; \}/);
-  assert.match(styles, /\.today-page \.timeline-day-subline > \.historical-plan-status \{ font: inherit; \}/);
   assert.match(styles, /\.today-page \.timeline-day-subline > \.timeline-term-chip \{[^}]*font: 500 13px\/1\.4 var\(--jx-font-sans\)/);
+});
+
+test("historical date heading omits the completion-status hint", () => {
+  assert.doesNotMatch(app, /历史安排 · 可修改完成状态|className="historical-plan-status"/);
 });

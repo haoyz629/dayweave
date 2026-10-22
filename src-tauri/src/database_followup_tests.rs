@@ -64,7 +64,7 @@ fn record_only_preserves_lifecycle_workload_pending_and_supports_correction_comp
         let mut completed = record(&db,&id,&selected);
         completed.outcome = ReviewOutcome::Completed;
         completed.note = Some("finished".into());
-        assert_eq!(db.resolve_task_execution(TODAY,completed).unwrap().status,"done");
+        assert_eq!(db.resolve_task_execution(TODAY,completed).unwrap().status,status);
         db.apply_undo(&db.latest_undo().unwrap().unwrap().id).unwrap();
         assert_eq!(serde_json::to_value(execution_snapshot(&db.connection,&selected).unwrap()).unwrap(),capture);
         assert_eq!(db.get_task(&id).unwrap().remaining_workload_minutes,Some(135));
@@ -75,7 +75,7 @@ fn record_only_preserves_lifecycle_workload_pending_and_supports_correction_comp
 #[test]
 fn record_only_rejects_fields_history_final_status_and_sql_errors_atomically() {
     let _clock = TestToday::new(TODAY);
-    for case in ["partial","start","end","remaining","note","wrong_date","missing","deleted","done","stale","trigger"] {
+    for case in ["partial","start","end","remaining","note","wrong_date","missing","deleted","stale","trigger"] {
         let mut db = Database::in_memory().unwrap();
         let id = source(&mut db);
         let selected = block(&db,&id,TODAY);

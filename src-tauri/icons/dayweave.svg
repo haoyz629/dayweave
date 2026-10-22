@@ -1,5 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 179 179"><defs><filter id="windows-shadow" x="-25%" y="-25%" width="150%" height="155%" color-interpolation-filters="sRGB"><feDropShadow dx="0" dy="3" stdDeviation="2.5" flood-color="#14263D" flood-opacity=".48"/></filter></defs><g filter="url(#windows-shadow)"><g transform="translate(-5 -9)"><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="203" height="171"
-     viewBox="0 0 203 171" role="img" aria-labelledby="logo-title logo-desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 512 512" role="img" aria-labelledby="tile-title"><title id="tile-title">今序 · Dayweave</title><defs>
+<linearGradient id="tile-fill" x1="0" y1="0" x2="1" y2="1"><stop offset=".04" stop-color="#ffffff"/><stop offset=".37" stop-color="#fcfcfd"/><stop offset=".75" stop-color="#f2f3f6"/><stop offset="1" stop-color="#e9ebf0"/></linearGradient>
+<linearGradient id="tile-edge" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#ffffff" stop-opacity=".15"/><stop offset="1" stop-color="#ffffff" stop-opacity=".72"/></linearGradient>
+<filter id="tile-shadow" filterUnits="userSpaceOnUse" x="2" y="2" width="508" height="508" color-interpolation-filters="sRGB"><feDropShadow dx="0" dy="16.72" stdDeviation="14.96" flood-color="#283044" flood-opacity=".20"/></filter>
+<filter id="mark-shadow" filterUnits="userSpaceOnUse" x="0" y="0" width="512" height="512" color-interpolation-filters="sRGB"><feDropShadow dx="0" dy="3.96" stdDeviation="2.64" flood-color="#203346" flood-opacity="0.24"/></filter>
+</defs><rect id="logo-tile" x="36" y="22" width="440" height="440" rx="101.2" fill="url(#tile-fill)" filter="url(#tile-shadow)"/>
+<rect x="36.66" y="22.66" width="438.68" height="438.68" rx="100.54" fill="none" stroke="#ffffff" stroke-opacity=".85" stroke-width="1.32"/>
+<rect x="38.64" y="24.64" width="434.72" height="434.72" rx="98.56" fill="none" stroke="url(#tile-edge)" stroke-width=".88"/>
+<g filter="url(#mark-shadow)"><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="98.17435602551302" y="85.4167194567018" width="369.59999999999997" height="313.40350877192975"
+     viewBox="12 24 171 145" role="img" aria-labelledby="logo-title logo-desc">
   <title id="logo-title">交织圆环对勾 Logo · 精修版</title>
   <desc id="logo-desc">基于已确认版本精修：保留圆环交织结构和三层对勾比例，统一末端切线，修顺留白尖端，优化暖冷渐变，并加入细微矢量光泽。透明背景，可编辑纯矢量。</desc>
   <defs>
@@ -121,4 +129,4 @@
     </g>
   </g>
 </svg>
-</g></g></svg>
+</g></svg>

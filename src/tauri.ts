@@ -135,6 +135,16 @@ export type TaskDraft = TaskDraftInput & {
   confirmed_at: string | null;
 };
 
+export type TaskHistoryEvent = {
+  id: string;
+  occurred_at: string | null;
+  plan_date: string | null;
+  kind: "created" | "execution" | "status" | "restored" | "cleared";
+  status: TaskStatus | "not_completed" | null;
+  note: string | null;
+  review_note: string | null;
+};
+
 export type TaskMetadata = {
   task_id: string;
   tags: string[];
@@ -142,6 +152,9 @@ export type TaskMetadata = {
   latest_execution?: TaskExecutionFact | null;
   completion_date?: string | null;
   completion_ends_at?: string | null;
+  completion_backfill_allowed?: boolean;
+  completion_recorded_at?: string | null;
+  history?: TaskHistoryEvent[];
 };
 
 export type TaskExecutionFact = { plan_block_id: string; plan_date: string; ends_at: string; outcome: ReviewOutcome; note: string | null };

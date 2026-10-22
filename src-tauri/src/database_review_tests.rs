@@ -62,7 +62,7 @@ fn nullable_zero_known_minutes_and_duplicate_are_distinct_and_additive() {
     let saved = database.get_task(&task_id).unwrap();
     assert_eq!(saved.actual_minutes, 40);
     assert_eq!(saved.remaining_workload_minutes, Some(90));
-    assert_eq!(saved.status, "open");
+    assert_eq!(saved.status, "scheduled");
     let invalid = block(&database, &task_id, TODAY);
     assert!(database.save_review_entry(TODAY, review(&invalid, Some(-1))).is_err());
     assert!(serde_json::from_value::<ReviewEntryInput>(json!({"plan_block_id": invalid,"outcome":"completed","actual_minutes":1.5,"defer_reason":null,"notes":null,"remaining_workload_minutes":null})).is_err());
@@ -475,34 +475,44 @@ fn cumulative_minutes_overflow_is_rejected_before_any_review_fact_commits() {
 }
 
 #[test]
-fn historical_unknown_minutes_do_not_touch_task_and_no_draft_is_submitted_automatically() {
+fn historical_unknown_minutes_do_not_guess_actuals_or_submit_drafts_automatically() {
     let _clock = TestToday::new(TODAY);
     let mut database = Database::in_memory().unwrap();
     let id = task(&mut database);
     let selected = block(&database,&id,"2026-10-10");
-    let before = fact_rows(&database.connection,"SELECT * FROM tasks WHERE id = ?1",&id).unwrap();
+    let before = database.get_task(&id).unwrap();
     database.save_review_form_draft("2026-10-10","task",&selected,"{\"actual_minutes\":42}",0).unwrap();
     assert_eq!(database.count("review_entries").unwrap(),0);
     database.save_review_entry("2026-10-10",review(&selected,None)).unwrap();
-    assert_eq!(fact_rows(&database.connection,"SELECT * FROM tasks WHERE id = ?1",&id).unwrap(),before);
+    let saved = database.get_task(&id).unwrap();
+    assert_eq!(saved.status, "done");
+    assert_eq!(saved.remaining_workload_minutes, Some(0));
+    assert_eq!(saved.actual_minutes, before.actual_minutes);
+    assert_eq!(saved.total_workload_minutes, before.total_workload_minutes);
     assert_eq!(database.get_review_entry_for_block(&selected).unwrap().actual_minutes,None);
 }
 
 #[test]
-fn historical_light_result_can_be_corrected_and_reviewed_without_changing_task() {
+fn historical_light_result_syncs_task_without_overwriting_actuals_and_allows_later_capture() {
     let _clock = TestToday::new(TODAY);
     let mut database = Database::in_memory().unwrap();
     let task_id = task(&mut database);
     let id = block(&database, &task_id, "2026-10-15");
     database.save_execution_capture("2026-10-15", capture(&id)).unwrap();
-    let before = fact_rows(&database.connection, "SELECT * FROM tasks WHERE id = ?1", &task_id).unwrap();
+    let before = database.get_task(&task_id).unwrap();
     database.save_execution_capture("2026-10-15", ExecutionCaptureInput {
         plan_block_id: id.clone(), outcome: ReviewOutcome::Completed, note: None,
     }).unwrap();
     assert_eq!(execution_snapshot(&database.connection, &id).unwrap().execution_status, "completed");
-    database.save_review_entry("2026-10-15", review(&id, Some(20))).unwrap();
-    assert_eq!(fact_rows(&database.connection, "SELECT * FROM tasks WHERE id = ?1", &task_id).unwrap(), before);
-    assert_eq!(database.get_task(&task_id).unwrap().remaining_workload_minutes, Some(90));
+    assert_eq!(database.get_task(&task_id).unwrap().status, "done");
+    let mut corrected = review(&id, Some(20));
+    corrected.outcome = ReviewOutcome::NotStarted;
+    database.save_review_entry("2026-10-15", corrected).unwrap();
+    let saved = database.get_task(&task_id).unwrap();
+    assert_eq!(saved.status, "scheduled");
+    assert!(saved.is_incomplete);
+    assert_eq!(saved.actual_minutes, before.actual_minutes);
+    assert_eq!(saved.remaining_workload_minutes, Some(90));
     let today_block = block(&database, &task_id, TODAY);
     database.save_execution_capture(TODAY, capture(&today_block)).unwrap();
     database.save_execution_capture(TODAY, ExecutionCaptureInput {

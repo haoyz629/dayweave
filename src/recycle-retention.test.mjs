@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { recycleRetentionMessage } from "./recycle-retention.ts";
+import { recycleRetentionMessage, recycleCleanupMessage } from "./recycle-retention.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const now = Date.parse("2026-09-10T12:00:00+08:00");
@@ -31,4 +31,12 @@ test("recycle retention message handles expired and missing timestamps", () => {
     recycleRetentionMessage(null, now),
     "已移入回收站，将在 30 天保留期结束后被永久删除。"
   );
+});
+
+test("inline cleanup uses the actual 30-day expiry date in Shanghai time", () => {
+  assert.equal(recycleCleanupMessage("2026-10-21T16:30:00Z", Date.parse("2026-10-22T01:00:00+08:00")), "将于 2026-11-21 自动清理");
+  assert.equal(recycleCleanupMessage("2026-10-21T15:59:00Z", Date.parse("2026-10-22T01:00:00+08:00")), "将于 2026-11-20 自动清理");
+  assert.equal(recycleCleanupMessage("2026-09-01T12:00:00+08:00", Date.parse("2026-10-01T12:00:00+08:00")), "已到自动清理期限");
+  assert.equal(recycleCleanupMessage(null, now), "30 天保留期后自动清理");
+  assert.equal(recycleCleanupMessage("invalid", now), "30 天保留期后自动清理");
 });

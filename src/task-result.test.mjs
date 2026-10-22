@@ -35,14 +35,17 @@ test('editing or restoring does not extend task result context; unknown legacy c
   assert.equal(taskResultEditable({...task,result_date:null,execution_locked:false},now),true);
 });
 
-test('today retains whole-task completion and reopen actions',()=>{
-  const done={...task,status:'done'},finished={...block,task_status:'done',review:{outcome:'completed'}};
+test('today completion and cancellation act only on the block, not the whole-task result window',()=>{
   const now=at('2026-10-19T10:00:00+08:00');
-  assert.equal(timelineTaskCompletionAction(finished,done,'2026-10-19',resultToday(now),now),'reopen');
-  assert.equal(timelineTaskCompletionAction({...block,review:{outcome:'partial'}},task,'2026-10-19',resultToday(now),now),null);
-  for(const execution_status of ['not_started','partial','cancelled','blocked']) assert.equal(timelineTaskCompletionAction({...block,execution_status},task,'2026-10-19',resultToday(now),now),'clear');
-  assert.equal(timelineTaskCompletionAction(block,task,'2026-10-19',resultToday(now),now),'complete');
-  for(const current of [undefined,{...done,id:'other'},{...done,status:'deleted'},{...done,result_date:null}]) assert.equal(timelineTaskCompletionAction(finished,current,'2026-10-19','2026-10-19',now),null);
+  for(const status of ['scheduled','done']) {
+    const current={...task,status,result_date:null};
+    const daily={...block,task_status:status};
+    assert.equal(timelineTaskCompletionAction({...daily,execution_status:'completed'},current,'2026-10-19',resultToday(now),now),'uncomplete-block');
+    assert.equal(timelineTaskCompletionAction({...daily,review:{outcome:'partial'}},current,'2026-10-19',resultToday(now),now),null);
+    for(const execution_status of ['not_started','partial','cancelled','blocked']) assert.equal(timelineTaskCompletionAction({...daily,execution_status},current,'2026-10-19',resultToday(now),now),'clear');
+    assert.equal(timelineTaskCompletionAction(daily,current,'2026-10-19',resultToday(now),now),'complete-block');
+  }
+  for(const current of [undefined,{...task,id:'other'},{...task,status:'deleted'},{...task,deleted_at:'date'}]) assert.equal(timelineTaskCompletionAction(block,current,'2026-10-19','2026-10-19',now),null);
 });
 
 test('historical actions use only that block outcome, regardless of task completion or record age',()=>{
@@ -93,4 +96,22 @@ test('recorded incomplete facts with a review never turn into completed through 
     const current = {...block,review:{outcome:'not_started'},result_date:date};
     assert.equal(timelineTaskCompletionAction(current,task,date,'2026-10-20',now),null);
   }
+});
+
+test('execution locking must not prevent explicitly completing an active whole task',()=>{
+  const now=at('2026-10-20T12:00:00+08:00');
+  for (const status of ['open','scheduled']) {
+    assert.equal(taskResultEditable({...task,status,result_date:null,execution_locked:true},now),true);
+  }
+  assert.equal(taskResultEditable({...task,status:'done',result_date:'2026-10-19'},now),false);
+});
+
+test('active cross-day whole-task completion is independent of an old daily result context',()=>{
+  const now=at('2026-10-20T12:00:00+08:00');
+  const active={...task,status:'scheduled',earliest_start_date:'2026-10-19',due_date:'2026-10-22'};
+  assert.equal(taskResultEditable(active,now),true);
+  assert.equal(taskResultEditable(active,now,{completion_date:'2026-10-19',completion_ends_at:block.ends_at}),true);
+  assert.equal(taskResultEditable({...active,due_date:'2026-10-19',earliest_start_date:'2026-10-18'},now),true,'an unfinished overdue cross-day task can still be explicitly completed');
+  assert.equal(taskResultEditable({...active,status:'done'},now),false);
+  assert.equal(taskResultEditable({...active,deleted_at:'deleted'},now),false);
 });

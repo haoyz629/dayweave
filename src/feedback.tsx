@@ -55,11 +55,12 @@ export function Toast({ title, description, tone = "info", actions = [], duratio
   </div>, host);
 }
 
-export function ConfirmationDialog({ children, onCancel, busy = false, tone = "info", ...props }: ComponentPropsWithoutRef<"section"> & {
+export function ConfirmationDialog({ children, onCancel, busy = false, tone = "info", initialFocus, ...props }: ComponentPropsWithoutRef<"section"> & {
   children: ReactNode;
   onCancel: () => void;
   busy?: boolean;
   tone?: "info" | "caution" | "danger" | "success";
+  initialFocus?: string;
 }) {
   const element = useRef<HTMLElement>(null);
   const restoreFocus = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
@@ -77,8 +78,8 @@ export function ConfirmationDialog({ children, onCancel, busy = false, tone = "i
         }
       }
     }
-    const controls = () => [...dialog.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
-    const focusFirst = () => (dialog.querySelector<HTMLButtonElement>(".dialog-actions button:not(:disabled)") ?? controls()[0] ?? dialog).focus({ preventScroll: true });
+    const controls = () => [...dialog.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex]:not([tabindex='-1'])")];
+    const focusFirst = () => ((initialFocus ? dialog.querySelector<HTMLElement>(initialFocus) : null) ?? dialog.querySelector<HTMLButtonElement>(".dialog-actions button:not(:disabled)") ?? controls()[0] ?? dialog).focus({ preventScroll: true });
     focusFirst();
     function containFocus(event: FocusEvent) {
       if (!dialog.contains(event.target as Node)) focusFirst();
@@ -92,7 +93,7 @@ export function ConfirmationDialog({ children, onCancel, busy = false, tone = "i
       if (event.key === "Tab") {
         event.preventDefault();
         const buttons = controls();
-        const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        const index = buttons.indexOf(document.activeElement as HTMLElement);
         const next = event.shiftKey ? (index <= 0 ? buttons.length - 1 : index - 1) : (index + 1) % buttons.length;
         (buttons[next] ?? dialog).focus({ preventScroll: true });
       }

@@ -65,7 +65,7 @@ fn tagged_draft(tags: Vec<String>) -> TaskDraftInput {
 fn recurring(tags: Vec<String>) -> RecurringItemInput {
     RecurringItemInput { title: "带标签重复事项".into(), notes: None, frequency: "daily".into(), interval_value: 1,
         weekdays: vec![], month_day: None, starts_on: "2026-10-16".into(), ends_on: None,
-        display_time: None, display_duration_minutes: None, tags }
+        display_time: Some("09:00".into()), display_duration_minutes: Some(30), tags }
 }
 
 #[test]

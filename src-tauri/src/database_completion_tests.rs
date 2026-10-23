@@ -897,3 +897,113 @@ fn cross_day_clear_restores_legacy_or_unknown_workload_but_preserves_single_day_
         }
     }
 }
+
+fn confirmed_single_day_task(db: &mut Database) -> (String, String) {
+    let draft = db.create_manual_task_draft(TaskDraftInput {
+        item_type: "task".into(), recurring_settings: None, title: "单日完成同步".into(), notes: Some("task note".into()),
+        priority: Some(Priority::Medium), earliest_start_date: Some(FIRST.into()), earliest_start_time: Some("09:00".into()),
+        due_date: Some(FIRST.into()), due_time: Some("09:30".into()), total_workload_minutes: Some(30),
+        remaining_workload_minutes: Some(30), field_states_json: "{}".into(), tags: vec![], recurrence: None,
+    }).unwrap();
+    let task = db.confirm_task_draft(&draft.id, &draft.confirmation_token).unwrap();
+    let block = db.get_day_schedule(FIRST).unwrap().task_blocks.into_iter().find(|block| block.task_id == task.id).unwrap();
+    (task.id, block.id)
+}
+
+#[test]
+fn single_day_task_page_reopen_clears_completed_block_for_every_completion_entry() {
+    let _clock = TestNow::new("2026-10-21T18:00:00+08:00");
+    for api in ["resolve", "capture", "review", "task"] {
+        for promote in [false, true] {
+            let mut db = Database::in_memory().unwrap();
+            let (id, block) = confirmed_single_day_task(&mut db);
+            let scheduled = rows(&db, &block);
+            if api == "task" { db.complete_task(&id, None).unwrap(); }
+            else { write(&mut db, api, FIRST, &id, &block, ReviewOutcome::Completed).unwrap(); }
+            if promote { db.complete_task(&id, None).unwrap(); }
+            assert_eq!(db.get_task(&id).unwrap().status, "done");
+
+            let task = db.reopen_manual_task(&id, FIRST).unwrap();
+            assert_eq!(task.status, "scheduled", "{api}, promote={promote}");
+            assert_eq!(task.remaining_workload_minutes, Some(30));
+            assert_eq!(task.notes.as_deref(), Some("task note"));
+            let schedule = db.get_day_schedule(FIRST).unwrap();
+            assert_eq!(schedule.task_blocks.len(), 1, "the reservation must not be removed or duplicated");
+            assert_eq!(schedule.task_blocks[0].id, block);
+            assert_eq!(schedule.task_blocks[0].task_status, "scheduled");
+            assert_eq!(schedule.task_blocks[0].execution_status, "planned", "{api}, promote={promote}");
+            assert!(schedule.task_blocks[0].review.is_none());
+            let after = execution_snapshot(&db.connection, &block).unwrap();
+            assert_eq!(after.execution_note, None);
+            assert_eq!(after.execution_captured_at, None);
+            let after_rows = rows(&db, &block);
+            assert_eq!(&after_rows[0][..6], &scheduled[0][..6], "identity and scheduled time must remain unchanged");
+            assert!(db.get_task_metadata(&id).unwrap().history.iter().any(|event| event.kind == "reopened"));
+
+            write(&mut db, "capture", FIRST, &id, &block, ReviewOutcome::Completed).unwrap();
+            assert_eq!(db.get_task(&id).unwrap().status, "done", "the task can be completed again");
+        }
+    }
+}
+
+#[test]
+fn single_day_task_page_reopen_preserves_review_supplement_as_draft_and_survives_reload() {
+    let _clock = TestNow::new("2026-10-21T18:00:00+08:00");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("single-day-reopen.sqlite");
+    let (id, block) = {
+        let mut db = Database::open(&path).unwrap();
+        let (id, block) = confirmed_single_day_task(&mut db);
+        db.save_review_entry(FIRST, ReviewEntryInput { plan_block_id: block.clone(), outcome: ReviewOutcome::Completed,
+            actual_minutes: Some(23), defer_reason: Some("independent reason".into()), notes: Some("review note".into()),
+            remaining_workload_minutes: None }).unwrap();
+        db.reopen_manual_task(&id, FIRST).unwrap();
+        (id, block)
+    };
+    let db = Database::open(&path).unwrap();
+    assert_eq!(db.get_task(&id).unwrap().status, "scheduled");
+    let saved = execution_snapshot(&db.connection, &block).unwrap();
+    assert_eq!(saved.execution_status, "planned");
+    assert_eq!(saved.actual_minutes, Some(23));
+    assert!(db.get_review_entry_for_block(&block).is_err());
+    let json: String = db.connection.query_row("SELECT payload_json FROM review_form_drafts
+        WHERE review_date = ?1 AND item_type = 'task' AND item_id = ?2", params![FIRST, block], |row| row.get(0)).unwrap();
+    let supplement: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(supplement["actual_minutes"], "23");
+    assert_eq!(supplement["defer_reason"], "independent reason");
+    assert_eq!(supplement["notes"], "review note");
+}
+
+#[test]
+fn single_day_task_page_reopen_rolls_back_block_and_task_together_on_failure() {
+    let _clock = TestNow::new("2026-10-21T18:00:00+08:00");
+    let mut db = Database::in_memory().unwrap();
+    let (id, block) = confirmed_single_day_task(&mut db);
+    write(&mut db, "review", FIRST, &id, &block, ReviewOutcome::Completed).unwrap();
+    let before = fact_fingerprint(&db.connection, "task_completion", &id).unwrap();
+    db.connection.execute_batch("CREATE TRIGGER fail_reopen BEFORE UPDATE OF status ON tasks
+        WHEN NEW.status <> 'done' BEGIN SELECT RAISE(ABORT, 'reopen failure'); END;").unwrap();
+    assert!(db.reopen_manual_task(&id, FIRST).is_err());
+    assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), before);
+    assert_eq!(db.get_task(&id).unwrap().status, "done");
+    assert_eq!(db.get_review_entry_for_block(&block).unwrap().outcome, "completed");
+}
+
+#[test]
+fn cross_day_task_page_reopen_preserves_independent_completed_days() {
+    let _clock = TestNow::new("2026-10-22T18:00:00+08:00");
+    let mut db = Database::in_memory().unwrap();
+    let id = task(&mut db);
+    db.connection.execute("UPDATE tasks SET earliest_start_date = ?2, due_date = ?3 WHERE id = ?1",
+        params![id, FIRST, SECOND]).unwrap();
+    let first = block(&db, &id, FIRST, "09");
+    let second = block(&db, &id, SECOND, "09");
+    write(&mut db, "capture", FIRST, &id, &first, ReviewOutcome::Completed).unwrap();
+    write(&mut db, "review", SECOND, &id, &second, ReviewOutcome::Completed).unwrap();
+    let first_before = rows(&db, &first);
+    let second_before = rows(&db, &second);
+    db.reopen_manual_task(&id, SECOND).unwrap();
+    assert_state(&db, &id, false);
+    assert_eq!(rows(&db, &first), first_before);
+    assert_eq!(rows(&db, &second), second_before);
+}

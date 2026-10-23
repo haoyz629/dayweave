@@ -7,6 +7,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { syncFormCommonFields } from "./create-type-switch.ts";
 import { taskListStatus, historicalTaskCreationError, historicalTaskCompletionLocked, isHistoricalResultDate, resultToday, HISTORICAL_TASK_CREATION_NOTE } from "./task-result.ts";
+import { recurringTimeBlockIssue } from "./recurring-schedule.ts";
 
 // Exercise the real editor handlers; persistence is isolated from user data.
 const source = ts.createSourceFile("App.tsx", readFileSync(new URL("./App.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -28,7 +29,7 @@ const handlerCode = ts.transpileModule(snippets.join("\n"), { compilerOptions: {
 function editor({ saved = true } = {}) {
   const defaults = () => ({ title: "", notes: "", tags: [], priority: "high", earliest_start_date: "2026-09-25", earliest_start_time: "10:00", due_date: "2026-09-25", due_time: "11:00" });
   const taskForm = { ...defaults(), title: "团队周会", notes: "准备材料" };
-  const recurringDefaults = () => ({ title: "", notes: "", tags: [], frequency: "weekly", weekdays: [1], display_time: "09:00", ends_on: "" });
+  const recurringDefaults = () => ({ title: "", notes: "", tags: [], frequency: "weekly", weekdays: [1], display_time: "09:00", display_duration_minutes: 60, ends_on: "" });
   const db = new Map();
   let sequence = 0;
   const makeDraft = (input) => ({ ...input, id: `draft-${++sequence}`, version: 1, draft_kind: "create", item_type: input.item_type ?? "task" });
@@ -44,6 +45,7 @@ function editor({ saved = true } = {}) {
     newTaskDefaultForm: defaults, emptyNewTaskForm: defaults, recurringItemDefaultForm: recurringDefaults,
     today: "2026-09-23", setTimeout, Date: class extends Date { static now() { return Date.parse("2026-09-23T12:00:00+08:00"); } }, syncFormCommonFields, validDraftClock: () => true,
     historicalTaskCreationError, historicalTaskCompletionLocked, isHistoricalResultDate, resultToday, HISTORICAL_TASK_CREATION_NOTE,
+    recurringTimeBlockIssue,
     normalizeTaskWorkloadAfterScheduleChange: (_previous, next) => next,
     taskDraftInputForForm: (form) => ({ ...form }), taskFormForPersistedDraft: (draft) => ({ ...defaults(), ...draft }),
     uiErrorMessage: String, preferredSelection: { current: null }, taskListStatus,

@@ -29,59 +29,45 @@ test("date boundaries alternate and keep a valid date order", () => {
   });
 });
 
-test("task date selection follows recurring picker endpoint handoff and blocks historical multi-day ranges", () => {
-  const today = "2026-10-23";
-  assert.equal(selectTaskDateBoundary(today, "2026-10-25", "start", "2026-10-22", today), null);
-  assert.equal(selectTaskDateBoundary("2026-10-20", "2026-10-25", "end", "2026-10-24", today), null);
-  assert.deepEqual(selectTaskDateBoundary(today, "2026-10-25", "start", "2026-10-24", today), {
-    start: "2026-10-24", end: "2026-10-25", activeField: "end"
-  });
-  assert.deepEqual(selectTaskDateBoundary(today, "2026-10-25", "end", "2026-10-26", today), {
-    start: today, end: "2026-10-26", activeField: "start"
-  });
-  assert.deepEqual(selectTaskDateBoundary(today, "2026-10-25", "end", "2026-10-24", today), {
-    start: today, end: "2026-10-24", activeField: "start"
-  });
-});
-
-test("single-day historical backfill moves both dates and can return to today from either edge", () => {
-  const today = "2026-10-23";
-  for (const edge of ["start", "end"]) {
-    assert.deepEqual(selectTaskDateBoundary(today, today, edge, "2026-10-21", today), {
-      start: "2026-10-21", end: "2026-10-21", activeField: edge
-    });
-    assert.deepEqual(selectTaskDateBoundary("2026-10-21", "2026-10-21", edge, today, today), {
-      start: today, end: today, activeField: edge
+test("first task date click selects one day and a second click sorts endpoints in either direction", () => {
+  for (const [first, second] of [["2026-10-24", "2026-11-02"], ["2026-11-02", "2026-10-24"]]) {
+    const one = selectTaskDateBoundary(null, first, "2026-10-23");
+    assert.deepEqual(one, { start: first, end: first, dateAnchor: first });
+    assert.deepEqual(selectTaskDateBoundary(one.dateAnchor, second, "2026-10-23"), {
+      start: "2026-10-24", end: "2026-11-02", dateAnchor: null
     });
   }
 });
 
-test("single-day selection moves the whole task date in either direction regardless of the time edge", () => {
-  for (const edge of ["start", "end"]) for (const date of ["2026-10-21", "2026-10-23", "2026-10-24", "2026-11-02"]) {
-    assert.deepEqual(selectTaskDateBoundary("2026-10-25", "2026-10-25", edge, date, "2026-10-23"), {
-      start: date, end: date, activeField: edge
-    });
-  }
-});
-
-test("explicit multi-day mode can expand equal dates but never enables historical dates", () => {
-  const today = "2026-10-23";
-  for (const edge of ["start", "end"]) assert.equal(selectTaskDateBoundary(today, today, edge, "2026-10-21", today, "range"), null);
-  assert.deepEqual(selectTaskDateBoundary(today, today, "end", "2026-10-25", today, "range"), {
-    start: today, end: "2026-10-25", activeField: "start"
-  });
-});
-
-test("every enabled task calendar selection produces an ordered nonhistorical range and hands off its target", () => {
-  const dates = ["2026-09-30", "2026-10-20", "2026-10-22", "2026-10-23", "2026-10-25", "2026-11-01"];
-  for (const start of dates) for (const end of dates.filter(date => date >= start)) {
-    for (const edge of ["start", "end"]) for (const date of dates) {
-      const next = selectTaskDateBoundary(start, end, edge, date, "2026-10-23");
-      if (!next) continue;
-      assert.equal(next.activeField, start === end ? edge : edge === "start" ? "end" : "start");
-      assert.ok(next.start <= next.end);
-      assert.equal(taskDateRangeIncludesHistory(next.start, next.end, "2026-10-23"), false);
+test("historical task dates always select a single day, regardless of the pending anchor", () => {
+  for (const anchor of [null, "2026-10-20", "2026-10-23", "2026-11-02"]) {
+    for (const date of ["2026-09-30", "2026-10-21", "2026-10-22"]) {
+      assert.deepEqual(selectTaskDateBoundary(anchor, date, "2026-10-23"), {
+        start: date, end: date, dateAnchor: null
+      });
     }
+  }
+});
+
+test("an expired anchor starts a fresh single-day selection instead of a historical range", () => {
+  assert.deepEqual(selectTaskDateBoundary("2026-10-23", "2026-10-25", "2026-10-24"), {
+    start: "2026-10-25", end: "2026-10-25", dateAnchor: "2026-10-25"
+  });
+});
+
+test("clicking the same date twice completes a single-day selection", () => {
+  assert.deepEqual(selectTaskDateBoundary("2026-10-24", "2026-10-24", "2026-10-23"), {
+    start: "2026-10-24", end: "2026-10-24", dateAnchor: null
+  });
+});
+
+test("all task date combinations are ordered and never form a historical cross-day range", () => {
+  const dates = ["2026-09-30", "2026-10-22", "2026-10-23", "2026-10-25", "2026-11-01"];
+  for (const anchor of [null, ...dates]) for (const date of dates) {
+    const next = selectTaskDateBoundary(anchor, date, "2026-10-23");
+    assert.ok(next.start <= next.end);
+    assert.equal(taskDateRangeIncludesHistory(next.start, next.end, "2026-10-23"), false);
+    assert.equal(Boolean(next.dateAnchor), date >= "2026-10-23" && (!anchor || anchor < "2026-10-23"));
   }
 });
 

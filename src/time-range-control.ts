@@ -17,17 +17,16 @@ export function taskDateRangeIncludesHistory(start: string, end: string, today: 
   return Boolean(start && end && start !== end && start < today);
 }
 
-export function selectTaskDateBoundary(
-  start: string, end: string, activeField: TimeRangeEdge, date: string, today: string,
-  dateMode: "single" | "range" = start === end ? "single" : "range"
-) {
-  if (dateMode === "single") return { start: date, end: date, activeField };
-  // Equal boundaries do not leave explicit multi-day mode or enable history.
-  if (date < today) return null;
-  const next = selectDateBoundary(start, end, activeField, date);
-  return taskDateRangeIncludesHistory(next.start, next.end, today) ? null : {
-    ...next,
-    activeField: dateMode === "range" ? next.activeField : activeField
+export function selectTaskDateBoundary(anchorDate: string | null, date: string, today: string) {
+  // History is always a new single-day selection, never one end of a range.
+  if (date < today) return { start: date, end: date, dateAnchor: null };
+  if (!anchorDate || anchorDate < today) {
+    return { start: date, end: date, dateAnchor: date };
+  }
+  return {
+    start: date < anchorDate ? date : anchorDate,
+    end: date > anchorDate ? date : anchorDate,
+    dateAnchor: null
   };
 }
 

@@ -64,15 +64,26 @@ fn old_multiple_relationships_never_lock_status_even_after_children_complete_or_
 }
 
 #[test]
-fn reopen_preserves_later_review_and_capture_corrections() {
+fn single_day_reopen_clears_completed_capture_but_preserves_later_corrections() {
     let _clock = TestToday::new(TODAY);
-    let mut db = Database::in_memory().unwrap();
-    let (id, block) = task(&mut db);
-    db.complete_task(&id, None).unwrap();
-    db.connection.execute("UPDATE plan_blocks SET execution_note = '后来补充的记录' WHERE id = ?1", [&block]).unwrap();
-    let facts = fact_rows(&db.connection, "SELECT * FROM plan_blocks WHERE id = ?1", &block).unwrap();
-    db.reopen_manual_task(&id, TODAY).unwrap();
-    assert_eq!(facts, fact_rows(&db.connection, "SELECT * FROM plan_blocks WHERE id = ?1", &block).unwrap());
+    for outcome in ["completed", "not_started"] {
+        let mut db = Database::in_memory().unwrap();
+        let (id, block) = task(&mut db);
+        db.complete_task(&id, None).unwrap();
+        db.connection.execute("UPDATE plan_blocks SET execution_status = ?2, execution_note = '后来补充的记录' WHERE id = ?1",
+            params![block, outcome]).unwrap();
+        let facts = fact_rows(&db.connection, "SELECT * FROM plan_blocks WHERE id = ?1", &block).unwrap();
+        db.reopen_manual_task(&id, TODAY).unwrap();
+        if outcome == "completed" {
+            let saved = execution_snapshot(&db.connection, &block).unwrap();
+            assert_eq!(saved.execution_status, "planned");
+            assert_eq!(saved.execution_note, None);
+            assert!(db.get_task_metadata(&id).unwrap().history.iter()
+                .any(|event| event.note.as_deref() == Some("后来补充的记录")));
+        } else {
+            assert_eq!(facts, fact_rows(&db.connection, "SELECT * FROM plan_blocks WHERE id = ?1", &block).unwrap());
+        }
+    }
 }
 
 #[test]

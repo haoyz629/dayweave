@@ -27,6 +27,9 @@ mod database_results;
 mod database_tags;
 pub use database_tags::TaskTagDefinition;
 
+#[path = "database_recurring.rs"]
+mod database_recurring;
+
 pub struct Database {
     connection: Connection,
 }
@@ -193,6 +196,8 @@ pub struct RecurringOccurrenceDto {
     pub reviewed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub schedule_rule: Option<RecurringItemInput>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -867,9 +872,7 @@ fn preserve_review_supplement_after_capture(connection: &Connection, date: &str,
 }
 
 fn load_occurrence(connection: &Connection, id: &str) -> AppResult<RecurringOccurrenceDto> {
-    Ok(connection.query_row("SELECT o.id,o.recurring_item_id,i.title,i.notes,o.occurrence_date,i.display_time,i.display_duration_minutes,i.tags_json,
-        o.outcome,o.review_notes,o.reviewed_at,o.created_at,o.updated_at FROM recurring_occurrences o JOIN recurring_items i ON i.id = o.recurring_item_id WHERE o.id = ?1",
-        [id], recurring_occurrence_dto_from_row)?)
+    database_recurring::load_snapshot(connection, id)
 }
 
 impl Database {
@@ -912,6 +915,7 @@ impl Database {
             } else { Vec::new() };
             transaction.execute_batch(sql)?;
             if *version == 26 { database_results::backfill_completion_context(&transaction)?; }
+            if *version == 27 { database_recurring::backfill(&transaction)?; }
             for (name, definition) in review_schema {
                 let exists: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = ?1)", [&name], |row| row.get(0))?;
                 if !exists { transaction.execute_batch(&definition)?; }
@@ -1362,38 +1366,7 @@ impl Database {
     }
 
     pub fn update_recurring_item(&mut self, item_id: &str, input: RecurringItemInput) -> AppResult<RecurringItemDto> {
-        let input = normalize_recurring_item_input(input)?;
-        let transaction = self.connection.transaction()?;
-        let current = load_recurring_item_in_transaction(&transaction, item_id)?;
-        database_tags::validate_selection(&input.tags, &current.tags)?;
-        database_tags::register_tags(&transaction, &input.tags)?;
-        if current.deleted_at.is_some() {
-            return Err(AppError::Domain("回收站中的重复事项不能修改".into()));
-        }
-        if current.status == "ended" {
-            return Err(AppError::Domain("已结束的重复事项只保留历史，不能再修改规则".into()));
-        }
-        let timestamp = now();
-        transaction.execute(
-            "UPDATE recurring_items SET
-                title = ?2, notes = ?3, frequency = ?4, interval_value = ?5,
-                weekdays_json = ?6, month_day = ?7, starts_on = ?8, ends_on = ?9,
-                display_time = ?10, display_duration_minutes = ?11, tags_json = ?12, updated_at = ?13
-             WHERE id = ?1",
-            params![
-                item_id, input.title, input.notes, input.frequency, input.interval_value,
-                serde_json::to_string(&input.weekdays)?, input.month_day, input.starts_on,
-                input.ends_on, input.display_time, input.display_duration_minutes, serde_json::to_string(&input.tags)?, timestamp,
-            ],
-        )?;
-        transaction.execute(
-            "DELETE FROM recurring_occurrences
-             WHERE recurring_item_id = ?1 AND occurrence_date > ?2 AND outcome IS NULL",
-            params![item_id, shanghai_today()],
-        )?;
-        let item = load_recurring_item_in_transaction(&transaction, item_id)?;
-        transaction.commit()?;
-        Ok(item)
+        self.update_recurring_item_versioned(item_id, input)
     }
 
     pub fn set_recurring_item_status(&mut self, item_id: &str, status: &str) -> AppResult<RecurringItemDto> {
@@ -1412,13 +1385,7 @@ impl Database {
             "UPDATE recurring_items SET status = ?2, updated_at = ?3 WHERE id = ?1",
             params![item_id, status, now()],
         )?;
-        if status != "active" {
-            transaction.execute(
-                "DELETE FROM recurring_occurrences
-                 WHERE recurring_item_id = ?1 AND occurrence_date > ?2 AND outcome IS NULL",
-                params![item_id, shanghai_today()],
-            )?;
-        }
+        database_recurring::record_status(&transaction, item_id, status)?;
         let item = load_recurring_item_in_transaction(&transaction, item_id)?;
         transaction.commit()?;
         Ok(item)
@@ -1471,44 +1438,7 @@ impl Database {
     }
 
     pub fn list_recurring_occurrences(&mut self, occurrence_date: &str) -> AppResult<Vec<RecurringOccurrenceDto>> {
-        let date = parse_plan_date(occurrence_date)?;
-        let transaction = self.connection.transaction()?;
-        let active_items = if occurrence_date == shanghai_today() {
-            let mut statement = transaction.prepare(
-                "SELECT id, title, notes, frequency, interval_value, weekdays_json, month_day,
-                        starts_on, ends_on, display_time, display_duration_minutes, tags_json, status, created_at, updated_at, deleted_at, source_type
-                 FROM recurring_items WHERE status = 'active' AND deleted_at IS NULL",
-            )?;
-            let rows = statement.query_map([], recurring_item_dto_from_row)?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        } else { Vec::new() };
-        let timestamp = now();
-        for item in active_items {
-            if recurring_item_occurs_on(&item, date)? {
-                transaction.execute(
-                    "INSERT OR IGNORE INTO recurring_occurrences (
-                        id, recurring_item_id, occurrence_date, created_at, updated_at
-                     ) VALUES (?1, ?2, ?3, ?4, ?4)",
-                    params![Uuid::new_v4().to_string(), item.id, occurrence_date, timestamp],
-                )?;
-            }
-        }
-        let occurrences = {
-            let mut statement = transaction.prepare(
-                "SELECT occurrence.id, occurrence.recurring_item_id, item.title, item.notes,
-                        occurrence.occurrence_date, item.display_time, item.display_duration_minutes, item.tags_json,
-                        occurrence.outcome, occurrence.review_notes, occurrence.reviewed_at,
-                        occurrence.created_at, occurrence.updated_at
-                 FROM recurring_occurrences occurrence
-                 JOIN recurring_items item ON item.id = occurrence.recurring_item_id
-                 WHERE occurrence.occurrence_date = ?1
-                 ORDER BY item.display_time IS NULL, item.display_time, item.title COLLATE NOCASE",
-            )?;
-            let rows = statement.query_map([occurrence_date], recurring_occurrence_dto_from_row)?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        };
-        transaction.commit()?;
-        Ok(occurrences)
+        self.list_recurring_occurrences_range(occurrence_date, occurrence_date)
     }
 
     pub fn save_recurring_occurrence_review(
@@ -1533,17 +1463,7 @@ impl Database {
              WHERE id = ?1",
             params![occurrence_id, input.outcome, notes, timestamp],
         )?;
-        let occurrence = transaction.query_row(
-            "SELECT occurrence.id, occurrence.recurring_item_id, item.title, item.notes,
-                    occurrence.occurrence_date, item.display_time, item.display_duration_minutes, item.tags_json,
-                    occurrence.outcome, occurrence.review_notes, occurrence.reviewed_at,
-                    occurrence.created_at, occurrence.updated_at
-             FROM recurring_occurrences occurrence
-             JOIN recurring_items item ON item.id = occurrence.recurring_item_id
-             WHERE occurrence.id = ?1",
-            [occurrence_id],
-            recurring_occurrence_dto_from_row,
-        )?;
+        let occurrence = load_occurrence(&transaction, occurrence_id)?;
         clear_review_draft(&transaction, &occurrence_date, "recurring", occurrence_id)?;
         let payload = FactUndo { task: None, block: None, occurrence: Some(before), review: None,
             after_facts: fact_fingerprint(&transaction, "recurring_review", occurrence_id)? };
@@ -3782,35 +3702,8 @@ impl Database {
         if !matches!(execution_status.as_str(), "completed" | "not_started" | "partial" | "cancelled" | "blocked") {
             return Err(AppError::Domain("该执行块没有可取消的任务结果".into()));
         }
-        database_history::preserve_current(&transaction, &task_id)?;
         let timestamp = now();
-        clear_review_draft(&transaction, capture_date, "task", plan_block_id)?;
-        if has_review {
-            let review = transaction.query_row("SELECT actual_minutes, defer_reason, notes, remaining_workload_minutes
-                FROM review_entries WHERE plan_block_id = ?1", [plan_block_id], |row| {
-                Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?, row.get::<_, Option<i64>>(3)?))
-            })?;
-            // Final outcomes cannot represent planned. Keep the independent supplement
-            // in the existing form draft instead, with a new revision to reject stale saves.
-            let mut supplement = serde_json::Map::new();
-            for (key, value) in [("actual_minutes", review.0.map(|v| v.to_string())),
-                ("defer_reason", review.1), ("notes", review.2),
-                ("remaining_workload_minutes", review.3.map(|v| v.to_string()))] {
-                if let Some(value) = value { supplement.insert(key.into(), serde_json::Value::String(value)); }
-            }
-            transaction.execute("UPDATE review_form_drafts SET payload_json = ?3
-                WHERE review_date = ?1 AND item_type = 'task' AND item_id = ?2",
-                params![capture_date, plan_block_id, serde_json::to_string(&supplement)?])?;
-            transaction.execute("DELETE FROM review_entries WHERE plan_block_id = ?1", [plan_block_id])?;
-        }
-        transaction.execute(
-            "UPDATE plan_blocks
-             SET execution_status = 'planned', execution_note = NULL, execution_captured_at = NULL,
-                 review_required = 0, updated_at = ?2
-             WHERE id = ?1",
-            params![plan_block_id, timestamp],
-        )?;
+        database_execution::clear_block_capture(&transaction, &task_id, capture_date, plan_block_id, has_review)?;
         if in_window { transaction.execute("UPDATE tasks SET updated_at = ?2 WHERE id = ?1", params![task_id, timestamp])?; }
         database_history::record_cleared(&transaction, &task_id, capture_date, execution_status == "completed")?;
         if execution_status == "completed" {
@@ -4883,6 +4776,7 @@ fn insert_recurring_item(transaction: &Transaction<'_>, input: &RecurringItemInp
         ],
     )?;
     let item = load_recurring_item_in_transaction(transaction, &id)?;
+    database_recurring::insert_initial_version(transaction, &item)?;
     Ok(item)
 }
 
@@ -4918,6 +4812,8 @@ fn normalize_recurring_item_input(mut input: RecurringItemInput) -> AppResult<Re
         ends_on: input.ends_on.clone(),
     };
     validate_recurrence(&recurrence)?;
+    input.starts_on = parse_plan_date(&input.starts_on)?.to_string();
+    input.ends_on = input.ends_on.as_deref().map(parse_plan_date).transpose()?.map(|date| date.to_string());
     input.display_time = input.display_time
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty());
@@ -4932,10 +4828,11 @@ fn normalize_recurring_item_input(mut input: RecurringItemInput) -> AppResult<Re
             if start_minutes + duration_minutes > 1440 {
                 return Err(AppError::Schema("重复事项展示时间与预计时长不能跨越当天 24:00".into()));
             }
+            input.display_time = Some(display_time.format("%H:%M").to_string());
         }
         (Some(_), None) => return Err(AppError::Schema("填写展示时间后还需填写重复事项预计时长".into())),
         (None, Some(_)) => return Err(AppError::Schema("填写重复事项预计时长前请先设置展示时间".into())),
-        (None, None) => {}
+        (None, None) => return Err(AppError::Schema("重复事项必须填写展示时间和预计时长".into())),
     }
     Ok(input)
 }
@@ -4986,6 +4883,7 @@ fn recurring_occurrence_dto_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Resul
         reviewed_at: row.get(10)?,
         created_at: row.get(11)?,
         updated_at: row.get(12)?,
+        schedule_rule: None,
     })
 }
 
@@ -6292,6 +6190,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
         -- A durable completion snapshot identifies the original execution, not the last edit.
         -- Completion contexts are recovered conservatively by the versioned Rust migration.
     "#),
+    (27, database_recurring::MIGRATION),
 ];
 
 #[cfg(test)]
@@ -9488,3 +9387,7 @@ mod completion_tests;
 #[cfg(test)]
 #[path = "database_historical_creation_tests.rs"]
 mod historical_creation_tests;
+
+#[cfg(test)]
+#[path = "database_recurring_tests.rs"]
+mod database_recurring_tests;

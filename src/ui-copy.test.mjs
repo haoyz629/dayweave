@@ -65,7 +65,7 @@ test("plan draft time editor stays compact and supports focused manual adjustmen
   assert.match(appSource, /focusedTimeRangePresentation\(/);
   assert.match(appSource, /type="text" inputMode="numeric"/);
   assert.match(appSource, /className="time-rail-endpoint-cards"/);
-  assert.match(appSource, /timeline-floating-layer\$\{planDraftTimeEdit \? " is-time-editor"/);
+  assert.match(appSource, /timeline-floating-layer\$\{planDraftTimeEdit \|\| selectedRecurringOccurrence \? " is-time-editor"/);
   assert.match(stylesSource, /\.timeline-floating-layer\.is-time-editor, \.timeline-floating-layer\.is-block-editor \{ position: fixed;/);
   assert.match(stylesSource, /\.time-rail-endpoint-cards \{[^}]*grid-template-columns: 31fr 38fr 31fr/);
   assert.match(appSource, /highlightedEdge === "start" \? "is-active"/);
@@ -247,8 +247,9 @@ test("formal task details use real resources, history, completion notes and rest
   assert.match(appSource, /splitTaskNotes\(notes \?\? ""\)/);
   assert.match(appSource, /navigator\.clipboard\.writeText\(url\)/);
   assert.match(appSource, /await openUrl\(href\)/);
-  assert.match(appSource, /const history = metadata\?\.history \?\? \[\]/);
-  assert.match(appSource, /event\.review_note && event\.review_note !== event\.note/);
+  assert.match(appSource, /const history = taskDisplayHistory\(task, metadata\?\.history \?\? \[\]\)/);
+  assert.match(appSource, /new Set\(\[event\.note, event\.review_note\]/);
+  assert.match(appSource, /event\.display_notes\.map/);
   assert.match(appSource, /await completeTask\(selectedTask\.id, null, note\?\.trim\(\) \|\| null\)/);
   assert.match(appSource, /<TaskCompletionDialog[^\n]*onConfirm=\{\(\) => void transition\("done", completionNote\)\}/);
   assert.match(appSource, /const restored = await getTask\(target\.id\);\s*onTaskCommitted\(restored\);\s*setView\(taskListStatus\(restored\)\)/);
@@ -631,9 +632,10 @@ test("legacy confirmed records remain readable in the block dialog without anoth
   assert.match(appSource, /const committed = target === "done" \? await completeTask/);
 });
 
-test("recurring items are display-only and never ask for completion or review", () => {
+test("recurring items allow scoped schedule edits but never ask for completion or review", () => {
   assert.doesNotMatch(appSource, /saveRecurringOccurrenceReview|canCaptureRecurringResult|selectedRecurring\.outcome|recurringNote|recurring-outcome-picker|记录重复事项/);
-  assert.match(appSource, /className="timeline-event recurring-event"/);
+  assert.match(appSource, /className=\{`timeline-event recurring-event/);
+  assert.match(appSource, /<RecurringScopeConfirmation/);
   assert.match(appSource, /按规则展示，无需勾选/);
   assert.doesNotMatch(appSource, /到期展示，复盘时处理/);
 });

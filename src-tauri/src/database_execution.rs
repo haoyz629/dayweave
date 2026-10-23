@@ -306,6 +306,35 @@ pub(super) fn has_followup(connection: &Connection, task_id: &str) -> AppResult<
         AND followup_action IN ('schedule','wait','stop'))", [task_id], |row| row.get(0))?)
 }
 
+// Both cancellation entry points retain review supplements while removing the result.
+pub(super) fn clear_block_capture(transaction: &Transaction<'_>, task_id: &str, capture_date: &str, plan_block_id: &str, has_review: bool) -> AppResult<()> {
+    database_history::preserve_current(transaction, task_id)?;
+    clear_review_draft(transaction, capture_date, "task", plan_block_id)?;
+    if has_review {
+        let review = transaction.query_row("SELECT actual_minutes, defer_reason, notes, remaining_workload_minutes
+            FROM review_entries WHERE plan_block_id = ?1", [plan_block_id], |row| {
+            Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?, row.get::<_, Option<i64>>(3)?))
+        })?;
+        // Final outcomes cannot represent planned. Keep independent details in the
+        // form draft, with a new revision to reject stale saves.
+        let mut supplement = serde_json::Map::new();
+        for (key, value) in [("actual_minutes", review.0.map(|v| v.to_string())),
+            ("defer_reason", review.1), ("notes", review.2),
+            ("remaining_workload_minutes", review.3.map(|v| v.to_string()))] {
+            if let Some(value) = value { supplement.insert(key.into(), serde_json::Value::String(value)); }
+        }
+        transaction.execute("UPDATE review_form_drafts SET payload_json = ?3
+            WHERE review_date = ?1 AND item_type = 'task' AND item_id = ?2",
+            params![capture_date, plan_block_id, serde_json::to_string(&supplement)?])?;
+        transaction.execute("DELETE FROM review_entries WHERE plan_block_id = ?1", [plan_block_id])?;
+    }
+    transaction.execute("UPDATE plan_blocks SET execution_status = 'planned', execution_note = NULL,
+        execution_captured_at = NULL, review_required = 0, updated_at = ?2 WHERE id = ?1",
+        params![plan_block_id, now()])?;
+    Ok(())
+}
+
 pub(super) fn reopen_in_transaction(transaction: &Transaction<'_>, task_id: &str, _plan_date: &str) -> AppResult<()> {
     let current = load_task_dto_in_transaction(transaction, task_id)?;
     if current.status != "done" || current.deleted_at.is_some() {
@@ -358,6 +387,26 @@ pub(super) fn reopen_in_transaction(transaction: &Transaction<'_>, task_id: &str
                     params![block.id, block.execution_status, block.actual_minutes, block.review_required,
                         block.execution_note, block.execution_captured_at, now()])?;
             }
+        }
+    }
+    // Automatic completion has no block snapshot. A single-day task must cancel
+    // its completed day as well; cross-day execution facts remain independent.
+    let today = shanghai_today();
+    if current.earliest_start_date.as_deref() == Some(today.as_str())
+        && current.due_date.as_deref() == Some(today.as_str()) {
+        let blocks = {
+            let mut statement = transaction.prepare("SELECT pb.id, review.id IS NOT NULL
+                FROM plan_blocks pb JOIN daily_plans dp ON dp.id = pb.daily_plan_id
+                LEFT JOIN review_entries review ON review.plan_block_id = pb.id
+                WHERE pb.task_id = ?1 AND dp.status = 'confirmed' AND dp.plan_date = ?2
+                    AND COALESCE(review.outcome, pb.execution_status) = 'completed'")?;
+            let rows = statement.query_map(params![task_id, today], |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        for (id, has_review) in blocks {
+            database_results::require_block_outcome_change(transaction, &id, "planned")?;
+            clear_block_capture(transaction, task_id, &today, &id, has_review)?;
         }
     }
     database_history::preserve_events(transaction, task_id, &history)?;

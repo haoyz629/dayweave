@@ -193,6 +193,21 @@ fn list_recurring_occurrences(
 }
 
 #[tauri::command]
+fn resolve_recurring_edit_target(state: State<'_, AppState>, item_id: String) -> Result<Option<RecurringOccurrenceDto>, String> {
+    with_database(&state, |database| database.resolve_recurring_edit_target(&item_id))
+}
+
+#[tauri::command]
+fn update_recurring_occurrence(state: State<'_, AppState>, occurrence_id: String, input: RecurringItemInput, target_date: String, scope: String) -> Result<RecurringItemDto, String> {
+    with_database(&state, |database| database.update_recurring_occurrence(&occurrence_id, input, &target_date, &scope))
+}
+
+#[tauri::command]
+fn list_recurring_occurrences_range(state: State<'_, AppState>, from_date: String, to_date: String) -> Result<Vec<RecurringOccurrenceDto>, String> {
+    with_database(&state, |database| database.list_recurring_occurrences_range(&from_date, &to_date))
+}
+
+#[tauri::command]
 fn save_recurring_occurrence_review(
     state: State<'_, AppState>,
     occurrence_id: String,
@@ -936,6 +951,9 @@ pub fn run() {
             restore_recurring_item,
             permanently_delete_recurring_item,
             list_recurring_occurrences,
+            resolve_recurring_edit_target,
+            update_recurring_occurrence,
+            list_recurring_occurrences_range,
             save_recurring_occurrence_review,
             get_task,
             get_task_metadata,

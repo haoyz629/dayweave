@@ -32,10 +32,9 @@ fn capture(block_id: &str) -> ExecutionCaptureInput {
 fn occurrence(database: &mut Database, date: &str) -> String {
     let item = database.create_recurring_item(RecurringItemInput { title: "repeat fixture".into(), notes: None,
         frequency: "daily".into(), interval_value: 1, weekdays: vec![], month_day: None,
-        starts_on: "2026-01-01".into(), ends_on: None, display_time: None, display_duration_minutes: None, tags: vec![] }).unwrap();
-    let id = Uuid::new_v4().to_string();
-    database.connection.execute("INSERT INTO recurring_occurrences (id,recurring_item_id,occurrence_date,created_at,updated_at) VALUES (?1,?2,?3,?4,?4)", params![id,item.id,date,now()]).unwrap();
-    id
+        starts_on: "2026-01-01".into(), ends_on: None, display_time: Some("09:00".into()), display_duration_minutes: Some(30), tags: vec![] }).unwrap();
+    database.list_recurring_occurrences(date).unwrap().into_iter()
+        .find(|o| o.recurring_item_id == item.id).unwrap().id
 }
 
 fn repeat_review(outcome: &str, notes: Option<&str>) -> RecurringOccurrenceReviewInput {
@@ -88,9 +87,11 @@ fn task_history_is_unlimited_while_recurring_and_draft_windows_stay_seven_days()
     assert!(database.save_execution_capture(TODAY,capture("missing")).is_err());
     assert!(database.save_recurring_occurrence_review("missing",repeat_review("completed",None)).is_err());
     assert!(database.save_review_form_draft(TODAY,"task","missing","{}",0).is_err());
+    let historical = database.list_recurring_occurrences("2026-10-14").unwrap();
+    assert_eq!(historical.len(), 5, "calendar reads reconstruct unvisited historical schedules");
     let old_count = database.count("recurring_occurrences").unwrap();
-    database.list_recurring_occurrences("2026-10-14").unwrap();
-    assert_eq!(database.count("recurring_occurrences").unwrap(),old_count,"historical reads never generate occurrences");
+    assert_eq!(database.list_recurring_occurrences("2026-10-14").unwrap(), historical);
+    assert_eq!(database.count("recurring_occurrences").unwrap(), old_count, "repeated historical reads are idempotent");
     assert!(validate_review_date("2026-02-30").is_err());
 }
 

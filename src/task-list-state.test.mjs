@@ -16,7 +16,7 @@ const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true
 const functions = new Map(), expressions = new Map();
 let capsule, editableCompletionButton;
 function collect(node) {
-  if (ts.isFunctionDeclaration(node) && ["taskMatchesView", "taskIsEditable", "TaskCapsuleFact", "TaskCapsuleContent", "CompletedTaskDetails", "DeletedTaskDetails", "TaskDetailContent", "TaskDetailResources", "TaskStatusHistory", "TaskCompletionDialog"].includes(node.name?.text)) functions.set(node.name.text, node.getText(source));
+  if (ts.isFunctionDeclaration(node) && ["taskMatchesView", "taskIsEditable", "TaskCapsuleFact", "TaskCapsuleContent", "CompletedTaskDetails", "DeletedTaskDetails", "TaskDetailContent", "TaskDetailResources", "taskDisplayHistory", "TaskStatusHistory", "TaskCompletionDialog"].includes(node.name?.text)) functions.set(node.name.text, node.getText(source));
   if (ts.isVariableDeclaration(node) && ["statusCopy", "taskViewCopy", "taskViewGroups", "taskEmptyCopy", "counts"].includes(node.name.getText(source))) expressions.set(node.name.getText(source), node.initializer.getText(source));
   if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(source) === "TaskCapsuleContent" && node.attributes.properties.some(attr => attr.name?.getText(source) === "statusTone" && attr.initializer?.getText(source) === "{taskListStatus(task)}")) capsule = node.getText(source);
   if (ts.isJsxElement(node) && node.openingElement.tagName.getText(source) === "button" && node.getText(source).includes('className="task-compact-complete"') && node.getText(source).includes('requestTaskChange({ kind: "transition", status: "done" })')) editableCompletionButton = node.getText(source);
@@ -286,7 +286,7 @@ test("capsule deadline icons match completed details while other fact icons stay
 
 test("automatic task status is explained in its title instead of a user note box", () => {
   const { state } = harness();
-  for (const [status, label] of [["done", "任务已自动完成"], ["scheduled", "已取消任务完成"], ["open", "已取消任务完成"]]) {
+  for (const [status, label] of [["done", "任务已完成"], ["scheduled", "已取消任务完成"], ["open", "已取消任务完成"]]) {
     const event = { ...history[2], kind: "automatic_status", status, note: null, review_note: null };
     const html = renderToStaticMarkup(state.TaskStatusHistory({ task: { ...original, status }, metadata: { history: [event] }, busy: false, ...callbacks }));
     assert.ok(html.includes(`<strong>${label}</strong>`));
@@ -341,7 +341,7 @@ test("multi-day history retains whole-task status while single-day history never
   for (const [kind, status, singleLabel, multiLabel] of [
     ["status", "done", "任务已完成", "整个任务已完成"],
     ["reopened", "scheduled", "已取消任务完成", "已取消整个任务完成"],
-    ["automatic_status", "done", "任务已自动完成", "所有日期均已完成，整个任务已自动完成"],
+    ["automatic_status", "done", "任务已完成", "所有日期均已完成，整个任务已自动完成"],
     ["automatic_status", "scheduled", "已取消任务完成", "已取消整个任务完成"]
   ]) {
     for (const [due_date, label] of [[original.earliest_start_date, singleLabel], ["2026-10-21", multiLabel]]) {
@@ -351,4 +351,82 @@ test("multi-day history retains whole-task status while single-day history never
       if (label === singleLabel) assert.doesNotMatch(html, /整个任务|整体完成/);
     }
   }
+});
+
+function completionPair(kind = "automatic_status", start = "2026-10-20T10:00:00.100+08:00", end = "2026-10-20T10:00:00.105+08:00") {
+  return [
+    { ...history[1], id: `execution-${start}`, status: "done", occurred_at: start },
+    { ...history[2], id: `completion-${end}`, kind, plan_date: null, occurred_at: end }
+  ];
+}
+
+test("single-day completion folds its adjacent lifecycle event, retains all distinct notes and never mutates source data", () => {
+  const { state } = harness();
+  for (const kind of ["automatic_status", "status"]) {
+    const events = [history[0], ...completionPair(kind)];
+    const before = structuredClone(events);
+    for (const event of events) Object.freeze(event);
+    Object.freeze(events);
+    const displayed = state.taskDisplayHistory(original, events);
+    assert.equal(displayed.length, 2);
+    assert.deepEqual(Array.from(displayed[1].display_notes), ["执行备注\n第二行", "单独复盘备注", "完成备注"]);
+    assert.equal(displayed[1].occurred_at, events[1].occurred_at);
+    assert.equal(displayed[1].plan_date, events[1].plan_date);
+    const html = renderToStaticMarkup(state.TaskStatusHistory({ task: original, metadata: { history: events }, busy: false, ...callbacks }));
+    assert.equal((html.match(/<li\b/g) ?? []).length, 2);
+    assert.match(html, /2 条动态/);
+    assert.match(html, /<strong>任务已完成<\/strong>/);
+    assert.doesNotMatch(html, /当天任务已完成|任务已自动完成/);
+    for (const note of displayed[1].display_notes) assert.ok(html.includes(note));
+    assert.deepEqual(events, before);
+  }
+});
+
+test("complete, clear and complete again remain three separate actions even inside one second", () => {
+  const { state } = harness();
+  const first = completionPair();
+  const cleared = { ...history[1], id: "clear", kind: "cleared", status: "done", occurred_at: "2026-10-20T10:00:00.200+08:00", note: null, review_note: null };
+  const reopened = { ...history[2], id: "reopen", kind: "automatic_status", status: "scheduled", occurred_at: "2026-10-20T10:00:00.201+08:00", note: null, review_note: null };
+  const again = completionPair("automatic_status", "2026-10-20T10:00:00.300+08:00", "2026-10-20T10:00:00.301+08:00");
+  const events = [...first, cleared, reopened, ...again];
+  const displayed = state.taskDisplayHistory(original, events);
+  assert.equal(displayed.length, 3);
+  assert.deepEqual(Array.from(displayed, event => event.display_label), ["任务已完成", "已取消任务完成", "任务已完成"]);
+  const html = renderToStaticMarkup(state.TaskStatusHistory({ task: original, metadata: { history: events }, busy: false, ...callbacks }));
+  assert.match(html, /3 条动态/);
+  assert.equal((html.match(/<strong>任务已完成<\/strong>/g) ?? []).length, 2);
+  assert.match(html, /data-status="cleared"/);
+});
+
+test("history correlation is conservative for multi-day, undated, unrelated, invalid and distant events", () => {
+  const { state } = harness();
+  const pair = completionPair();
+  const cases = [
+    [{ ...original, due_date: "2026-10-21" }, pair],
+    [{ ...original, earliest_start_date: null, due_date: null }, pair],
+    [original, [{ ...pair[0], plan_date: "2026-10-19" }, pair[1]]],
+    [original, [{ ...pair[0], status: "not_completed" }, pair[1]]],
+    [original, [pair[0], { ...pair[1], kind: "restored" }]],
+    [original, [pair[0], { ...pair[1], occurred_at: null }]],
+    [original, [pair[0], { ...pair[1], occurred_at: "invalid" }]],
+    [original, [pair[0], { ...pair[1], occurred_at: "2026-10-20T10:00:01.100+08:00" }]],
+    [original, [pair[0], { ...pair[1], occurred_at: "2026-10-20T10:00:00.099+08:00" }]],
+    [original, [pair[0], history[3], pair[1]]]
+  ];
+  for (const [task, events] of cases) assert.equal(state.taskDisplayHistory(task, events).length, events.length);
+  assert.equal(state.taskDisplayHistory(original, [pair[0]]).length, 1);
+  const html = renderToStaticMarkup(state.TaskStatusHistory({ task: { ...original, due_date: "2026-10-21" }, metadata: { history: pair }, busy: false, ...callbacks }));
+  assert.match(html, /10月20日：当天任务已完成/);
+  assert.match(html, /所有日期均已完成，整个任务已自动完成/);
+  assert.match(html, /2 条动态/);
+});
+
+test("equivalent timestamps with offsets correlate and repeated notes render once", () => {
+  const { state } = harness();
+  const events = completionPair("status", "2026-10-20T02:00:00.100Z", "2026-10-20T10:00:00.200+08:00");
+  events[1].note = events[0].note;
+  events[1].review_note = events[0].review_note;
+  const displayed = state.taskDisplayHistory(original, events);
+  assert.equal(displayed.length, 1);
+  assert.equal(displayed[0].display_notes.length, 2);
 });

@@ -58,6 +58,7 @@ export type RecurringOccurrenceOutcome = "completed" | "partial" | "not_complete
 export type RecurringOccurrence = {
   id: string;
   recurring_item_id: string;
+  schedule_rule?: RecurringItemInput | null;
   title: string;
   notes: string | null;
   occurrence_date: string;
@@ -429,6 +430,18 @@ export function permanentlyDeleteRecurringItem(itemId: string, confirmed: boolea
 
 export function listRecurringOccurrences(occurrenceDate: string) {
   return invokeDesktop<RecurringOccurrence[]>("list_recurring_occurrences", { occurrenceDate });
+}
+
+export function listRecurringOccurrencesRange(fromDate: string, toDate: string) {
+  return invokeDesktop<RecurringOccurrence[]>("list_recurring_occurrences_range", { fromDate, toDate });
+}
+
+export function resolveRecurringEditTarget(itemId: string) {
+  return invokeDesktop<RecurringOccurrence | null>("resolve_recurring_edit_target", { itemId });
+}
+
+export function updateRecurringOccurrence(occurrenceId: string, input: RecurringItemInput, targetDate: string, scope: "this" | "future") {
+  return invokeDesktop<RecurringItem>("update_recurring_occurrence", { occurrenceId, input, targetDate, scope });
 }
 
 export function saveRecurringOccurrenceReview(

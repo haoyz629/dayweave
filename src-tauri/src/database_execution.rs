@@ -58,6 +58,7 @@ impl Database {
         }
         let task = load_task_dto_in_transaction(&transaction, &task_id)?;
         let in_window = database_results::allow_capture(&transaction, capture_date, &input.plan_block_id)?;
+        database_results::require_block_outcome_change(&transaction, &input.plan_block_id, input.outcome.as_str())?;
         if task.deleted_at.is_some() || task.status == "deleted" {
             return Err(AppError::Domain("回收站任务不能记录结果".into()));
         }
@@ -174,6 +175,18 @@ impl Database {
         transaction.commit()?;
         self.get_task(&task_id)
     }
+}
+
+pub(super) fn complete_historical_creation(transaction: &Transaction<'_>, task_id: &str) -> AppResult<()> {
+    let task = load_task_dto_in_transaction(transaction, task_id)?;
+    if database_results::historical_single_day(&task).is_none() {
+        return Err(AppError::Domain("历史补录需要完整有效的单日起止时间".into()));
+    }
+    complete_in_transaction(transaction, task_id, None, Some("创建历史任务自动完成"))?;
+    // Creation is already an execution fact; do not advertise an unusable completion undo.
+    transaction.execute("UPDATE undo_entries SET status = 'conflicted'
+        WHERE target_type = 'task_completion' AND target_id = ?1 AND status = 'available'", [task_id])?;
+    Ok(())
 }
 
 // Explicit whole-task completion retains its existing result window and atomic undo policy.
@@ -298,7 +311,7 @@ pub(super) fn reopen_in_transaction(transaction: &Transaction<'_>, task_id: &str
     if current.status != "done" || current.deleted_at.is_some() {
         return Err(AppError::Domain("只有已完成任务可以取消完成".into()));
     }
-    database_results::require_task_window(transaction, task_id)?;
+    database_results::require_task_reopenable(transaction, task_id)?;
     let snapshot: Option<(String, Option<String>)> = transaction.query_row(
         "SELECT before_json, block_after_json FROM task_completion_snapshots WHERE task_id = ?1", [task_id],
         |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
@@ -377,12 +390,24 @@ pub(super) fn is_automatic_completion(connection: &Connection, task_id: &str) ->
 // Aggregate every confirmed scheduled block, including missed history and other blocks on the same day.
 // Automatic snapshots contain task state only; a daily correction must never replay execution/review facts.
 pub(super) fn sync_block_result(transaction: &Transaction<'_>, block_id: &str) -> AppResult<()> {
+    sync_block_result_inner(transaction, block_id, false)
+}
+
+// Only clearing a completed day may override explicit cross-day completion. Do not
+// use reopen_in_transaction: its block snapshot can belong to a different date.
+pub(super) fn sync_cleared_completion(transaction: &Transaction<'_>, block_id: &str) -> AppResult<()> {
+    sync_block_result_inner(transaction, block_id, true)
+}
+
+fn sync_block_result_inner(transaction: &Transaction<'_>, block_id: &str, cleared_completion: bool) -> AppResult<()> {
     let (task_id, date, end) = database_results::block_context(transaction, block_id)?;
     let current = load_task_dto_in_transaction(transaction, &task_id)?;
     if current.deleted_at.is_some() || !matches!(current.status.as_str(), "open" | "scheduled" | "done") { return Ok(()); }
     let automatic = is_automatic_completion(transaction, &task_id)?;
     let historical_recorded_at = database_results::historical_completion_recorded_at(transaction, &task_id)?;
-    if current.status == "done" && !automatic {
+    let cross_day_clear = cleared_completion && current.earliest_start_date.as_ref()
+        .zip(current.due_date.as_ref()).is_some_and(|(start, due)| start < due);
+    if current.status == "done" && !automatic && !cross_day_clear {
         let saved: Option<String> = transaction.query_row("SELECT result_block_id FROM tasks WHERE id = ?1", [&task_id], |row| row.get(0))?;
         if historical_recorded_at.is_none() || saved.as_deref() != Some(block_id) { return Ok(()); }
     }
@@ -392,26 +417,38 @@ pub(super) fn sync_block_result(transaction: &Transaction<'_>, block_id: &str) -
          LEFT JOIN review_entries review ON review.plan_block_id = pb.id
          WHERE pb.task_id = ?1 AND dp.status = 'confirmed'",
         [&task_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
-    // Cross-day creation stores a date range, not one plan block per date. A future
-    // date without a confirmed reservation is still pending, not implicitly completed.
-    let unscheduled_future = if let (Some(start), Some(due)) = (&current.earliest_start_date, &current.due_date) {
-        if start < due && due > &shanghai_today() {
-            let first = start.max(&shanghai_today()).clone();
-            transaction.query_row("SELECT COUNT(DISTINCT dp.plan_date) < CAST(julianday(?3) - julianday(?2) AS INTEGER)
+    // Cross-day creation stores an inclusive date range, not one block per date.
+    // Missing past, current, and future dates all remain pending. Multiple blocks
+    // on one date cannot substitute for another date; incomplete blocks still veto.
+    let unscheduled_date = if let (Some(start), Some(due)) = (&current.earliest_start_date, &current.due_date) {
+        if start < due {
+            transaction.query_row("SELECT COUNT(DISTINCT dp.plan_date) < CAST(julianday(?3) - julianday(?2) AS INTEGER) + 1
                 FROM plan_blocks pb JOIN daily_plans dp ON dp.id = pb.daily_plan_id
-                WHERE pb.task_id = ?1 AND dp.status = 'confirmed' AND dp.plan_date > ?2 AND dp.plan_date <= ?3",
-                params![task_id, first, due], |row| row.get::<_, bool>(0))?
+                WHERE pb.task_id = ?1 AND dp.status = 'confirmed' AND dp.plan_date >= ?2 AND dp.plan_date <= ?3",
+                params![task_id, start, due], |row| row.get::<_, bool>(0))?
         } else { false }
     } else { false };
-    let completed = count > 0 && incomplete == 0 && !unscheduled_future;
+    let completed = count > 0 && incomplete == 0 && !unscheduled_date && !cross_day_clear;
     if completed == (current.status == "done") { return Ok(()); }
     let (status, remaining) = if completed {
         ("done", Some(0))
     } else {
-        let json: String = transaction.query_row("SELECT before_json FROM task_completion_snapshots WHERE task_id = ?1",
-            [&task_id], |row| row.get(0))?;
-        let before: FactUndo = serde_json::from_str(&json)?;
-        let remaining = before.task.and_then(|task| task.remaining_workload_minutes);
+        let json: Option<String> = transaction.query_row("SELECT before_json FROM task_completion_snapshots WHERE task_id = ?1",
+            [&task_id], |row| row.get(0)).optional()?;
+        let json = match json {
+            Some(json) => Some(json),
+            None if cross_day_clear => transaction.query_row("SELECT before_json FROM undo_entries
+                WHERE target_type = 'task_completion' AND target_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                [&task_id], |row| row.get(0)).optional()?,
+            None => return Err(rusqlite::Error::QueryReturnedNoRows.into()),
+        };
+        let remaining = if let Some(json) = json {
+            let before: FactUndo = serde_json::from_str(&json)?;
+            before.task.and_then(|task| task.remaining_workload_minutes)
+        } else {
+            current.remaining_workload_minutes.filter(|minutes| *minutes > 0)
+                .or(current.total_workload_minutes).or(current.estimated_minutes)
+        };
         (if count > 0 { "scheduled" } else { "open" }, remaining)
     };
     if completed {

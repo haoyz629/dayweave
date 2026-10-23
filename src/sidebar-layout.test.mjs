@@ -55,18 +55,17 @@ test("create and navigation actions share an intermediate width without changing
   assert.match(styles, /\.sidebar-collapsed \.sidebar-nav-selection \{[^}]*width: 40px/);
 });
 
-test("create and navigation buttons share the 52px midpoint height and matching selection step", () => {
+test("create action is a compact flat button while navigation keeps the 52px step", () => {
   assert.match(styles, /--sidebar-action-height: 52px/);
-  assert.match(styles, /\.next-sidebar \.next-create \{[^}]*height: var\(--sidebar-action-height\); min-height: var\(--sidebar-action-height\)/);
+  assert.match(styles, /\.next-sidebar \.next-create \{[^}]*height: 40px; min-height: 40px/);
   assert.match(styles, /\.next-sidebar nav \{ --sidebar-nav-height: var\(--sidebar-action-height\); --sidebar-nav-step: calc\(var\(--sidebar-nav-height\) \+ 8px\)/);
   assert.match(styles, /\.sidebar-collapsed \.next-sidebar \.next-create \{[^}]*height: 44px; min-height: 44px/);
 });
 
-test("create action uses the approved green palette and white icon in both themes", () => {
-  assert.match(styles, /\.next-sidebar \{ --sidebar-create-bg: #1B633E; --sidebar-create-ink: #fff;/);
-  assert.match(styles, /html\[data-mode="dark"\] \.next-sidebar \{ --sidebar-create-bg: #228452;/);
-  assert.match(styles, /\.next-sidebar \.next-create \{[^}]*border: 1px solid #145032;/);
-  assert.match(styles, /html\[data-mode="dark"\] \.next-sidebar \.next-create \{ border-color: #34A86A; box-shadow: 0 3px 14px rgba\(34,132,82,0\.36\);/);
+test("create action uses the approved green palette with flat styling in both themes", () => {
+  assert.match(styles, /\.next-sidebar \{ --sidebar-create-bg: #1B633E; --sidebar-create-ink: #f2f6f2;/);
+  assert.match(styles, /html\[data-mode="dark"\] \.next-sidebar \{ --sidebar-create-bg: #228452; --sidebar-create-hover: #1B633E; background: #181a18; \}/);
+  assert.match(styles, /\.next-sidebar \.next-create \{[^}]*border: 0; border-radius: 11px/);
   assert.match(styles, /\.next-create > \.sidebar-create-icon \{[^}]*filter: brightness\(0\) invert\(1\)/);
 });
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { executionResultForOutcome, taskExecutionResolution, timelineTaskCompletionAction, taskResultEditable, blockResultEditable, resultWindowOpen, resultToday, visibleTaskScheduleBlocks } from './task-result.ts';
+import { executionResultForOutcome, taskExecutionResolution, timelineTaskCompletionAction, taskResultEditable, blockResultEditable, resultWindowOpen, resultToday, visibleTaskScheduleBlocks, historicalTaskCreationError, historicalBlockCompletionLocked, historicalTaskCompletionLocked } from './task-result.ts';
 const at=value=>Date.parse(value);
 const block={id:'block',task_id:'task',task_status:'scheduled',ends_at:'2026-10-19T23:30:00+08:00',execution_status:'planned',review:null};
 const task={id:'task',status:'scheduled',updated_at:'v1',result_date:'2026-10-19',result_ends_at:block.ends_at,execution_locked:true,remaining_workload_minutes:90};
@@ -28,7 +28,7 @@ test('same CST day or original end plus six hours with inclusive boundary',()=>{
 test('editing or restoring does not extend task result context; unknown legacy completion is read only',()=>{
   const done={...task,status:'done'};
   const now=at('2026-10-20T05:00:00+08:00');
-  assert.equal(taskResultEditable(done,now),true);
+  assert.equal(taskResultEditable(done,now),false,'historical completion overrides the old six-hour grace');
   for(const change of [{updated_at:'2026-10-20T09:00:00+08:00'},{title:'renamed'},{restored_at:'today'}]) assert.equal(taskResultEditable({...done,...change},at('2026-10-20T05:30:01+08:00')),false);
   assert.equal(taskResultEditable({...done,result_date:null},now),false);
   assert.equal(taskResultEditable({...done,deleted_at:'date'},now),false);
@@ -52,7 +52,7 @@ test('historical actions use only that block outcome, regardless of task complet
   for(const now of [at('2026-10-20T05:30:00+08:00'),at('2026-10-20T12:00:00+08:00'),at('2027-01-01T12:00:00+08:00')]) {
     for(const status of ['open','scheduled','done']) for(const outcome of ['planned','completed','not_started','partial','blocked','cancelled']) {
       for(const review of [null,{outcome}]) {
-        const expected = outcome === 'completed' ? 'uncomplete-block' : outcome === 'planned' ? 'complete-block' : review ? null : 'clear';
+        const expected = outcome === 'completed' ? null : outcome === 'planned' ? 'complete-block' : review ? null : 'clear';
         assert.equal(timelineTaskCompletionAction({...block,task_status:status,execution_status:outcome,review},{...task,status},'2026-10-19',resultToday(now),now),expected);
       }
     }
@@ -114,4 +114,30 @@ test('active cross-day whole-task completion is independent of an old daily resu
   assert.equal(taskResultEditable({...active,due_date:'2026-10-19',earliest_start_date:'2026-10-18'},now),true,'an unfinished overdue cross-day task can still be explicitly completed');
   assert.equal(taskResultEditable({...active,status:'done'},now),false);
   assert.equal(taskResultEditable({...active,deleted_at:'deleted'},now),false);
+});
+
+test('historical whole-task completion overrides fresh metadata and locks exactly at Shanghai midnight',()=>{
+  const done={...task,status:'done'};
+  const before=at('2026-10-19T15:59:59.999Z'), after=at('2026-10-19T16:00:00Z');
+  const metadata={task_id:task.id,completion_backfill_allowed:true,completion_recorded_at:'2026-10-19T23:59:00+08:00'};
+  assert.equal(taskResultEditable(done,before,metadata),true);
+  assert.equal(historicalTaskCompletionLocked(done,after),true);
+  assert.equal(taskResultEditable(done,after,metadata),false);
+  assert.equal(historicalTaskCompletionLocked({...done,status:'scheduled'},after),false);
+  assert.equal(historicalBlockCompletionLocked('2026-10-19',{...block,execution_status:'completed'},before),false);
+  assert.equal(historicalBlockCompletionLocked('2026-10-19',{...block,review:{outcome:'completed'}},after),true);
+  assert.equal(historicalBlockCompletionLocked('2026-10-19',{...block,execution_status:'completed',review:{outcome:'not_started'}},after),false);
+});
+
+test('historical creation requires a complete valid single day and multi-day creation cannot start before Shanghai today',()=>{
+  const now=at('2026-10-20T00:00:00+08:00');
+  const schedule={earliest_start_date:'2026-10-19',earliest_start_time:'09:00',due_date:'2026-10-19',due_time:'10:00'};
+  assert.equal(historicalTaskCreationError(schedule,now),null);
+  for(const change of [{earliest_start_date:null},{earliest_start_time:null},{due_time:null},{due_time:'09:00'},{due_time:'09:14'},{earliest_start_time:'25:00'}]) assert.match(historicalTaskCreationError({...schedule,...change},now),/完整且有效/);
+  assert.match(historicalTaskCreationError({...schedule,earliest_start_date:'2026-10-18'},now),/包含历史日期的多日任务/);
+  for(const due_date of ['2026-10-20','2026-10-21']) assert.match(historicalTaskCreationError({...schedule,due_date},now),/开始日期不能早于今天/);
+  const crossing={...schedule,earliest_start_date:'2026-10-19',due_date:'2026-10-20'};
+  assert.equal(historicalTaskCreationError(crossing,now-1),null,'Shanghai midnight, not UTC midnight, determines history');
+  assert.match(historicalTaskCreationError(crossing,now),/开始日期不能早于今天/);
+  assert.equal(historicalTaskCreationError({...schedule,earliest_start_date:'2026-10-20',due_date:'2026-10-21'},now),null);
 });

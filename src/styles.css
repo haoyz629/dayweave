@@ -4096,6 +4096,9 @@ html[data-mode="dark"] .recurring-validity-dialog .recurring-btn-cancel:hover {
 .schedule-picker-reset:hover { color: #475569; background: rgba(0, 0, 0, 0.04); }
 .schedule-picker-close { display: grid; width: 32px; height: 32px; padding: 0; place-items: center; border-radius: 50%; color: var(--jx-muted); }
 .schedule-picker-close:hover { color: var(--jx-ink); background: var(--jx-paper); }
+.schedule-picker-date-mode { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 28px; border-bottom: 1px solid var(--jx-edge-soft); color: var(--jx-muted); font-size: 12px; }
+.schedule-picker-task-date { display: inline-flex; align-items: center; gap: 5px; padding: 6px 0; border: 0; color: var(--jx-ink); background: transparent; font-size: 12px; }
+.schedule-picker-date-mode .schedule-picker-switch-btn:disabled { opacity: .45; cursor: not-allowed; }
 .schedule-picker-boundaries { display: grid; min-height: 154px; flex: 0 0 auto; grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr); align-items: center; gap: 14px; padding: 20px 30px; border-bottom: 1px solid var(--jx-edge-soft); background: var(--jx-surface); }
 .schedule-boundary-card { display: grid; min-width: 0; min-height: 112px; align-content: center; gap: 14px; padding: 15px 18px; border: 1px solid var(--jx-edge); border-radius: 14px; color: var(--jx-ink-soft); background: var(--jx-raised); box-shadow: 0 1px 3px rgb(15 23 42 / 5%); text-align: left; cursor: pointer; transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }
 .schedule-boundary-card:hover { border-color: #b9c5ef; background: #fcfdff; }
@@ -4103,6 +4106,7 @@ html[data-mode="dark"] .recurring-validity-dialog .recurring-btn-cancel:hover {
 .schedule-boundary-select { display: flex; width: max-content; align-items: center; gap: 7px; padding: 0; border: 0; color: var(--jx-ink); background: transparent; font-size: 12px; font-weight: 800; cursor: pointer; }
 .schedule-boundary-select .time-range-marker { width: 8px; height: 8px; flex: 0 0 auto; }
 .schedule-boundary-fields { display: grid; min-width: 0; grid-template-columns: minmax(0, 1.45fr) minmax(100px, 1fr); gap: 9px; }
+.schedule-boundary-fields.is-single-day { grid-template-columns: minmax(0, 1fr); }
 .schedule-boundary-field { display: grid; min-width: 0; gap: 5px; }
 button.schedule-boundary-field { padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
 button.schedule-boundary-field:hover > strong { border-color: #b9c5ef; background: var(--jx-raised); }
@@ -4132,6 +4136,8 @@ button.schedule-boundary-field:hover > strong { border-color: #b9c5ef; backgroun
 .schedule-picker-calendar .apple-date-grid button.selected { color: #fff; background: #536dff; box-shadow: 0 0 0 3px rgb(83 109 255 / 15%); }
 .schedule-picker-calendar .apple-date-grid button.today::after { background: #536dff; }
 .schedule-picker-calendar .apple-date-grid button.today.selected::after { background: #fff; }
+.schedule-picker-calendar .apple-date-grid button:disabled { opacity: .35; color: var(--jx-muted); background: transparent; box-shadow: none; cursor: not-allowed; }
+.schedule-picker-date-help { margin: 10px 0 0; color: var(--jx-muted); font-size: 11px; line-height: 1.6; }
 .schedule-picker-calendar > footer { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--jx-edge-soft); color: var(--jx-muted); font-size: 11px; }
 .schedule-picker-calendar > footer strong { color: var(--jx-ink-soft); }
 .schedule-picker-calendar > footer em { color: #536dff; font-style: normal; font-weight: 750; }
@@ -6827,11 +6833,10 @@ html[data-mode="dark"] .timeline-floating-panel .plan-draft-time-form > footer .
 }
 
 /* Approved sidebar: centered label, quiet theme contrast and a shared selection. */
-.next-sidebar { --sidebar-create-bg: #1B633E; --sidebar-create-ink: #fff; --sidebar-create-hover: #145032; --sidebar-action-height: 52px; background: var(--jx-paper); }
-html[data-mode="dark"] .next-sidebar { --sidebar-create-bg: #228452; --sidebar-create-hover: #1B633E; }
+.next-sidebar { --sidebar-create-bg: #1B633E; --sidebar-create-ink: #f2f6f2; --sidebar-create-hover: #145032; --sidebar-action-height: 52px; background: var(--jx-paper); }
+html[data-mode="dark"] .next-sidebar { --sidebar-create-bg: #228452; --sidebar-create-hover: #1B633E; background: #181a18; }
 .next-sidebar .sidebar-brand, .next-sidebar .next-create, .next-sidebar nav { width: calc(100% - 10px); max-width: 280px; align-self: center; }
-.next-sidebar .next-create { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); gap: 9px; height: var(--sidebar-action-height); min-height: var(--sidebar-action-height); padding: 8px 16px; border: 1px solid #145032; border-radius: 12px; color: var(--sidebar-create-ink); background: var(--sidebar-create-bg); font: 700 14px/20px var(--jx-font-sans); }
-html[data-mode="dark"] .next-sidebar .next-create { border-color: #34A86A; box-shadow: 0 3px 14px rgba(34,132,82,0.36); }
+.next-sidebar .next-create { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); gap: 9px; height: 40px; min-height: 40px; padding: 0 14px; border: 0; border-radius: 11px; color: var(--sidebar-create-ink); background: var(--sidebar-create-bg); font: 550 13.5px/20px var(--jx-font-sans); }
 .next-sidebar .next-create:hover { background: var(--sidebar-create-hover); transform: none; }
 .next-create > .sidebar-create-icon { display: block; grid-column: 1; grid-row: 1; justify-self: end; width: 20px; height: 20px; filter: brightness(0) invert(1); pointer-events: none; }
 .next-create > .next-create-label { grid-column: 2; grid-row: 1; color: inherit; white-space: nowrap; }

@@ -157,7 +157,9 @@ fn migration_preserves_over_limit_data_backfills_colors_and_permits_only_reducti
     db.save_task_draft(&draft.id, draft.version, tagged_draft(old.clone())).unwrap();
     let id = db.create_manual_task("旧超限任务").unwrap();
     for i in 0..12 { db.connection.execute("INSERT INTO task_tags VALUES (?1,?2)", params![id, format!("tag-{i}")]).unwrap(); }
+    let creation_clock = TestNow::new("2026-10-16T00:00:00+08:00");
     db.update_manual_task_with_tags(&id, update("保留旧标签"), Some(old.clone())).unwrap();
+    drop(creation_clock);
     let mut expanded = old.clone(); expanded.push("old-12".into());
     assert!(db.set_task_tags(&id, expanded).is_err());
     db.set_task_tags(&id, old[..11].to_vec()).unwrap();

@@ -1,4 +1,5 @@
 import type { PlanBlock, Task, TaskMetadata, TaskExecutionResolutionInput } from "./tauri";
+import { taskRangeDurationMinutes } from "./task-workload.ts";
 
 export type ExecutionResult = "completed" | "not_completed";
 export type ExecutionOutcome = "completed" | "not_started";
@@ -28,15 +29,49 @@ export function resultWindowOpen(date: string | null | undefined, endsAt: string
   return Number.isFinite(end) && end <= now && now <= end + RESULT_GRACE_MS;
 }
 
-// Block facts may be corrected on any elapsed date; whole-task results keep their own window.
+// Elapsed unfinished block facts remain writable, including historical backfill.
 export function blockResultEditable(date: string | null | undefined, now = Date.now()) {
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
   const parsed = Date.parse(`${date}T00:00:00+08:00`);
   return Number.isFinite(parsed) && resultToday(parsed) === date && date <= resultToday(now);
 }
 
+export const HISTORY_COMPLETION_LOCKED_MESSAGE = "历史日期的已完成记录不可取消完成";
+export const HISTORICAL_TASK_CREATION_NOTE = "创建历史任务自动完成";
+
+export function isHistoricalResultDate(date: string | null | undefined, now = Date.now()) {
+  return blockResultEditable(date, now) && date! < resultToday(now);
+}
+
+export function historicalBlockCompletionLocked(date: string, block: {
+  execution_status: string; review?: { outcome?: string } | null;
+}, now = Date.now()) {
+  return isHistoricalResultDate(date, now) && (block.review?.outcome ?? block.execution_status) === "completed";
+}
+
+export function historicalTaskCompletionLocked(task: Pick<Task, "status" | "result_date">, now = Date.now()) {
+  return task.status === "done" && isHistoricalResultDate(task.result_date, now);
+}
+
+export function historicalTaskCreationError(schedule: {
+  earliest_start_date: string | null; earliest_start_time: string | null;
+  due_date: string | null; due_time: string | null;
+}, now = Date.now()) {
+  if (schedule.earliest_start_date && schedule.due_date && schedule.earliest_start_date !== schedule.due_date
+    && isHistoricalResultDate(schedule.earliest_start_date, now)) {
+    return "不支持创建包含历史日期的多日任务；多日任务的开始日期不能早于今天，历史事项请分别补录为单日任务。";
+  }
+  if (!isHistoricalResultDate(schedule.due_date, now)) return null;
+  const duration = taskRangeDurationMinutes({
+    earliest_start_date: schedule.earliest_start_date ?? "", earliest_start_time: schedule.earliest_start_time ?? "",
+    due_date: schedule.due_date ?? "", due_time: schedule.due_time ?? ""
+  });
+  return duration !== null && duration >= 15 ? null : "历史单日任务须填写完整且有效的开始和结束时间（至少 15 分钟）；当前内容仍可保存为草稿。";
+}
+
 export function taskResultEditable(task: Task | null | undefined, now = Date.now(), metadata?: TaskMetadata | null) {
   if (!task || task.status === "deleted" || task.deleted_at) return false;
+  if (historicalTaskCompletionLocked(task, now)) return false;
   if (metadata?.task_id === task.id) {
     if (task.status !== "done" && metadata.completion_backfill_allowed) return true;
     if (task.status === "done" && metadata.completion_recorded_at) {
@@ -74,6 +109,7 @@ export function timelineTaskCompletionAction(block: PlanBlock | null, task: Task
   if (!blockResultEditable(recordDate, now) || recordDate !== date) return null;
   if (!["open", "scheduled", "done"].includes(task.status)) return null;
   const outcome = block.review?.outcome ?? block.execution_status;
+  if (historicalBlockCompletionLocked(recordDate, block, now)) return null;
   if (outcome !== "planned" && outcome !== "completed") return block.review ? null : "clear";
   return outcome === "completed" ? "uncomplete-block" : "complete-block";
 }
@@ -88,7 +124,9 @@ export function timelineTaskDialogState(block: Pick<PlanBlock, "task_status" | "
   return { status: "executing", label: "执行中", action: null } as const;
 }
 
-// Ended tasks retain their facts, but unexecuted current/future blocks are no longer work to do.
+// Recycled tasks are hidden from the timeline without deleting their facts.
+// Completed tasks retain facts, but unexecuted current/future blocks are no longer work to do.
 export function visibleTaskScheduleBlocks(blocks: PlanBlock[], date: string, today: string) {
-  return blocks.filter((block) => !(date >= today && block.task_status === "done" && block.execution_status === "planned" && !block.review));
+  return blocks.filter((block) => block.task_status !== "deleted"
+    && !(date >= today && block.task_status === "done" && block.execution_status === "planned" && !block.review));
 }

@@ -89,7 +89,7 @@ fn missed_history_and_other_same_day_blocks_each_prevent_auto_completion() {
 }
 
 #[test]
-fn historical_nonlatest_cancellation_reopens_auto_without_replaying_notes_or_review_metadata() {
+fn historical_nonlatest_cancellation_is_rejected_without_changing_notes_or_review_metadata() {
     for api in ["resolve", "capture", "review"] {
         let _clock = TestNow::new("2026-10-22T18:00:00+08:00");
         let mut db = Database::in_memory().unwrap();
@@ -103,24 +103,25 @@ fn historical_nonlatest_cancellation_reopens_auto_without_replaying_notes_or_rev
         assert_state(&db,&id,true);
         let other_block = rows(&db,&second);
         let _late = TestNow::new("2027-02-01T18:00:00+08:00");
-        write(&mut db,api,FIRST,&id,&first,ReviewOutcome::NotStarted).unwrap();
-        assert_state(&db,&id,false);
+        let before = fact_fingerprint(&db.connection, "task_completion", &id).unwrap();
+        let error = write(&mut db,api,FIRST,&id,&first,ReviewOutcome::NotStarted).unwrap_err();
+        assert!(error.to_string().contains("历史完成记录不支持取消"));
+        assert_state(&db,&id,true);
+        assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), before);
         assert_eq!(rows(&db,&second),other_block);
         let corrected = db.get_review_entry_for_block(&first).unwrap();
-        assert_eq!(corrected.outcome,"not_started");
-        assert_eq!(corrected.notes.as_deref(),Some("block note"));
+        assert_eq!(corrected.outcome,original.outcome);
+        assert_eq!(corrected.notes,original.notes);
         assert_eq!(corrected.actual_minutes,original.actual_minutes);
         assert_eq!(corrected.defer_reason,original.defer_reason);
         assert_eq!(corrected.remaining_workload_minutes,original.remaining_workload_minutes);
         assert_eq!(corrected.created_at,original.created_at);
         assert_eq!(corrected.updated_at,original.updated_at);
-        write(&mut db,api,FIRST,&id,&first,ReviewOutcome::Completed).unwrap();
-        assert_state(&db,&id,true);
     }
 }
 
 #[test]
-fn clearing_nonlatest_historical_capture_reopens_auto_and_preserves_other_block() {
+fn clearing_nonlatest_historical_capture_is_rejected_and_preserves_other_block() {
     let _clock = TestNow::new("2026-10-22T18:00:00+08:00");
     let mut db = Database::in_memory().unwrap();
     let id = task(&mut db);
@@ -130,30 +131,45 @@ fn clearing_nonlatest_historical_capture_reopens_auto_and_preserves_other_block(
     write(&mut db,"capture",SECOND,&id,&second,ReviewOutcome::Completed).unwrap();
     let other = rows(&db,&second);
     let _late = TestNow::new("2027-02-01T18:00:00+08:00");
-    db.clear_execution_capture(FIRST,&first).unwrap();
-    assert_state(&db,&id,false);
+    let before = fact_fingerprint(&db.connection, "task_completion", &id).unwrap();
+    assert!(db.clear_execution_capture(FIRST,&first).unwrap_err().to_string().contains("历史完成记录不支持取消"));
+    assert_state(&db,&id,true);
     assert_eq!(rows(&db,&second),other);
-    assert_eq!(execution_snapshot(&db.connection,&first).unwrap().execution_status,"planned");
+    assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), before);
+    assert_eq!(execution_snapshot(&db.connection,&first).unwrap().execution_status,"completed");
 }
 
 #[test]
-fn explicit_early_completion_protects_global_done_for_all_daily_corrections_and_clear() {
+fn explicit_cross_day_completion_protects_daily_corrections_but_clear_reopens() {
     for api in ["resolve", "capture", "review", "clear"] {
         for historical in [false,true] {
             let _clock = TestNow::new("2026-10-21T18:00:00+08:00");
             let mut db = Database::in_memory().unwrap();
             let id = task(&mut db);
+            db.connection.execute("UPDATE tasks SET earliest_start_date = ?2, due_date = ?3 WHERE id = ?1",
+                params![id, FIRST, SECOND]).unwrap();
             let first = block(&db,&id,FIRST,"09");
             let future = block(&db,&id,SECOND,"15");
             let future_before = rows(&db,&future);
             db.complete_task(&id,Some(&first)).unwrap();
             assert!(!database_execution::is_automatic_completion(&db.connection,&id).unwrap());
             let _late = historical.then(|| TestNow::new("2027-02-01T18:00:00+08:00"));
+            if historical {
+                let before = fact_fingerprint(&db.connection, "task_completion", &id).unwrap();
+                let result = if api == "clear" { db.clear_execution_capture(FIRST,&first) }
+                    else { write(&mut db,api,FIRST,&id,&first,ReviewOutcome::NotStarted) };
+                assert!(result.unwrap_err().to_string().contains("历史完成记录不支持取消"));
+                assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), before);
+                assert_state(&db,&id,true);
+                continue;
+            }
             if api == "clear" { db.clear_execution_capture(FIRST,&first).unwrap(); }
             else { write(&mut db,api,FIRST,&id,&first,ReviewOutcome::NotStarted).unwrap(); }
-            assert_state(&db,&id,true);
+            assert_state(&db,&id,api != "clear");
             assert_eq!(rows(&db,&future),future_before);
-            if !historical {
+            if api == "clear" {
+                assert_eq!(execution_snapshot(&db.connection,&first).unwrap().execution_status, "planned");
+            } else if !historical {
                 db.reopen_manual_task(&id,FIRST).unwrap();
                 assert_state(&db,&id,false);
                 assert_eq!(execution_snapshot(&db.connection,&first).unwrap().execution_status,
@@ -215,8 +231,11 @@ fn completion_provenance_survives_reload_trash_restore_and_explicit_completion_u
     let mut db = Database::open(&path).unwrap();
     for id in [&automatic,&explicit] { db.restore_task(id).unwrap(); }
     for (id,block) in [(&automatic,&auto_block),(&explicit,&explicit_block)] {
-        db.clear_execution_capture(FIRST,block).unwrap();
-        assert_state(&db,id,id == &explicit);
+        let before = fact_fingerprint(&db.connection, "task_completion", id).unwrap();
+        assert!(db.clear_execution_capture(FIRST,block).unwrap_err().to_string().contains("历史完成记录不支持取消"));
+        assert_state(&db,id,true);
+        assert_eq!(fact_fingerprint(&db.connection, "task_completion", id).unwrap(), before);
+        assert_eq!(database_execution::is_automatic_completion(&db.connection,id).unwrap(), id == &automatic);
     }
 }
 
@@ -292,7 +311,7 @@ fn automatic_cancellation_restores_unknown_workload_without_inventing_an_estimat
     db.connection.execute("UPDATE tasks SET remaining_workload_minutes = NULL WHERE id = ?1",[&id]).unwrap();
     let first = block(&db,&id,FIRST,"09");
     write(&mut db,"capture",FIRST,&id,&first,ReviewOutcome::Completed).unwrap();
-    let _late = TestNow::new("2027-02-01T18:00:00+08:00");
+    let _later_today = TestNow::new("2026-10-21T23:59:59+08:00");
     db.clear_execution_capture(FIRST,&first).unwrap();
     let reopened = db.get_task(&id).unwrap();
     assert_eq!(reopened.status,"scheduled");
@@ -402,6 +421,8 @@ fn reviewed_completion_clear_preserves_supplement_and_other_dates_without_a_plan
             let _clock = TestNow::new("2026-10-22T18:00:00+08:00");
             let mut db = Database::in_memory().unwrap();
             let id = task(&mut db);
+            db.connection.execute("UPDATE tasks SET earliest_start_date = ?2, due_date = ?3 WHERE id = ?1",
+                params![id, FIRST, SECOND]).unwrap();
             let first = block(&db, &id, FIRST, "09");
             let second = block(&db, &id, SECOND, "09");
             write(&mut db, "review", FIRST, &id, &first, ReviewOutcome::Completed).unwrap();
@@ -413,10 +434,17 @@ fn reviewed_completion_clear_preserves_supplement_and_other_dates_without_a_plan
             let other = rows(&db, &first);
             let old_revision: i64 = db.connection.query_row("SELECT revision FROM review_form_drafts WHERE item_id = ?1", [&second], |row| row.get(0)).unwrap();
             let _late = historical.then(|| TestNow::new("2027-02-01T18:00:00+08:00"));
+            if historical {
+                let before = fact_fingerprint(&db.connection, "task_completion", &id).unwrap();
+                assert!(db.clear_execution_capture(SECOND, &second).unwrap_err().to_string().contains("历史完成记录不支持取消"));
+                assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), before);
+                assert_eq!(db.get_review_entry_for_block(&second).unwrap().notes, saved.notes);
+                continue;
+            }
             db.clear_execution_capture(SECOND, &second).unwrap();
             let current = db.get_task(&id).unwrap();
-            assert_eq!(current.status, if explicit { "done" } else { "scheduled" });
-            assert_eq!(current.remaining_workload_minutes, Some(if explicit { 0 } else { 45 }));
+            assert_eq!(current.status, "scheduled");
+            assert_eq!(current.remaining_workload_minutes, Some(45));
             assert_eq!(current.actual_minutes, 23);
             assert_eq!(rows(&db, &first), other);
             let selected = db.get_day_schedule(SECOND).unwrap().task_blocks.remove(0);
@@ -432,7 +460,6 @@ fn reviewed_completion_clear_preserves_supplement_and_other_dates_without_a_plan
             if !historical {
                 assert!(db.save_review_form_draft(SECOND, "task", &second, "{}", old_revision).is_err());
                 assert!(db.list_review_form_drafts(SECOND).unwrap().iter().any(|draft| draft.item_id == second));
-                if explicit { db.reopen_manual_task(&id, SECOND).unwrap(); }
                 db.save_review_entry(SECOND, ReviewEntryInput { plan_block_id: second, outcome: ReviewOutcome::Completed,
                     actual_minutes: saved.actual_minutes, defer_reason: saved.defer_reason, notes: saved.notes,
                     remaining_workload_minutes: saved.remaining_workload_minutes }).unwrap();
@@ -529,17 +556,15 @@ fn clearing_reviewed_results_uses_final_review_outcome_when_legacy_block_status_
     }
 }
 
+// Simulate an existing unfinished record from before historical creation auto-completed.
 fn confirmed_historical_single_day(db: &mut Database) -> String {
-    let draft = db.create_manual_task_draft(TaskDraftInput {
-        item_type: "task".into(), recurring_settings: None, title: "补录历史单日任务".into(), notes: Some("原任务备注".into()),
-        priority: Some(Priority::Medium), earliest_start_date: Some(FIRST.into()), earliest_start_time: Some("09:00".into()),
-        due_date: Some(FIRST.into()), due_time: Some("09:30".into()), total_workload_minutes: Some(30),
-        remaining_workload_minutes: Some(30), field_states_json: "{}".into(), tags: vec![], recurrence: None,
-    }).unwrap();
-    let task = db.confirm_task_draft(&draft.id, &draft.confirmation_token).unwrap();
-    assert_eq!(task.status, "open");
-    assert!(db.get_day_schedule(FIRST).unwrap().task_blocks.is_empty());
-    task.id
+    let id = db.create_manual_task("补录历史单日任务").unwrap();
+    db.connection.execute("UPDATE tasks SET notes = '原任务备注', priority = 'medium',
+        earliest_start_date = ?2, earliest_start_time = '09:00', due_date = ?2, due_time = '09:30',
+        earliest_start_at = ?3, due_at = ?4, total_workload_minutes = 30, remaining_workload_minutes = 30,
+        estimated_minutes = 30 WHERE id = ?1",
+        params![id, FIRST, format!("{FIRST}T09:00:00+08:00"), format!("{FIRST}T09:30:00+08:00")]).unwrap();
+    id
 }
 
 #[test]
@@ -584,35 +609,28 @@ fn historical_list_completion_materializes_or_reuses_one_block_with_original_dat
 }
 
 #[test]
-fn historical_completion_cancel_and_undo_keep_the_block_planned_and_allow_recompletion_without_duplicates() {
+fn historical_completion_cannot_be_cancelled_cleared_or_undone() {
     for action in ["reopen", "undo", "clear"] {
         let _clock = TestNow::new("2026-11-01T18:00:00+08:00");
         let mut db = Database::in_memory().unwrap();
         let id = confirmed_historical_single_day(&mut db);
         db.complete_task(&id, None).unwrap();
         let block_id = db.get_day_schedule(FIRST).unwrap().task_blocks[0].id.clone();
-        match action {
-            "reopen" => { db.reopen_manual_task(&id, "2026-11-01").unwrap(); }
-            "undo" => { let undo = db.latest_undo().unwrap().unwrap(); assert_eq!(undo.target_type, "task_completion"); db.apply_undo(&undo.id).unwrap(); }
-            "clear" => { let _late = TestNow::new("2027-01-01T18:00:00+08:00"); db.clear_execution_capture(FIRST, &block_id).unwrap(); }
+        let before = fact_fingerprint(&db.connection, "task_completion", &id).unwrap();
+        let result = match action {
+            "reopen" => db.reopen_manual_task(&id, "2026-11-01").map(|_| ()),
+            "undo" => { let undo = db.latest_undo().unwrap().unwrap(); assert_eq!(undo.target_type, "task_completion"); db.apply_undo(&undo.id).map(|_| ()) },
+            "clear" => { let _late = TestNow::new("2027-01-01T18:00:00+08:00"); db.clear_execution_capture(FIRST, &block_id) },
             _ => unreachable!(),
-        }
-        let task = db.get_task(&id).unwrap();
-        assert_eq!(task.status, "scheduled", "{action}");
-        assert_eq!(task.remaining_workload_minutes, Some(30));
-        assert!(!task.is_incomplete);
-        let schedule = db.get_day_schedule(FIRST).unwrap();
-        assert_eq!(schedule.task_blocks.len(), 1);
-        assert_eq!(schedule.task_blocks[0].id, block_id);
-        assert_eq!(schedule.task_blocks[0].execution_status, "planned");
-        assert_eq!(schedule.task_blocks[0].execution_captured_at, None);
-        assert!(db.get_task_metadata(&id).unwrap().completion_backfill_allowed);
-        db.complete_task(&id, None).unwrap();
+        };
+        assert!(result.unwrap_err().to_string().contains("历史完成记录不支持取消"), "{action}");
+        assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), before);
+        assert_eq!(db.get_task(&id).unwrap().status, "done");
+        assert_eq!(db.get_task(&id).unwrap().remaining_workload_minutes, Some(0));
         let schedule = db.get_day_schedule(FIRST).unwrap();
         assert_eq!(schedule.task_blocks.len(), 1);
         assert_eq!(schedule.task_blocks[0].id, block_id);
         assert_eq!(schedule.task_blocks[0].execution_status, "completed");
-        assert_eq!(db.get_task(&id).unwrap().result_date.as_deref(), Some(FIRST));
     }
 }
 
@@ -695,19 +713,20 @@ fn historical_backfill_does_not_fabricate_missing_times_or_bypass_old_task_resul
 }
 
 #[test]
-fn cancelled_historical_backfills_keep_content_time_lock_and_cannot_move_frozen_context_into_other_dates() {
+fn historical_backfills_keep_content_time_lock_and_cannot_move_frozen_context_into_other_dates() {
     for action in ["reopen", "undo", "clear"] {
         let _clock = TestNow::new("2026-11-01T18:00:00+08:00");
         let mut db = Database::in_memory().unwrap();
         let id = confirmed_historical_single_day(&mut db);
         db.complete_task(&id, None).unwrap();
         let block_id = db.get_day_schedule(FIRST).unwrap().task_blocks[0].id.clone();
-        match action {
-            "reopen" => { db.reopen_manual_task(&id, "2026-11-01").unwrap(); }
-            "undo" => { let undo = db.latest_undo().unwrap().unwrap(); db.apply_undo(&undo.id).unwrap(); }
-            "clear" => { db.clear_execution_capture(FIRST, &block_id).unwrap(); }
+        let result = match action {
+            "reopen" => db.reopen_manual_task(&id, "2026-11-01").map(|_| ()),
+            "undo" => { let undo = db.latest_undo().unwrap().unwrap(); db.apply_undo(&undo.id).map(|_| ()) },
+            "clear" => db.clear_execution_capture(FIRST, &block_id),
             _ => unreachable!(),
-        }
+        };
+        assert!(result.unwrap_err().to_string().contains("历史完成记录不支持取消"));
         assert!(db.get_task(&id).unwrap().execution_locked);
         let before = fact_fingerprint(&db.connection, "task_completion", &id).unwrap();
         for (start, end) in [("2026-10-22T10:00:00+08:00", "2026-10-22T10:30:00+08:00"),
@@ -716,11 +735,165 @@ fn cancelled_historical_backfills_keep_content_time_lock_and_cannot_move_frozen_
                 title: "尝试改期".into(), notes: None, priority: None,
                 earliest_start_at: Some(start.into()), due_at: Some(end.into()), estimated_minutes: Some(30),
             }).unwrap_err();
-            assert!(error.to_string().contains("锁定"), "{action}: {error}");
+            assert!(error.to_string().contains("任务已完成"), "{action}: {error}");
             assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), before);
         }
         db.complete_task(&id, None).unwrap();
         assert_eq!(db.get_task(&id).unwrap().result_date.as_deref(), Some(FIRST));
         assert_eq!(db.get_day_schedule(FIRST).unwrap().task_blocks[0].id, block_id);
+    }
+}
+
+#[test]
+fn explicit_cross_day_clear_reloads_visible_day_without_replaying_another_days_completion_snapshot() {
+    for api in ["capture", "review"] {
+        for selected_date in [FIRST, SECOND] {
+            for historical in [false, true] {
+                let _clock = TestNow::new("2026-10-21T18:00:00+08:00");
+                let dir = tempfile::tempdir().unwrap();
+                let path = dir.path().join("cross-day-clear.sqlite");
+                let mut db = Database::open(&path).unwrap();
+                let id = confirmed_cross_day_draft(&mut db, "2026-10-23");
+                let first = plan_day(&mut db, &id, FIRST, "direct");
+                let second = plan_day(&mut db, &id, SECOND, "direct");
+                let future = block(&db, &id, "2026-10-23", "09");
+                write(&mut db, api, FIRST, &id, &first, ReviewOutcome::Completed).unwrap();
+                let _next = TestNow::new("2026-10-22T18:00:00+08:00");
+                write(&mut db, api, SECOND, &id, &second, ReviewOutcome::Partial).unwrap();
+                db.complete_task(&id, Some(&second)).unwrap();
+                let undo = db.latest_undo().unwrap().unwrap();
+                let selected = if selected_date == FIRST { &first } else { &second };
+                let other = if selected_date == FIRST { &second } else { &first };
+                let other_before = rows(&db, other);
+                let future_before = rows(&db, &future);
+                let other_review = fact_rows(&db.connection, "SELECT * FROM review_entries WHERE plan_block_id = ?1", other).unwrap();
+                let before = db.get_task(&id).unwrap();
+                assert_state(&db, &id, true);
+                drop(db);
+                let _late = historical.then(|| TestNow::new("2027-02-01T18:00:00+08:00"));
+                let mut db = Database::open(&path).unwrap();
+                if historical || selected_date < shanghai_today().as_str() {
+                    let facts = fact_fingerprint(&db.connection, "task_completion", &id).unwrap();
+                    assert!(db.clear_execution_capture(selected_date, selected).unwrap_err().to_string().contains("历史完成记录不支持取消"));
+                    assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), facts);
+                    drop(db);
+                    let db = Database::open(&path).unwrap();
+                    assert_state(&db, &id, true);
+                    assert_eq!(rows(&db, other), other_before);
+                    assert_eq!(rows(&db, &future), future_before);
+                    continue;
+                }
+                db.clear_execution_capture(selected_date, selected).unwrap();
+                drop(db);
+                let mut db = Database::open(&path).unwrap();
+                assert_state(&db, &id, false);
+                let after = db.get_task(&id).unwrap();
+                assert_eq!((after.earliest_start_date, after.due_date, after.earliest_start_at, after.due_at),
+                    (before.earliest_start_date, before.due_date, before.earliest_start_at, before.due_at));
+                assert_eq!(rows(&db, other), other_before, "must not replay the other day's partial snapshot");
+                assert_eq!(rows(&db, &future), future_before);
+                assert_eq!(fact_rows(&db.connection, "SELECT * FROM review_entries WHERE plan_block_id = ?1", other).unwrap(), other_review);
+                let visible = db.get_day_schedule(selected_date).unwrap().task_blocks.into_iter().find(|block| block.id == *selected).unwrap();
+                assert_eq!(visible.execution_status, "planned");
+                assert!(visible.review.is_none());
+                assert_eq!(db.connection.query_row("SELECT status FROM undo_entries WHERE id = ?1", [&undo.id], |row| row.get::<_, String>(0)).unwrap(), "conflicted");
+                assert!(db.apply_undo(&undo.id).is_err());
+                assert_state(&db, &id, false);
+            }
+        }
+    }
+}
+
+#[test]
+fn cross_day_auto_completion_requires_every_inclusive_date_even_after_the_range_ends() {
+    const LAST: &str = "2026-10-23";
+    for api in ["resolve", "capture", "review"] {
+        for missing in [FIRST, SECOND, LAST] {
+            for as_of in ["2026-10-23T18:00:00+08:00", "2027-02-01T18:00:00+08:00"] {
+                let _clock = TestNow::new("2026-10-21T18:00:00+08:00");
+                let mut db = Database::in_memory().unwrap();
+                let id = confirmed_cross_day_draft(&mut db, LAST);
+                let present: Vec<_> = [FIRST, SECOND, LAST].into_iter().filter(|date| *date != missing)
+                    .map(|date| (date, block(&db, &id, date, "09"))).collect();
+                // Duplicates and completed out-of-range reservations cannot fill a missing date.
+                let duplicate = block(&db, &id, present[0].0, "15");
+                let outside = block(&db, &id, "2026-10-20", "09");
+                let _later = TestNow::new(as_of);
+                for (date, block_id) in present.iter().map(|(date, id)| (*date, id))
+                    .chain([(present[0].0, &duplicate), ("2026-10-20", &outside)]) {
+                    write(&mut db, api, date, &id, block_id, ReviewOutcome::Completed).unwrap();
+                    assert_ne!(db.get_task(&id).unwrap().status, "done", "{api}/{missing}/{as_of}");
+                    assert_eq!(db.get_task(&id).unwrap().remaining_workload_minutes, Some(75));
+                }
+                let missing_block = block(&db, &id, missing, "09");
+                write(&mut db, api, missing, &id, &missing_block, ReviewOutcome::Completed).unwrap();
+                assert_state(&db, &id, true);
+                assert!(database_execution::is_automatic_completion(&db.connection, &id).unwrap());
+                let before = fact_fingerprint(&db.connection, "task_completion", &id).unwrap();
+                let result = db.clear_execution_capture(missing, &missing_block);
+                if missing < shanghai_today().as_str() {
+                    assert!(result.unwrap_err().to_string().contains("历史完成记录不支持取消"));
+                    assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), before);
+                    assert_state(&db, &id, true);
+                } else {
+                    result.unwrap();
+                    assert_state(&db, &id, false);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn explicit_cross_day_clear_failure_rolls_back_all_facts_including_undo_and_review_supplements() {
+    for (table, event) in [("task_estimates", "INSERT"), ("tasks", "UPDATE"), ("undo_entries", "UPDATE")] {
+        let _clock = TestNow::new("2026-10-21T18:00:00+08:00");
+        let mut db = Database::in_memory().unwrap();
+        let id = confirmed_cross_day_draft(&mut db, SECOND);
+        let first = plan_day(&mut db, &id, FIRST, "direct");
+        let second = plan_day(&mut db, &id, SECOND, "direct");
+        write(&mut db, "review", FIRST, &id, &first, ReviewOutcome::Completed).unwrap();
+        let _next = TestNow::new("2026-10-22T18:00:00+08:00");
+        db.complete_task(&id, Some(&second)).unwrap();
+        let tables = ["tasks", "daily_plans", "plan_blocks", "review_entries", "review_form_drafts",
+            "task_changes", "task_estimates", "task_completion_snapshots", "undo_entries"];
+        let snapshot = |db: &Database| tables.map(|table| fact_rows(&db.connection, &format!("SELECT * FROM {table} WHERE ?1 = ?1 ORDER BY rowid"), &id).unwrap());
+        let before = snapshot(&db);
+        db.connection.execute_batch(&format!("CREATE TRIGGER fail_cross_day_clear BEFORE {event} ON {table}
+            BEGIN SELECT RAISE(ABORT, 'cross-day clear failed'); END;")).unwrap();
+        assert!(db.clear_execution_capture(SECOND, &second).is_err(), "{table}");
+        assert_eq!(snapshot(&db), before, "{table}");
+    }
+}
+
+#[test]
+fn cross_day_clear_restores_legacy_or_unknown_workload_but_preserves_single_day_explicit_protection() {
+    for cross_day in [false, true] {
+        for provenance in ["snapshot", "unknown_workload", "legacy_undo", "no_snapshot"] {
+            let _clock = TestNow::new("2026-10-21T18:00:00+08:00");
+            let mut db = Database::in_memory().unwrap();
+            let id = task(&mut db);
+            db.connection.execute("UPDATE tasks SET earliest_start_date = ?2, due_date = ?3 WHERE id = ?1",
+                params![id, FIRST, if cross_day { SECOND } else { FIRST }]).unwrap();
+            if provenance == "unknown_workload" {
+                db.connection.execute("UPDATE tasks SET remaining_workload_minutes = NULL WHERE id = ?1", [&id]).unwrap();
+            }
+            let first = block(&db, &id, FIRST, "09");
+            db.complete_task(&id, Some(&first)).unwrap();
+            if matches!(provenance, "legacy_undo" | "no_snapshot") {
+                db.connection.execute("DELETE FROM task_completion_snapshots WHERE task_id = ?1", [&id]).unwrap();
+            }
+            if provenance == "no_snapshot" {
+                db.connection.execute("DELETE FROM undo_entries WHERE target_type = 'task_completion' AND target_id = ?1", [&id]).unwrap();
+            }
+            db.clear_execution_capture(FIRST, &first).unwrap();
+            let current = db.get_task(&id).unwrap();
+            assert_eq!(current.status, if cross_day { "scheduled" } else { "done" }, "{provenance}");
+            let expected = if !cross_day { Some(0) } else { match provenance {
+                "unknown_workload" => None, "no_snapshot" => Some(120), _ => Some(75),
+            }};
+            assert_eq!(current.remaining_workload_minutes, expected, "{provenance}");
+            assert_eq!(execution_snapshot(&db.connection, &first).unwrap().execution_status, "planned");
+        }
     }
 }

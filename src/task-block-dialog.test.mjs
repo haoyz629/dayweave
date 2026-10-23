@@ -5,7 +5,7 @@ import vm from "node:vm";
 import ts from "typescript";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { timelineTaskDialogState, timelineTaskCompletionAction, resultWindowOpen, executionResultForOutcome, taskResultEditable } from "./task-result.ts";
+import { timelineTaskDialogState, timelineTaskCompletionAction, resultWindowOpen, executionResultForOutcome, taskResultEditable, historicalBlockCompletionLocked, HISTORY_COMPLETION_LOCKED_MESSAGE } from "./task-result.ts";
 import { canCaptureTaskResult } from "./review-workflow.ts";
 
 const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
@@ -32,7 +32,8 @@ export function createDialogHarness({ status = "executing", expired = false, del
   task.due_date = crossDay ? "2026-10-22" : date;
   const calls = [];
   const state = {
-    React, selectedBlock: block, selectedTask: task, taskResultEditable, clock: { getTime: () => now },
+    React, selectedBlock: block, selectedTask: task, taskResultEditable, historicalBlockCompletionLocked, HISTORY_COMPLETION_LOCKED_MESSAGE, clock: { getTime: () => now },
+    selectedTaskIsCrossDay: crossDay,
     selectedBlockDialog: timelineTaskDialogState(block),
     selectedBlockCompletionAction: timelineTaskCompletionAction(block, task, date, today, now),
     canRecordSelectedBlock: canCaptureTaskResult(date, today, block, now),
@@ -46,7 +47,6 @@ export function createDialogHarness({ status = "executing", expired = false, del
     timeRangeLabel: (start, end) => `${start.slice(11, 16)} - ${end.slice(11, 16)}`,
     closeTimelinePanel() { calls.push(["close"]); },
     openTimelineTask(...args) { calls.push(["open", ...args]); },
-    requestTimelineTaskCompletion() { calls.push(["complete-task", task.id]); },
     adjustSelectedBlockTime() { calls.push(["adjust"]); },
     removeSelectedBlock() { calls.push(["remove", block.id]); },
     quickCompleteTimelineBlock(block) { calls.push(["reopen", block.id]); },
@@ -108,12 +108,19 @@ test("footer buttons retain reopen and independent new-task behavior", () => {
   assert.equal(unfinished.state.selectedTask.status, "scheduled");
 });
 
-test("historical results stay editable and cancel only that blocks completion", () => {
+test("historical completed results cannot be cancelled or changed to incomplete", () => {
   const completed = createDialogHarness({ status: "completed", expired: true });
-  assert.equal(button(completed, "execution-reopen-task").props.disabled, false);
-  assert.match(button(completed, "execution-reopen-task").props.title, /仅取消当天任务块/);
-  assert.ok(button(completed, "primary-action"));
-  assert.match(completed.markup(), /保存历史结果|不改变其他日期的任务块/);
+  completed.state.selectedBlock.execution_note = "创建历史任务自动完成";
+  assert.equal(button(completed, "execution-reopen-task").props.disabled, true);
+  assert.equal(button(completed, "execution-reopen-task").props.title, HISTORY_COMPLETION_LOCKED_MESSAGE);
+  assert.equal(button(completed, "primary-action"), undefined);
+  assert.equal(completed.elements().some(node => node.props["data-outcome"]), false);
+  assert.match(completed.markup(), /创建历史任务自动完成/);
+  assert.doesNotMatch(completed.markup(), /实际耗时|实际分钟/);
+  completed.state.selectedBlock.review = { outcome: "completed", notes: "独立复盘备注", actual_minutes: null, remaining_workload_minutes: null };
+  assert.match(completed.markup(), /创建历史任务自动完成/);
+  assert.match(completed.markup(), /独立复盘备注/);
+  assert.doesNotMatch(completed.markup(), /实际耗时|实际分钟/);
   const unfinished = createDialogHarness({ status: "not_completed", expired: true });
   assert.equal(button(unfinished, "execution-new-task").props.disabled, false);
   assert.ok(button(unfinished, "primary-action"));
@@ -159,35 +166,48 @@ test("dialog state handles legacy incomplete facts without conflicting actions",
 });
 
 test("current planned blocks expose direct removal and protected records do not", () => {
-  const current = createDialogHarness();
-  button(current, "execution-remove-today").props.onClick();
-  assert.deepEqual(current.calls, [["remove", "block"]]);
-  for (const options of [{ status: "completed" }, { status: "not_completed" }, { expired: true }, { deleted: true }]) {
-    assert.equal(button(createDialogHarness(options), "execution-remove-today"), undefined);
-  }
-  for (const flags of [{ busy: true }, { loading: true }, { savingExecution: true }, { quickCompletingBlockId: "block" }, { savingDraggedBlock: true }, { timelineDrag: {} }, { preview: {} }]) {
-    const current = createDialogHarness();
-    Object.assign(current.state, flags);
-    assert.equal(Boolean(button(current, "execution-remove-today").props.disabled), true);
+  for (const crossDay of [false, true]) {
+    const current = createDialogHarness({ crossDay });
+    button(current, "execution-remove-today").props.onClick();
+    assert.deepEqual(current.calls, [["remove", "block"]]);
+    for (const options of [{ status: "completed" }, { status: "not_completed" }, { expired: true }, { deleted: true }]) {
+      assert.equal(button(createDialogHarness({ ...options, crossDay }), "execution-remove-today"), undefined);
+    }
+    for (const flags of [{ busy: true }, { loading: true }, { savingExecution: true }, { quickCompletingBlockId: "block" }, { savingDraggedBlock: true }, { timelineDrag: {} }, { preview: {} }]) {
+      const current = createDialogHarness({ crossDay });
+      Object.assign(current.state, flags);
+      assert.equal(Boolean(button(current, "execution-remove-today").props.disabled), true);
+    }
   }
 });
 
-test("daily completion and whole-task completion have distinct visible actions", () => {
-  const current = createDialogHarness({ crossDay: true });
-  const choose = current.elements().find(node => node.props["data-outcome"] === "completed");
-  choose.props.onClick();
-  assert.match(renderToStaticMarkup(button(current, "primary-action")), />完成当天</);
-  assert.match(current.markup(), /全部日期完成后，任务自动完成/);
-  const complete = current.elements().find(node => node.props["data-action"] === "complete-task");
-  assert.ok(complete);
-  assert.equal(complete.props.disabled, false);
-  complete.props.onClick();
-  assert.deepEqual(current.calls, [["complete-task", "task"]]);
-  for (const options of [{ status: "completed", crossDay: true }, { deleted: true, crossDay: true }, { crossDay: false }]) {
+test("cross-day completion choices stay in the dialog until Save while keeping removal for unexecuted blocks", () => {
+  for (const status of ["executing", "completed", "not_completed"]) {
+    const current = createDialogHarness({ crossDay: true, status });
+    const complete = current.elements().find(node => node.props["data-action"] === "complete-task");
+    assert.ok(complete);
+    complete.props.onClick();
+    assert.deepEqual(current.calls, [], "choosing whole completion must not navigate or persist");
+    assert.equal(current.state.executionDraft.wholeTask, true);
+    assert.equal(current.elements().find(node => node.props["data-action"] === "complete-task").props["aria-pressed"], true);
+    assert.equal(current.elements().find(node => node.props["data-outcome"] === "completed").props["aria-pressed"], false);
+    assert.match(renderToStaticMarkup(button(current, "primary-action")), />保存</);
+    assert.equal(button(current, "execution-reopen-task"), undefined);
+    assert.equal(button(current, "execution-new-task"), undefined);
+    assert.equal(Boolean(button(current, "execution-remove-today")), status === "executing");
+    button(current, "quiet-button").props.onClick();
+    assert.deepEqual(current.calls, [["close"]]);
+    current.calls.length = 0;
+    button(current, "primary-action").props.onClick();
+    assert.equal(current.calls[0][0], "save");
+    assert.equal(current.calls[0][1].wholeTask, true);
+    current.elements().find(node => node.props["data-outcome"] === "completed").props.onClick();
+    assert.equal(current.state.executionDraft.wholeTask, false);
+    assert.match(current.markup(), /所有日期完成后，任务自动完成/);
+  }
+  for (const options of [{ deleted: true, crossDay: true }, { crossDay: false }]) {
     assert.equal(createDialogHarness(options).elements().some(node => node.props["data-action"] === "complete-task"), false);
   }
-  const completed = createDialogHarness({ status: "completed" });
-  assert.match(renderToStaticMarkup(button(completed, "execution-reopen-task")), /取消当天完成/);
 });
 
 test("a completed day of an active cross-day task still exposes whole-task completion", () => {
@@ -199,7 +219,7 @@ test("a completed day of an active cross-day task still exposes whole-task compl
   const whole = current.elements().find(node => node.props["data-action"] === "complete-task");
   assert.ok(whole);
   assert.equal(whole.props.disabled, false);
-  assert.ok(button(current, "execution-reopen-task"));
+  assert.equal(button(current, "execution-reopen-task"), undefined);
 });
 
 test("whole-task completion is the third existing outcome-row button only for cross-day tasks", () => {
@@ -208,7 +228,7 @@ test("whole-task completion is the third existing outcome-row button only for cr
     const group = current.elements().find(node => node.props.className === "floating-outcomes");
     assert.equal(group.props.style?.gridTemplateColumns, crossDay ? "repeat(3, minmax(0, 1fr))" : undefined);
     const labels = React.Children.toArray(group.props.children).map(child => child.props.children).flat().filter(child => typeof child === "string");
-    assert.deepEqual(labels, crossDay ? ["完成", "未完成", "完成整个任务"] : ["完成", "未完成"]);
+    assert.deepEqual(labels, crossDay ? ["当天完成", "未完成", "整体完成"] : ["完成", "未完成"]);
     assert.doesNotMatch(current.markup(), /execution-whole-task-action|已完成全部工作/);
   }
 });

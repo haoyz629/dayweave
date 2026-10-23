@@ -34,7 +34,7 @@ test("creation toast carries the new task identity into its arrangement action",
   actions.find(action => action.label === "查看安排").onClick();
   assert.deepEqual(calls, [["2026-10-23", "new-independent-task"]]);
   assert.equal(state.successToast.undoId, "undo");
-  assert.match(functions.get("commitNewTask"), /showCommittedToast\([\s\S]*result.item.id\)/);
+  assert.match(functions.get("commitNewTask"), /showCommittedToast\([\s\S]*result.item.id, !historicalTaskCompletionLocked\(result.item\)\)/);
   assert.match(text, /onOpenToday=\{\(date = today, taskId\) => requestNavigation\(\{ active: "今日", date, timelineReturnContext: taskId \? \{ date, taskId \} : undefined \}\)\}/);
 });
 

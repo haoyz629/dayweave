@@ -607,11 +607,11 @@ test("execution records live in timeline dialogs, not a separate Today subview",
 
 test("incomplete saves results and offers a plain independent draft from toast and details", () => {
   assert.match(appSource, /canCaptureTaskResult\(selectedDate, today, selectedBlock, clock.getTime\(\)\)/);
-  assert.match(appSource, /\|\| savingExecution \|\| busy \|\| quickCompletingBlockId/);
+  assert.match(appSource, /\|\| savingExecution \|\| busy \|\| loading \|\| preview \|\| quickCompletingBlockId/);
   assert.match(appSource, /canCaptureTaskResult\(selectedDate, today, selectedBlock, Date\.now\(\)\)/);
   assert.match(appSource, /await resolveTaskExecution\(resultDate, input\)/);
   assert.match(appSource, /仅记录当天结果，不改变其他日期的记录/);
-  assert.match(appSource, /全部日期完成后，任务自动完成/);
+  assert.match(appSource, /所有日期完成后，任务自动完成/);
   assert.match(appSource, /await saveExecutionCapture\(resultDate/);
   assert.match(appSource, /label: "新建任务"/);
   assert.match(appSource, /requestNavigation\(\{ active: "任务", taskSeed: planToast.taskSeed \}\)/);
@@ -658,7 +658,7 @@ test("whole-task controls keep their result window while historical blocks have 
   const details = appSource.slice(appSource.indexOf("function CompletedTaskDetails("), appSource.indexOf("function TaskWorkspace("));
   assert.match(details, /taskResultEditable\(task, now, metadata\)/);
   assert.match(details, /disabled=\{busy \|\| !editable\}/);
-  assert.match(details, /task.status === "done" \? "取消整体完成" : "完成整个任务"/);
+  assert.match(details, /task.status === "done" \? task.earliest_start_date && task.due_date && task.earliest_start_date < task.due_date \? "取消整体完成" : "取消完成" : task.earliest_start_date && task.due_date && task.earliest_start_date < task.due_date \? "完成整个任务" : "完成任务"/);
   assert.match(appSource, /disabled=\{!completionAction \|\| Boolean\(quickCompletingBlockId\)/);
   assert.match(appSource, /selectedBlockCompletionAction !== selectedBlockDialog.action/);
   assert.match(appSource, /action === "complete-block" \|\| action === "uncomplete-block"/);

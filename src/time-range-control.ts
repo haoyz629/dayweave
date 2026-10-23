@@ -13,6 +13,24 @@ export function selectDateBoundary(start: string, end: string, activeField: Time
   };
 }
 
+export function taskDateRangeIncludesHistory(start: string, end: string, today: string) {
+  return Boolean(start && end && start !== end && start < today);
+}
+
+export function selectTaskDateBoundary(
+  start: string, end: string, activeField: TimeRangeEdge, date: string, today: string,
+  dateMode: "single" | "range" = start === end ? "single" : "range"
+) {
+  if (dateMode === "single") return { start: date, end: date, activeField };
+  // Equal boundaries do not leave explicit multi-day mode or enable history.
+  if (date < today) return null;
+  const next = selectDateBoundary(start, end, activeField, date);
+  return taskDateRangeIncludesHistory(next.start, next.end, today) ? null : {
+    ...next,
+    activeField: dateMode === "range" ? next.activeField : activeField
+  };
+}
+
 export type MinuteRange = {
   start: number;
   end: number;

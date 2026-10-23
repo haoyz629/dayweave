@@ -4,7 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 import React from "react";
-import { taskResultEditable, taskListStatus, visibleTaskScheduleBlocks } from "./task-result.ts";
+import { taskResultEditable, taskListStatus, visibleTaskScheduleBlocks, historicalTaskCompletionLocked, HISTORY_COMPLETION_LOCKED_MESSAGE } from "./task-result.ts";
 
 const source = ts.createSourceFile("App.tsx", readFileSync(new URL("./App.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const handlers = new Map(), summaries = new Map();
@@ -30,7 +30,7 @@ test("historical list completion follows backend eligibility without widening le
   assert.equal(taskResultEditable(task, now, { ...metadata, completion_backfill_allowed: false }), false);
   const done = { ...task, status: "done", result_date: metadata.completion_date, result_ends_at: metadata.completion_ends_at };
   const completedMetadata = { ...metadata, completion_backfill_allowed: false, completion_recorded_at: recorded };
-  for (const offset of [0, 6 * 3600000]) assert.equal(taskResultEditable(done, now + offset, completedMetadata), true);
+  for (const offset of [0, 6 * 3600000]) assert.equal(taskResultEditable(done, now + offset, completedMetadata), false, "historical result_date overrides freshly recorded completion");
   for (const offset of [-1, 6 * 3600000 + 1]) assert.equal(taskResultEditable(done, now + offset, completedMetadata), false);
   assert.equal(taskResultEditable({ ...done, updated_at: "2026-11-02T18:00:00+08:00" }, now + 86400000, completedMetadata), false);
   assert.equal(taskResultEditable(done, now, { ...completedMetadata, task_id: "other" }), false);
@@ -56,8 +56,9 @@ test("historical pool action opens the task list instead of a disabled or duplic
 test("real list completion and reopen handlers commit before refreshing and keep metadata current", async () => {
   for (const action of ["transition", "reopen"]) for (const fail of [false, true]) {
     const calls = [];
-    const state = { selectedTask: { ...task, status: action === "reopen" ? "done" : "open" }, busy: false, today: "2026-11-01", preferredSelection: { current: null }, taskListStatus,
-      uiErrorMessage: String, statusCopy: { scheduled: "已安排" },
+    const state = { selectedTask: { ...task, status: action === "reopen" ? "done" : "open", result_date: "2026-11-01" }, busy: false, today: "2026-11-01", preferredSelection: { current: null }, taskListStatus,
+      uiErrorMessage: String, statusCopy: { scheduled: "已安排" }, taskResultEditable, historicalTaskCompletionLocked, HISTORY_COMPLETION_LOCKED_MESSAGE, selectedMetadata: null,
+      Date: class extends Date { static now() { return Date.parse("2026-11-01T12:00:00+08:00"); } },
       async completeTask(id, block, note) { calls.push(["complete", id, block, note]); if (fail) throw Error("写入失败"); return { ...task, status: "done" }; },
       async reopenManualTask(id, date) { calls.push(["reopen", id, date]); if (fail) throw Error("写入失败"); return { ...task, status: "scheduled" }; },
       onTaskCommitted(value) { calls.push(["commit", value.status]); },

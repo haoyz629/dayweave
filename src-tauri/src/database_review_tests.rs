@@ -493,7 +493,7 @@ fn historical_unknown_minutes_do_not_guess_actuals_or_submit_drafts_automaticall
 }
 
 #[test]
-fn historical_light_result_syncs_task_without_overwriting_actuals_and_allows_later_capture() {
+fn historical_light_result_syncs_task_preserves_actuals_and_rejects_cancellation_but_allows_later_capture() {
     let _clock = TestToday::new(TODAY);
     let mut database = Database::in_memory().unwrap();
     let task_id = task(&mut database);
@@ -505,14 +505,27 @@ fn historical_light_result_syncs_task_without_overwriting_actuals_and_allows_lat
     }).unwrap();
     assert_eq!(execution_snapshot(&database.connection, &id).unwrap().execution_status, "completed");
     assert_eq!(database.get_task(&task_id).unwrap().status, "done");
+    let facts = |database: &Database| json!([
+        fact_fingerprint(&database.connection, "task_completion", &task_id).unwrap(),
+        fact_rows(&database.connection, "SELECT * FROM task_completion_snapshots WHERE task_id = ?1", &task_id).unwrap(),
+        fact_rows(&database.connection, "SELECT * FROM undo_entries WHERE target_id = ?1 ORDER BY id", &task_id).unwrap(),
+        fact_rows(&database.connection, "SELECT * FROM review_form_drafts WHERE item_id = ?1 ORDER BY review_date,item_type", &id).unwrap(),
+    ]);
+    let completed = facts(&database);
     let mut corrected = review(&id, Some(20));
     corrected.outcome = ReviewOutcome::NotStarted;
-    database.save_review_entry("2026-10-15", corrected).unwrap();
+    assert!(database.save_review_entry("2026-10-15", corrected).is_err());
+    assert_eq!(facts(&database), completed);
+    // Supplementing a completed historical result is still allowed without reopening it.
+    let supplement = database.save_review_entry("2026-10-15", review(&id, Some(20))).unwrap();
+    assert_eq!(supplement.outcome, "completed");
+    assert_eq!(supplement.actual_minutes, Some(20));
+    assert_eq!(supplement.notes.as_deref(), Some("saved detail"));
     let saved = database.get_task(&task_id).unwrap();
-    assert_eq!(saved.status, "scheduled");
-    assert!(saved.is_incomplete);
+    assert_eq!(saved.status, "done");
+    assert!(!saved.is_incomplete);
     assert_eq!(saved.actual_minutes, before.actual_minutes);
-    assert_eq!(saved.remaining_workload_minutes, Some(90));
+    assert_eq!(saved.remaining_workload_minutes, Some(0));
     let today_block = block(&database, &task_id, TODAY);
     database.save_execution_capture(TODAY, capture(&today_block)).unwrap();
     database.save_execution_capture(TODAY, ExecutionCaptureInput {

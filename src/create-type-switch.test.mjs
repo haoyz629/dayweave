@@ -6,23 +6,27 @@ import ts from "typescript";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { syncFormCommonFields } from "./create-type-switch.ts";
-import { taskListStatus } from "./task-result.ts";
+import { taskListStatus, historicalTaskCreationError, historicalTaskCompletionLocked, isHistoricalResultDate, resultToday, HISTORICAL_TASK_CREATION_NOTE } from "./task-result.ts";
 
 // Exercise the real editor handlers; persistence is isolated from user data.
 const source = ts.createSourceFile("App.tsx", readFileSync(new URL("./App.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const handlers = new Set(["applyCreateItemType", "updateNewTaskFields", "currentCreationInput", "persistCurrentTaskDraft", "saveNewTaskBeforeLeaving", "cancelNewTask", "clearNewTaskForm", "commitNewTask", "openPersistedTaskDraft", "selectPersistedTaskDraft", "recurringFormForDraft", "recurringCapsuleFacts"]);
+const handlers = new Set(["applyCreateItemType", "updateNewTaskFields", "updateNewTaskSchedule", "currentCreationInput", "persistCurrentTaskDraft", "saveNewTaskBeforeLeaving", "cancelNewTask", "clearNewTaskForm", "commitNewTask", "openPersistedTaskDraft", "selectPersistedTaskDraft", "recurringFormForDraft", "recurringCapsuleFacts"]);
 const snippets = [];
-let capsuleExpression;
+let capsuleExpression, historicalCreationFields, historicalDialogExpression;
+const historyExpressions = new Map();
 function collect(node) {
   if (ts.isFunctionDeclaration(node) && handlers.has(node.name?.text)) snippets.push(node.getText(source));
   if (ts.isJsxExpression(node) && node.expression?.getText(source).startsWith('!taskDraftsLoading && view === "draft" && visibleTaskDrafts.map')) capsuleExpression = node.expression.getText(source);
+  if (ts.isJsxExpression(node) && node.expression?.getText(source).startsWith('creating && pendingHistoricalCreation &&')) historicalDialogExpression = node.expression.getText(source);
+  if (ts.isVariableDeclaration(node) && ["newTaskIsHistoricalCreation", "newTaskHistoryError"].includes(node.name.getText(source))) historyExpressions.set(node.name.getText(source), node.initializer.getText(source));
+  if (ts.isJsxFragment(node) && node.getText(source).includes("newTaskIsHistoricalCreation &&")) historicalCreationFields = node.getText(source);
   ts.forEachChild(node, collect);
 }
 collect(source);
 const handlerCode = ts.transpileModule(snippets.join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 
 function editor({ saved = true } = {}) {
-  const defaults = () => ({ title: "", notes: "", tags: [], priority: "high", due_date: "2026-09-25", due_time: "11:00" });
+  const defaults = () => ({ title: "", notes: "", tags: [], priority: "high", earliest_start_date: "2026-09-25", earliest_start_time: "10:00", due_date: "2026-09-25", due_time: "11:00" });
   const taskForm = { ...defaults(), title: "团队周会", notes: "准备材料" };
   const recurringDefaults = () => ({ title: "", notes: "", tags: [], frequency: "weekly", weekdays: [1], display_time: "09:00", ends_on: "" });
   const db = new Map();
@@ -38,7 +42,9 @@ function editor({ saved = true } = {}) {
     newTaskIsDirty: true, newTaskFieldsAreDirty: true, newTaskEditRevision: { current: 0 },
     newTaskHasCompleteSchedule: true, newTaskHasValidRange: true, newTaskHasValidWorkload: true,
     newTaskDefaultForm: defaults, emptyNewTaskForm: defaults, recurringItemDefaultForm: recurringDefaults,
-    today: "2026-09-23", setTimeout, Date, syncFormCommonFields, validDraftClock: () => true,
+    today: "2026-09-23", setTimeout, Date: class extends Date { static now() { return Date.parse("2026-09-23T12:00:00+08:00"); } }, syncFormCommonFields, validDraftClock: () => true,
+    historicalTaskCreationError, historicalTaskCompletionLocked, isHistoricalResultDate, resultToday, HISTORICAL_TASK_CREATION_NOTE,
+    normalizeTaskWorkloadAfterScheduleChange: (_previous, next) => next,
     taskDraftInputForForm: (form) => ({ ...form }), taskFormForPersistedDraft: (draft) => ({ ...defaults(), ...draft }),
     uiErrorMessage: String, preferredSelection: { current: null }, taskListStatus,
     recurringItemInputForForm: (form) => form,
@@ -56,7 +62,8 @@ function editor({ saved = true } = {}) {
     },
     async onRecurringChanged() {}, onTaskCommitted() {}, async onReload() {}, async showCommittedToast() {}
   };
-  for (const key of ["busy", "newTaskError", "newTaskForm", "persistedNewTaskDraft", "taskDrafts", "recurringForm", "newTaskAutosaveArmed", "createItemType", "draftSaving", "feedback", "creating", "successToast", "pendingDiscardNew", "view", "selectedRecurringId", "selectedId", "draft"]) {
+  state.pendingHistoricalCreation = null;
+  for (const key of ["busy", "newTaskError", "newTaskForm", "persistedNewTaskDraft", "taskDrafts", "recurringForm", "newTaskAutosaveArmed", "createItemType", "draftSaving", "feedback", "creating", "successToast", "pendingDiscardNew", "pendingHistoricalCreation", "view", "selectedRecurringId", "selectedId", "draft"]) {
     state[`set${key[0].toUpperCase()}${key.slice(1)}`] = (value) => { state[key] = typeof value === "function" ? value(state[key]) : value; };
   }
   const context = vm.createContext(state);
@@ -70,7 +77,18 @@ function editor({ saved = true } = {}) {
     const code = ts.transpileModule(`const capsules = (${capsuleExpression});`, { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 } }).outputText;
     return renderToStaticMarkup(vm.runInContext(`(() => { ${code} return capsules; })()`, context));
   }
-  return { state, db, renderCapsules };
+  function renderHistoryFields() {
+    Object.assign(state, { React, resultNow: state.Date.now(), availableTags: [], TaskEditorRegions: () => null });
+    for (const [name, value] of historyExpressions) vm.runInContext(`this.${name} = ${value};`, context);
+    const code = ts.transpileModule(`(${historicalCreationFields})`, { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 } }).outputText;
+    return renderToStaticMarkup(vm.runInContext(code, context));
+  }
+  function historicalDialog() {
+    Object.assign(state, { React, HISTORICAL_TASK_CREATION_NOTE, ConfirmationDialog: ({ children }) => React.createElement("section", null, children) });
+    const code = ts.transpileModule(`(${historicalDialogExpression})`, { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 } }).outputText;
+    return vm.runInContext(code, context);
+  }
+  return { state, db, renderCapsules, renderHistoryFields, historicalDialog };
 }
 
 async function save(state) { return state.persistCurrentTaskDraft(false, true); }
@@ -312,4 +330,165 @@ test("independent task drafts keep copied priority and tags without relation fie
   assert.ok(input.recurring_settings);
   assert.equal("origin" in input, false);
   assert.equal("source_task_id" in input, false);
+});
+
+test("manual and AI-source historical drafts cannot confirm multi-day or incomplete times but retain the draft", async () => {
+  for (const source_type of ["manual", "ai_assistant"]) for (const change of [{ earliest_start_date: "2026-09-21" }, { earliest_start_time: "" }, { due_time: "" }]) {
+    const { state, db, renderHistoryFields } = editor();
+    state.persistedNewTaskDraft.source_type = source_type;
+    state.newTaskForm = { ...state.newTaskForm, earliest_start_date: "2026-09-22", due_date: "2026-09-22", ...change };
+    assert.match(renderHistoryFields(), /多日任务|完整且有效/);
+    assert.equal(await state.commitNewTask(), false);
+    assert.match(state.newTaskError, /多日任务|完整且有效/);
+    assert.equal(state.committed.length, 0);
+    assert.equal(db.size, 1);
+    assert.equal(await state.saveNewTaskBeforeLeaving(), true, "invalid creation remains saveable as a draft");
+  }
+});
+
+test("historical single-day confirmation explains auto-completion and trusts backend facts without sending actual minutes", async () => {
+  for (const source_type of ["manual", "ai_assistant"]) {
+    const { state, db, renderHistoryFields, historicalDialog } = editor();
+    state.persistedNewTaskDraft.source_type = source_type;
+    state.newTaskForm = { ...state.newTaskForm, earliest_start_date: "2026-09-22", due_date: "2026-09-22" };
+    assert.match(renderHistoryFields(), /创建历史任务自动完成/);
+    assert.match(renderHistoryFields(), /已完成任务及当天任务块/);
+    assert.match(renderHistoryFields(), /不填写实际耗时/);
+    state.confirmCreationDraft = async draft => {
+      state.committed.push(draft);
+      assert.equal("actual_minutes" in draft, false);
+      assert.equal("execution_note" in draft, false, "the automatic note is a backend fact, not a forged user note");
+      return { item_type: "task", item: { id: "historical", status: "done", result_date: "2026-09-22" } };
+    };
+    let toast;
+    state.showCommittedToast = async (...args) => { toast = args; };
+    assert.equal(await state.commitNewTask(), false, "first submit requests confirmation, not creation");
+    assert.equal(state.committed.length, 0);
+    assert.equal(db.size, 1, "the persisted draft remains editable before confirmation");
+    const dialog = historicalDialog();
+    const markup = renderToStaticMarkup(dialog);
+    assert.match(markup, /确认补录历史任务/);
+    assert.match(markup, /历史事项补录，不是待办计划/);
+    assert.match(markup, /创建后将直接完成任务/);
+    assert.match(markup, /生成已完成任务块/);
+    assert.match(markup, /创建历史任务自动完成/);
+    assert.match(markup, /不能取消完成/);
+    const confirmation = dialog.props.children;
+    const confirmButton = confirmation.props.children.at(-1).props.children[1];
+    assert.equal(confirmButton.props.children, "确认补录并完成");
+    assert.equal(confirmation.props.role, "alertdialog");
+    assert.equal(confirmation.props["aria-modal"], "true");
+    confirmButton.props.onClick();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(state.committed.length, 1);
+    assert.equal(state.view, "done");
+    assert.equal(toast[0], "历史任务已创建并自动完成");
+    assert.equal(toast[4], false, "historical completion must not offer cancellation through undo");
+  }
+});
+
+test("multi-day creation cannot start in history even when its deadline is today or future", async () => {
+  for (const due_date of ["2026-09-23", "2026-09-25"]) {
+    const { state, renderHistoryFields } = editor();
+    state.newTaskForm = { ...state.newTaskForm, earliest_start_date: "2026-09-21", due_date };
+    assert.match(renderHistoryFields(), /多日任务的开始日期不能早于今天/);
+    assert.doesNotMatch(renderHistoryFields(), /创建历史任务自动完成/);
+    assert.equal(await state.commitNewTask(), false);
+    assert.equal(state.committed.length, 0);
+    assert.equal(state.pendingHistoricalCreation, null);
+  }
+});
+
+test("confirmation rechecks historical creation after an async draft save crosses Shanghai midnight", async () => {
+  const { state } = editor();
+  state.newTaskForm = { ...state.newTaskForm, earliest_start_date: "2026-09-23", due_date: "2026-09-25" };
+  let now = Date.parse("2026-09-23T23:59:59+08:00");
+  state.Date = class extends Date { static now() { return now; } };
+  const realSave = state.saveTaskDraft;
+  state.saveTaskDraft = async (...args) => {
+    const saved = await realSave(...args);
+    now = Date.parse("2026-09-24T00:00:00+08:00");
+    return saved;
+  };
+  assert.equal(await state.commitNewTask(), false);
+  assert.match(state.newTaskError, /多日任务的开始日期不能早于今天/);
+  assert.equal(state.committed.length, 0);
+});
+
+test("returning from historical confirmation preserves the draft and requires confirmation again", async () => {
+  const { state, db, historicalDialog } = editor();
+  state.newTaskForm = { ...state.newTaskForm, earliest_start_date: "2026-09-22", due_date: "2026-09-22" };
+  await state.commitNewTask();
+  const dialog = historicalDialog();
+  const confirmation = dialog.props.children;
+  confirmation.props.onCancel();
+  assert.equal(state.pendingHistoricalCreation, null);
+  assert.equal(state.committed.length, 0);
+  assert.equal(db.size, 1);
+  assert.equal(state.newTaskForm.title, "团队周会");
+  assert.equal(await state.commitNewTask(), false);
+  assert.ok(state.pendingHistoricalCreation);
+  const priorConsent = state.pendingHistoricalCreation.input;
+  state.updateNewTaskFields({ ...state.newTaskForm, title: "改过内容的补录" });
+  assert.equal(state.pendingHistoricalCreation, null);
+  assert.equal(await state.commitNewTask(priorConsent), false, "old consent cannot create modified historical content");
+  assert.equal(state.committed.length, 0);
+  assert.equal(state.pendingHistoricalCreation.title, "改过内容的补录");
+});
+
+test("a single-day save crossing Shanghai midnight asks for historical confirmation before creation", async () => {
+  const { state } = editor();
+  state.newTaskForm = { ...state.newTaskForm, earliest_start_date: "2026-09-23", due_date: "2026-09-23" };
+  let now = Date.parse("2026-09-23T23:59:59+08:00");
+  state.Date = class extends Date { static now() { return now; } };
+  const realSave = state.saveTaskDraft;
+  state.saveTaskDraft = async (...args) => { const saved = await realSave(...args); now = Date.parse("2026-09-24T00:00:00+08:00"); return saved; };
+  assert.equal(await state.commitNewTask(), false);
+  assert.equal(state.committed.length, 0);
+  assert.ok(state.pendingHistoricalCreation);
+  assert.equal(await state.commitNewTask(state.pendingHistoricalCreation.input), true);
+  assert.equal(state.committed.length, 1);
+});
+
+test("historical confirmation blocks actions while busy and schedule edits invalidate consent", async () => {
+  const { state, historicalDialog } = editor();
+  state.newTaskForm = { ...state.newTaskForm, earliest_start_date: "2026-09-22", due_date: "2026-09-22" };
+  await state.commitNewTask();
+  const consent = state.pendingHistoricalCreation.input;
+  for (const flag of ["busy", "draftSaving"]) {
+    state[flag] = true;
+    const dialog = historicalDialog();
+    const confirmation = dialog.props.children;
+    assert.equal(confirmation.props.busy, true);
+    for (const button of confirmation.props.children.at(-1).props.children) assert.equal(button.props.disabled, true);
+    confirmation.props.onCancel();
+    assert.ok(state.pendingHistoricalCreation);
+    dialog.props.onMouseDown({ target: dialog, currentTarget: dialog });
+    assert.ok(state.pendingHistoricalCreation);
+    assert.equal(await state.commitNewTask(consent), false);
+    assert.equal(state.committed.length, 0);
+    state[flag] = false;
+  }
+  state.updateNewTaskSchedule({ ...state.newTaskForm, due_time: "12:00" });
+  assert.equal(state.pendingHistoricalCreation, null);
+  assert.equal(await state.commitNewTask(consent), false);
+  assert.equal(state.committed.length, 0);
+  assert.notEqual(state.pendingHistoricalCreation.input, consent);
+});
+
+test("editing during historical confirmation persistence cannot create stale content", async () => {
+  const { state } = editor();
+  state.newTaskForm = { ...state.newTaskForm, earliest_start_date: "2026-09-22", due_date: "2026-09-22" };
+  await state.commitNewTask();
+  const consent = state.pendingHistoricalCreation.input;
+  const realSave = state.saveTaskDraft;
+  state.saveTaskDraft = async (...args) => {
+    const saved = await realSave(...args);
+    state.updateNewTaskFields({ ...state.newTaskForm, title: "保存期间修改" });
+    return saved;
+  };
+  assert.equal(await state.commitNewTask(consent), false);
+  assert.equal(state.committed.length, 0);
+  assert.equal(state.pendingHistoricalCreation, null);
+  assert.equal(state.newTaskForm.title, "保存期间修改");
 });

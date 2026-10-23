@@ -183,7 +183,7 @@ export function ReviewPage({ today, reviewDate, onSelectDate, onFactsChanged, on
       await onCompleteTask(block.task_id, block.id);
       queue.current.forget(identity("task", block.id));
       await loadReviewSchedule(block.id);
-      setMessages((current) => ({ ...current, [block.id]: "整个任务已完成。" }));
+      setMessages((current) => ({ ...current, [block.id]: "任务已完成。" }));
     });
   }
   function saveRecurring(item: RecurringOccurrence, outcome: RecurringOccurrenceOutcome) {
@@ -224,7 +224,7 @@ export function ReviewPage({ today, reviewDate, onSelectDate, onFactsChanged, on
           <label className="review-wide">备注<textarea aria-label="备注" rows={2} maxLength={2000} value={draft.notes} disabled={Boolean(busy)} onChange={(event) => updateDraft(block.id, { notes: event.target.value })} /></label>
         </div><div className="review-actions"><small>保存后只读；空耗时不会按 0 或计划时长记录。</small><button type="button" disabled={Boolean(busy) || !draft.outcome} onClick={() => saveBlock(block, true)}>保存补充记录</button></div></details>
       </> : <p className="review-history-readonly">{outcome ? `本次${outcomeCopy[outcome]}` : "当时未记录结果"}{!editable && " · 此日期只读"}{block.execution_note && ` · ${block.execution_note}`}</p>}
-      <div className="review-actions"><span role="status">{messages[block.id] || (historical && editable && !saved ? "补录仅记录当时情况，不改变当前安排。" : "")}</span>{reviewDate === today && block.task_status !== "deleted" && (block.task_status === "done" ? <strong className="task-complete-state">整个任务已完成</strong> : <button type="button" className="complete-task-action" disabled={Boolean(busy)} onClick={() => finishTask(block)}>完成整个任务</button>)}</div>
+      <div className="review-actions"><span role="status">{messages[block.id] || (historical && editable && !saved ? "补录仅记录当时情况，不改变当前安排。" : "")}</span>{reviewDate === today && block.task_status !== "deleted" && (block.task_status === "done" ? <strong className="task-complete-state">任务已完成</strong> : <button type="button" className="complete-task-action" disabled={Boolean(busy)} onClick={() => finishTask(block)}>完成任务</button>)}</div>
     </article>;
   }
   function recurringCard(item: RecurringOccurrence) {

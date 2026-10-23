@@ -75,10 +75,10 @@ pub(super) fn preserve_current(transaction: &Transaction<'_>, task_id: &str) -> 
     preserve_events(transaction, task_id, &current_events(transaction, task_id)?)
 }
 
-pub(super) fn record_cleared(transaction: &Transaction<'_>, task_id: &str, plan_date: &str) -> AppResult<()> {
+pub(super) fn record_cleared(transaction: &Transaction<'_>, task_id: &str, plan_date: &str, completed: bool) -> AppResult<()> {
     let status: String = transaction.query_row("SELECT status FROM tasks WHERE id = ?1", [task_id], |row| row.get(0))?;
     let event = TaskHistoryEventDto { id: format!("cleared:{}", Uuid::new_v4()), occurred_at: Some(now()),
-        plan_date: Some(plan_date.into()), kind: "cleared".into(), status: Some(status), note: None, review_note: None };
+        plan_date: Some(plan_date.into()), kind: if completed { "cleared" } else { "cleared_incomplete" }.into(), status: Some(status), note: None, review_note: None };
     preserve_events(transaction, task_id, &[event])
 }
 
@@ -91,18 +91,18 @@ pub(super) fn load(connection: &Connection, task_id: &str) -> AppResult<Vec<Task
         plan_date: None, kind: "created".into(), status: initial_status.and_then(real_status), note: None, review_note: None };
     let mut events = Vec::new();
     let mut seen = HashSet::new();
-    let mut statement = connection.prepare("SELECT rowid, id, change_kind, new_value, reason, created_at
+    let mut statement = connection.prepare("SELECT rowid, id, change_kind, new_value, reason, created_at, old_value
         FROM task_changes WHERE task_id = ?1 ORDER BY rowid")?;
     let changes = statement.query_map([task_id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?,
         row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, Option<String>>(4)?,
-        row.get::<_, String>(5)?)))?.collect::<Result<Vec<_>, _>>()?;
-    for (order, id, kind, new_value, reason, timestamp) in changes {
+        row.get::<_, String>(5)?, row.get::<_, Option<String>>(6)?)))?.collect::<Result<Vec<_>, _>>()?;
+    for (order, id, kind, new_value, reason, timestamp, old_value) in changes {
         if kind == "history_snapshot" {
             if let Some(event) = new_value.as_deref().and_then(|json| serde_json::from_str::<TaskHistoryEventDto>(json).ok()) {
                 if seen.insert(serde_json::to_string(&event)?) {
                     let mut event = event;
                     event.id = format!("history:{id}");
-                    let rank = if event.kind == "cleared" { 2 } else { 1 };
+                    let rank = if matches!(event.kind.as_str(), "cleared" | "cleared_incomplete") { 2 } else { 1 };
                     events.push((event, rank, order));
                 }
             }
@@ -118,14 +118,18 @@ pub(super) fn load(connection: &Connection, task_id: &str) -> AppResult<Vec<Task
                 }
             } else { new_value.clone().and_then(real_status) };
         if status.is_none() { continue; }
-        // Legacy completion audits contain a real optional note in reason; other reasons are internal labels/undo ids.
-        let note = if kind == "completion_note_changed" {
+        let automatic = kind == "status_changed" && reason.as_deref() == Some("汇总全部执行块结果");
+        let reopened = matches!(kind.as_str(), "status_changed" | "undo_task_completed")
+            && old_value.as_deref() == Some("done") && matches!(status.as_deref(), Some("open" | "scheduled"));
+        // System aggregation explains a lifecycle transition, never a user-entered note.
+        // Legacy completion and resolution audits can still contain real notes in reason.
+        let note = if automatic { None } else if kind == "completion_note_changed" {
             new_value
         } else if kind == "status_changed" && status.as_deref() == Some("done") {
             reason.filter(|note| note != "明确完成整个任务")
         } else if kind == "execution_resolved" { reason } else { None };
         events.push((TaskHistoryEventDto { id: format!("change:{id}"), occurred_at: Some(timestamp), plan_date: None,
-            kind: if kind == "restored" { "restored" } else { "status" }.into(), status, note, review_note: None }, 2, order));
+            kind: if automatic { "automatic_status" } else if reopened { "reopened" } else if kind == "restored" { "restored" } else { "status" }.into(), status, note, review_note: None }, 2, order));
     }
     for event in current_events(connection, task_id)? {
         if seen.insert(serde_json::to_string(&event)?) { events.push((event, 1, i64::MAX)); }
@@ -210,6 +214,41 @@ mod tests {
     }
 
     #[test]
+    fn automatic_status_history_separates_system_reasons_from_real_execution_notes() {
+        let _clock = TestToday::new(TODAY);
+        let mut db = Database::in_memory().unwrap();
+        let id = db.create_manual_task("automatic status history").unwrap();
+        let block = add_block(&db, &id, TODAY);
+        db.save_execution_capture(TODAY, ExecutionCaptureInput { plan_block_id: block.clone(),
+            outcome: ReviewOutcome::Completed, note: Some("用户的完成备注".into()) }).unwrap();
+        assert_eq!(db.get_task(&id).unwrap().status, "done");
+        let events = db.get_task_metadata(&id).unwrap().history;
+        let automatic = events.iter().find(|event| event.kind == "automatic_status").unwrap();
+        assert_eq!(automatic.status.as_deref(), Some("done"));
+        assert_eq!(automatic.note, None);
+        assert_eq!(automatic.review_note, None);
+        assert!(events.iter().any(|event| event.kind == "execution" && event.note.as_deref() == Some("用户的完成备注")));
+
+        // Identical user wording must remain a note on the execution fact, not be filtered globally.
+        capture(&mut db, &block, TODAY, "汇总全部执行块结果");
+        assert_eq!(db.get_task(&id).unwrap().status, "scheduled");
+        let before = fact_fingerprint(&db.connection, "task_completion", &id).unwrap();
+        let events = db.get_task_metadata(&id).unwrap().history;
+        let automatic = events.iter().filter(|event| event.kind == "automatic_status").collect::<Vec<_>>();
+        assert_eq!(automatic.len(), 2);
+        assert_eq!(automatic.last().unwrap().status.as_deref(), Some("scheduled"));
+        assert!(automatic.iter().all(|event| event.note.is_none() && event.review_note.is_none()));
+        assert!(events.iter().any(|event| event.kind == "execution" && event.note.as_deref() == Some("汇总全部执行块结果")));
+        assert!(events.iter().any(|event| event.kind == "execution" && event.note.as_deref() == Some("用户的完成备注")));
+        assert_eq!(events, db.get_task_metadata(&id).unwrap().history);
+        assert_eq!(before, fact_fingerprint(&db.connection, "task_completion", &id).unwrap());
+        let audits: i64 = db.connection.query_row("SELECT COUNT(*) FROM task_changes
+            WHERE task_id = ?1 AND change_kind = 'status_changed' AND reason = '汇总全部执行块结果'",
+            [&id], |row| row.get(0)).unwrap();
+        assert_eq!(audits, 2, "reading history must retain the original system audits");
+    }
+
+    #[test]
     fn incomplete_completed_deleted_restored_done_and_equal_timestamps_keep_true_last_status() {
         let _clock = TestToday::new(TODAY);
         let mut db = Database::in_memory().unwrap();
@@ -267,13 +306,31 @@ mod tests {
         let events = db.get_task_metadata(&id).unwrap().history;
         assert_eq!(events.iter().filter(|e| e.note.as_deref() == Some("original execution")).count(), 1);
         assert_eq!(events.iter().filter(|e| e.note.as_deref() == Some("revised execution")).count(), 1);
-        assert_eq!(events.last().unwrap().kind, "cleared");
+        assert_eq!(events.last().unwrap().kind, "cleared_incomplete");
         capture(&mut db, &block, TODAY, "separate execution");
         db.save_review_entry(TODAY, review(&block, "first review")).unwrap();
         db.save_review_entry(TODAY, review(&block, "revised review")).unwrap();
         let events = db.get_task_metadata(&id).unwrap().history;
         assert!(events.iter().any(|e| e.note.as_deref() == Some("separate execution") && e.review_note.as_deref() == Some("first review")));
         assert!(events.iter().any(|e| e.review_note.as_deref() == Some("revised review")));
+    }
+
+    #[test]
+    fn cancelled_daily_and_whole_completion_have_explicit_history_kinds() {
+        let _clock = TestToday::new(TODAY);
+        let mut db = Database::in_memory().unwrap();
+        let id = db.create_manual_task("completion cancellation history").unwrap();
+        let block = add_block(&db, &id, TODAY);
+        db.complete_task(&id, Some(&block)).unwrap();
+        db.reopen_manual_task(&id, TODAY).unwrap();
+        let history = db.get_task_metadata(&id).unwrap().history;
+        assert!(history.iter().any(|event| event.kind == "reopened" && event.status.as_deref() == Some("scheduled")));
+        db.save_execution_capture(TODAY, ExecutionCaptureInput { plan_block_id: block.clone(),
+            outcome: ReviewOutcome::Completed, note: None }).unwrap();
+        db.clear_execution_capture(TODAY, &block).unwrap();
+        let history = db.get_task_metadata(&id).unwrap().history;
+        assert!(history.iter().any(|event| event.kind == "cleared" && event.plan_date.as_deref() == Some(TODAY)));
+        assert!(history.iter().any(|event| event.kind == "automatic_status" && event.status.as_deref() == Some("scheduled")));
     }
 
     #[test]

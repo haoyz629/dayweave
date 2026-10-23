@@ -1092,6 +1092,7 @@ impl Database {
             let before_blocks = load_task_schedule_blocks(&transaction, &task_id)?;
             let current_drafts = current_plan_draft_dates(&transaction)?;
             ensure_task_content_editable(&before)?;
+            ensure_task_not_moved_into_history(&before, input.earliest_start_date.as_deref(), input.due_date.as_deref())?;
             let earliest_start_at = legacy_timestamp(input.earliest_start_date.as_deref(), input.earliest_start_time.as_deref());
             let due_at = legacy_timestamp(input.due_date.as_deref(), input.due_time.as_deref());
             let timestamp = now();
@@ -1131,6 +1132,8 @@ impl Database {
         if draft.draft_kind != "create" {
             return Err(AppError::Domain("未知任务草稿类型".into()));
         }
+        let historical = validate_new_task_history(
+            input.earliest_start_date.as_deref(), input.due_date.as_deref())?;
 
         let task_id = Uuid::new_v4().to_string();
         let current_drafts = current_plan_draft_dates(&transaction)?;
@@ -1195,12 +1198,18 @@ impl Database {
              WHERE id = ?1 AND status = 'active'",
             params![draft_id, task_id, timestamp],
         )?;
-        sync_single_day_task_schedule(&transaction, &task_id, None, &current_drafts)?;
+        if historical {
+            database_execution::complete_historical_creation(&transaction, &task_id)?;
+        } else {
+            sync_single_day_task_schedule(&transaction, &task_id, None, &current_drafts)?;
+        }
         let task = load_task_dto_in_transaction(&transaction, &task_id)?;
-        record_undo_entry(
-            &transaction, "task_created", "task", &task_id,
-            &task_schedule_undo_json(&transaction, &task_id, None, Vec::new())?, Some(&task.updated_at),
-        )?;
+        if !historical {
+            record_undo_entry(
+                &transaction, "task_created", "task", &task_id,
+                &task_schedule_undo_json(&transaction, &task_id, None, Vec::new())?, Some(&task.updated_at),
+            )?;
+        }
         transaction.commit()?;
         Ok(task)
     }
@@ -1774,9 +1783,10 @@ impl Database {
         if matches!(target_type.as_str(), "task_completion" | "execution_capture") {
             let payload: FactUndo = serde_json::from_str(&before_json)?;
             if target_type == "task_completion" {
-                database_results::require_task_window(&transaction, &target_id)?;
+                database_results::require_task_reopenable(&transaction, &target_id)?;
             } else if let Some(block) = payload.block {
                 database_results::require_block_window(&transaction, &block.id)?;
+                database_results::require_block_outcome_change(&transaction, &block.id, &block.execution_status)?;
             }
         }
         match target_type.as_str() {
@@ -1801,13 +1811,14 @@ impl Database {
                     record_task_change(&transaction, &task.id, "undo_task_completed", Some(&current.status), Some(&task.status), "undo", Some(undo_id))?;
                 }
                 if let Some(block) = payload.block {
+                    let cancelled_completion = execution_snapshot(&transaction, &block.id)?.execution_status == "completed";
                     transaction.execute("UPDATE plan_blocks SET execution_status = ?2, actual_minutes = ?3, review_required = ?4,
                         execution_note = ?5, execution_captured_at = ?6, updated_at = ?7 WHERE id = ?1",
                         params![block.id, block.execution_status, block.actual_minutes, block.review_required,
                             block.execution_note, block.execution_captured_at, now()])?;
                     if target_type == "execution_capture" {
                         let (_, date, _) = database_results::block_context(&transaction, &block.id)?;
-                        database_history::record_cleared(&transaction, &target_id, &date)?;
+                        database_history::record_cleared(&transaction, &target_id, &date, cancelled_completion)?;
                     }
                 }
                 if let Some(review) = payload.review {
@@ -2433,6 +2444,7 @@ impl Database {
         record_optional_change(&transaction, task_id, "estimate_changed", old_estimate.as_deref(), new_estimate.as_deref())?;
         let (earliest_start_date, earliest_start_time) = split_legacy_timestamp(update.earliest_start_at.as_deref());
         let (due_date, due_time) = split_legacy_timestamp(update.due_at.as_deref());
+        ensure_task_not_moved_into_history(&existing, earliest_start_date.as_deref(), due_date.as_deref())?;
         let remaining_workload_minutes = if existing.migration_review_required
             || existing.remaining_workload_minutes == existing.estimated_minutes
         {
@@ -3710,6 +3722,7 @@ impl Database {
             return Err(AppError::Domain("回收站任务不能记录执行状态".into()));
         }
         let in_window = database_results::allow_capture(&transaction, capture_date, &input.plan_block_id)?;
+        database_results::require_block_outcome_change(&transaction, &input.plan_block_id, input.outcome.as_str())?;
         let task_id: String = transaction.query_row("SELECT task_id FROM plan_blocks WHERE id = ?1", [&input.plan_block_id], |row| row.get(0))?;
         database_history::preserve_current(&transaction, &task_id)?;
         let before = execution_snapshot(&transaction, &input.plan_block_id)?;
@@ -3744,6 +3757,7 @@ impl Database {
     pub fn clear_execution_capture(&mut self, capture_date: &str, plan_block_id: &str) -> AppResult<()> {
         let transaction = self.connection.transaction()?;
         let in_window = database_results::allow_capture(&transaction, capture_date, plan_block_id)?;
+        database_results::require_block_outcome_change(&transaction, plan_block_id, "planned")?;
         let task_id: String = transaction.query_row("SELECT task_id FROM plan_blocks WHERE id = ?1", [plan_block_id], |row| row.get(0))?;
         let task = load_task_dto_in_transaction(&transaction, &task_id)?;
         if task.deleted_at.is_some() || task.status == "deleted" { return Err(AppError::Domain("回收站任务不能取消结果".into())); }
@@ -3798,8 +3812,12 @@ impl Database {
             params![plan_block_id, timestamp],
         )?;
         if in_window { transaction.execute("UPDATE tasks SET updated_at = ?2 WHERE id = ?1", params![task_id, timestamp])?; }
-        database_history::record_cleared(&transaction, &task_id, capture_date)?;
-        database_execution::sync_block_result(&transaction, plan_block_id)?;
+        database_history::record_cleared(&transaction, &task_id, capture_date, execution_status == "completed")?;
+        if execution_status == "completed" {
+            database_execution::sync_cleared_completion(&transaction, plan_block_id)?;
+        } else {
+            database_execution::sync_block_result(&transaction, plan_block_id)?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -3840,6 +3858,7 @@ impl Database {
             |row| row.get(0),
         )?;
         let in_window = database_results::allow_capture(&transaction, review_date, &input.plan_block_id)?;
+        database_results::require_block_outcome_change(&transaction, &input.plan_block_id, input.outcome.as_str())?;
         if !is_today && input.remaining_workload_minutes.is_some() {
             return Err(AppError::Domain("历史记录不能修改当前剩余工作量".into()));
         }
@@ -4199,6 +4218,7 @@ fn apply_operation(transaction: &Transaction<'_>, operation: &AiOperation, destr
             let id = Uuid::new_v4().to_string();
             let (earliest_start_date, earliest_start_time) = split_legacy_timestamp(earliest_start_at.as_deref());
             let (due_date, due_time) = split_legacy_timestamp(due_at.as_deref());
+            let historical = validate_new_task_history(earliest_start_date.as_deref(), due_date.as_deref())?;
             let status = TaskStatus::Open;
             transaction.execute(
                 "INSERT INTO tasks (
@@ -4218,7 +4238,11 @@ fn apply_operation(transaction: &Transaction<'_>, operation: &AiOperation, destr
             )?;
             record_task_change(transaction, &id, "created", None, Some(status.as_str()), "ai", None)?;
             record_initial_estimates(transaction, &id, *estimated_minutes, *estimated_minutes, "ai_assistant")?;
-            sync_single_day_task_schedule(transaction, &id, None, &current_drafts)?;
+            if historical {
+                database_execution::complete_historical_creation(transaction, &id)?;
+            } else {
+                sync_single_day_task_schedule(transaction, &id, None, &current_drafts)?;
+            }
             Ok(ApplyResult { affected_task_ids: vec![id], plan_id: None })
         }
         AiOperation::ProposedTaskUpdate { task_id, title, priority, estimated_minutes } => {
@@ -4702,7 +4726,7 @@ fn set_task_status(transaction: &Transaction<'_>, task_id: &str, target: TaskSta
     let current = TaskStatus::parse(&current)?;
     if !current.can_transition_to(target) { return Err(AppError::Domain("任务状态转移不合法".into())); }
     if current == TaskStatus::Done && target != TaskStatus::Done && target != TaskStatus::Deleted {
-        database_results::require_task_window(transaction, task_id)?;
+        database_results::require_task_reopenable(transaction, task_id)?;
     }
     transaction.execute("UPDATE tasks SET status = ?2, updated_at = ?3 WHERE id = ?1", params![task_id, target.as_str(), now()])?;
     record_task_change(transaction, task_id, "status_changed", Some(current.as_str()), Some(target.as_str()), source, None)
@@ -4771,6 +4795,28 @@ fn validate_task_draft_input(input: &TaskDraftInput, require_title: bool) -> App
     normalize_tags(&input.tags)?;
     if let Some(recurrence) = &input.recurrence { validate_recurrence(recurrence)?; }
     Ok(())
+}
+
+fn ensure_task_not_moved_into_history(task: &TaskDto, start: Option<&str>, due: Option<&str>) -> AppResult<()> {
+    if task.earliest_start_date.as_deref() == start && task.due_date.as_deref() == due {
+        return Ok(());
+    }
+    let today = shanghai_today();
+    let historical_multiday = start != due && start.is_some_and(|date| date < today.as_str());
+    if historical_multiday || (task.due_date.as_deref().is_some_and(|date| date >= today.as_str())
+        && due.is_some_and(|date| date < today.as_str())) {
+        return Err(AppError::Domain("当日或未来任务不能改为历史任务，请新建历史单日任务补录".into()));
+    }
+    Ok(())
+}
+
+fn validate_new_task_history(start: Option<&str>, due: Option<&str>) -> AppResult<bool> {
+    let today = shanghai_today();
+    let historical = due.is_some_and(|date| date < today.as_str());
+    if start != due && (historical || start.is_some_and(|date| date < today.as_str())) {
+        return Err(AppError::Domain("历史日期只允许创建单日任务".into()));
+    }
+    Ok(historical)
 }
 
 fn validate_confirmable_task_input(input: &TaskDraftInput) -> AppResult<()> {
@@ -7435,6 +7481,7 @@ mod tests {
 
     #[test]
     fn ai_create_requires_preview_then_confirmation_and_commits_final_state() {
+        let _clock = TestNow::new("2026-09-01T12:00:00+08:00");
         let mut database = Database::in_memory().unwrap();
         let preview = database.preview_ai_proposal(&task_create("提交周报")).unwrap();
         assert_eq!(database.count("tasks").unwrap(), 0, "预览不能改变任务最终状态");
@@ -7443,15 +7490,17 @@ mod tests {
         let result = database.apply_confirmed_ai_proposal(&preview.ai_run_id, &preview.confirmation_token, false).unwrap();
         assert_eq!(result.affected_task_ids.len(), 1);
         let task_id = &result.affected_task_ids[0];
-        assert_eq!(database.task_status(task_id).unwrap(), "open");
+        assert_eq!(database.task_status(task_id).unwrap(), "done");
         assert_eq!(database.get_task(task_id).unwrap().source_type, "ai_assistant");
-        assert_eq!(database.count("task_changes").unwrap(), 1);
+        assert_eq!(database.count("task_changes").unwrap(), 2);
+        assert_eq!(database.get_day_schedule("2026-08-28").unwrap().task_blocks[0].execution_note.as_deref(), Some("创建历史任务自动完成"));
         let audit_status: String = database.connection.query_row("SELECT validation_status FROM ai_runs WHERE id = ?1", [&preview.ai_run_id], |row| row.get(0)).unwrap();
         assert_eq!(audit_status, "committed");
     }
 
     #[test]
     fn conversation_proposal_persists_until_confirmation_then_disappears() {
+        let _clock = TestNow::new("2026-09-01T12:00:00+08:00");
         let mut database = Database::in_memory().unwrap();
         let conversation = database.create_ai_conversation(Some("整理发布计划".into())).unwrap();
         let other_conversation = database.create_ai_conversation(Some("其他对话".into())).unwrap();
@@ -7474,7 +7523,7 @@ mod tests {
         assert_eq!(result.affected_task_ids.len(), 1);
         let task = database.get_task(&result.affected_task_ids[0]).unwrap();
         assert_eq!(task.title, "发布新版本");
-        assert_eq!(task.status, "open");
+        assert_eq!(task.status, "done");
         assert_eq!(task.source_type, "ai_assistant");
     }
 
@@ -7493,6 +7542,7 @@ mod tests {
 
     #[test]
     fn draft_confirmation_requires_complete_time_and_is_idempotent() {
+        let _clock = TestNow::new("2026-09-01T12:00:00+08:00");
         let mut database = Database::in_memory().unwrap();
         let incomplete = database.create_manual_task_draft(manual_draft("整理灵感", None)).unwrap();
         assert_eq!(incomplete.validation_status, "needs_confirmation");
@@ -7503,7 +7553,7 @@ mod tests {
         let dated_task = database.confirm_task_draft(&dated_draft.id, &dated_draft.confirmation_token).unwrap();
         let retry = database.confirm_task_draft(&dated_draft.id, &dated_draft.confirmation_token).unwrap();
         assert_eq!(retry.id, dated_task.id, "重复确认必须返回同一正式任务");
-        assert_eq!(dated_task.status, "open");
+        assert_eq!(dated_task.status, "done");
         assert_eq!(dated_task.earliest_start_date.as_deref(), Some("2026-08-28"));
         assert_eq!(dated_task.earliest_start_time.as_deref(), Some("09:00"));
         assert_eq!(dated_task.due_date.as_deref(), Some("2026-08-28"));
@@ -7511,7 +7561,7 @@ mod tests {
         assert_eq!(dated_task.due_at.as_deref(), Some("2026-08-28T10:30:00+08:00"));
         assert_eq!(dated_task.source_type, "manual");
         assert_eq!(dated_task.total_workload_minutes, Some(90));
-        assert_eq!(dated_task.remaining_workload_minutes, Some(90));
+        assert_eq!(dated_task.remaining_workload_minutes, Some(0));
         assert_eq!(dated_task.actual_minutes, 0);
         assert_eq!(database.count("tasks").unwrap(), 1);
     }
@@ -8194,12 +8244,14 @@ mod tests {
                 due_at: Some("2026-09-08T12:00:00+08:00".into()), estimated_minutes: Some(minutes),
             }).unwrap();
         }
+        let creation_clock = TestNow::new("2026-09-07T00:00:00+08:00");
         database.update_manual_task(&narrow_window_id, ManualTaskUpdate {
             title: "当天仅剩十分钟窗口".into(), notes: None, priority: None,
             earliest_start_at: Some("2026-09-07T09:00:00+08:00".into()),
             due_at: Some("2026-09-08T09:10:00+08:00".into()),
             estimated_minutes: Some(60),
         }).unwrap();
+        drop(creation_clock);
 
         let preview = database.preview_rule_based_plan("2026-09-08").unwrap();
         assert_eq!(preview.blocks.len(), 1);
@@ -8434,11 +8486,13 @@ mod tests {
             }).unwrap();
         }
         let future_task_id = database.create_manual_task("9月23日到期任务").unwrap();
+        let creation_clock = TestNow::new("2026-08-28T00:00:00+08:00");
         database.update_manual_task(&future_task_id, ManualTaskUpdate {
             title: "9月23日到期任务".into(), notes: None, priority: Some(Priority::Low),
             earliest_start_at: Some("2026-08-28T11:00:00+08:00".into()),
             due_at: Some("2026-09-23T17:00:00+08:00".into()), estimated_minutes: Some(70),
         }).unwrap();
+        drop(creation_clock);
 
         let preview = database.preview_rule_based_plan("2026-09-04").unwrap();
         assert_eq!(preview.blocks.len(), 1);
@@ -8580,11 +8634,13 @@ mod tests {
         assert_eq!(residual.unscheduled[0].estimated_minutes, Some(7));
         assert!(residual.blocks.iter().any(|block| block.task_id == bounded_id), "同一任务的剩余工作量可与已排块并存");
 
+        let creation_clock = TestNow::new("2026-08-14T00:00:00+08:00");
         database.update_manual_task(&second_id, ManualTaskUpdate {
             title: "需要缓冲的任务".into(), notes: None, priority: Some(Priority::Medium),
             earliest_start_at: Some("2026-08-14T09:00:00+08:00".into()),
             due_at: Some("2026-08-15T13:00:00+08:00".into()), estimated_minutes: Some(120),
         }).unwrap();
+        drop(creation_clock);
         let saturday = database.preview_rule_based_plan("2026-08-15").unwrap();
         let saturday_blocks = vec![RulePlanBlock {
             task_id: second_id.clone(), task_title: String::new(),
@@ -8785,12 +8841,14 @@ mod tests {
             lunch_start: None, lunch_end: None, lunch_reason: "午休".into(), buffer_minutes: 0,
         }).unwrap();
         let task_id = database.create_manual_task("跨两天整理完整项目资料").unwrap();
+        let creation_clock = TestNow::new("2026-08-28T00:00:00+08:00");
         let updated = database.update_manual_task(&task_id, ManualTaskUpdate {
             title: "跨两天整理完整项目资料".into(), notes: None, priority: Some(Priority::High),
             earliest_start_at: Some("2026-08-28T09:00:00+08:00".into()),
             due_at: Some("2026-08-29T12:00:00+08:00".into()),
             estimated_minutes: Some(240),
         }).unwrap();
+        drop(creation_clock);
         assert!(updated.splittable, "拆分已是系统排程能力，不再由任务开关决定");
 
         let first_preview = database.preview_rule_based_plan("2026-08-28").unwrap();
@@ -8824,12 +8882,14 @@ mod tests {
     fn confirmed_plan_adjustment_does_not_repeat_a_cross_day_task_in_unscheduled() {
         let mut database = Database::in_memory().unwrap();
         let task_id = database.create_manual_task("跨天任务不重复出现").unwrap();
+        let creation_clock = TestNow::new("2026-09-09T00:00:00+08:00");
         database.update_manual_task(&task_id, ManualTaskUpdate {
             title: "跨天任务不重复出现".into(), notes: None, priority: Some(Priority::High),
             earliest_start_at: Some("2026-09-09T09:00:00+08:00".into()),
             due_at: Some("2026-09-10T18:00:00+08:00".into()),
             estimated_minutes: Some(240),
         }).unwrap();
+        drop(creation_clock);
 
         let preview = database.preview_rule_based_plan("2026-09-09").unwrap();
         assert_eq!(preview.blocks[0].estimated_minutes, 120);
@@ -8867,12 +8927,14 @@ mod tests {
         database.confirm_rule_based_plan(second_day).unwrap();
 
         let cross_day_id = database.create_manual_task("跨天任务刷新剩余时间").unwrap();
+        let creation_clock = TestNow::new("2026-09-09T00:00:00+08:00");
         database.update_manual_task(&cross_day_id, ManualTaskUpdate {
             title: "跨天任务刷新剩余时间".into(), notes: None, priority: Some(Priority::High),
             earliest_start_at: Some("2026-09-09T09:00:00+08:00".into()),
             due_at: Some("2026-09-10T18:00:00+08:00".into()),
             estimated_minutes: Some(240),
         }).unwrap();
+        drop(creation_clock);
         let first_day = database.preview_rule_based_plan("2026-09-09").unwrap();
         assert_eq!(first_day.blocks.iter()
             .find(|block| block.task_id == cross_day_id)
@@ -8904,12 +8966,14 @@ mod tests {
     fn cross_day_task_accepts_total_workload_over_one_day_and_plans_the_daily_average() {
         let mut database = Database::in_memory().unwrap();
         let task_id = database.create_manual_task("跨三天准备发布").unwrap();
+        let creation_clock = TestNow::new("2026-09-09T00:00:00+08:00");
         let updated = database.update_manual_task(&task_id, ManualTaskUpdate {
             title: "跨三天准备发布".into(), notes: None, priority: Some(Priority::High),
             earliest_start_at: Some("2026-09-09T09:00:00+08:00".into()),
             due_at: Some("2026-09-11T18:00:00+08:00".into()),
             estimated_minutes: Some(1800),
         }).unwrap();
+        drop(creation_clock);
         assert_eq!(updated.total_workload_minutes, Some(1800));
 
         let preview = database.preview_rule_based_plan("2026-09-09").unwrap();
@@ -8927,12 +8991,14 @@ mod tests {
             lunch_reason: "午休".into(), buffer_minutes: 10,
         }).unwrap();
         let task_id = database.create_manual_task("已过截止时间的跨天任务").unwrap();
+        let creation_clock = TestNow::new("2026-08-28T00:00:00+08:00");
         database.update_manual_task(&task_id, ManualTaskUpdate {
             title: "已过截止时间的跨天任务".into(), notes: None, priority: Some(Priority::High),
             earliest_start_at: Some("2026-08-28T11:00:00+08:00".into()),
             due_at: Some("2026-08-29T12:00:00+08:00".into()),
             estimated_minutes: Some(1000),
         }).unwrap();
+        drop(creation_clock);
 
         let preview = database.preview_rule_based_plan("2026-08-31").unwrap();
         assert!(preview.blocks.is_empty());
@@ -9227,6 +9293,7 @@ mod tests {
 
     #[test]
     fn short_undo_uses_new_transaction_and_refuses_later_conflicts() {
+        let _clock = TestNow::new("2026-09-01T12:00:00+08:00");
         let mut database = Database::in_memory().unwrap();
         let draft = database.create_manual_task_draft(manual_draft("可撤销创建", Some("2026-09-01"))).unwrap();
         let task = database.confirm_task_draft(&draft.id, &draft.confirmation_token).unwrap();
@@ -9417,3 +9484,7 @@ mod results_tests;
 #[cfg(test)]
 #[path = "database_completion_tests.rs"]
 mod completion_tests;
+
+#[cfg(test)]
+#[path = "database_historical_creation_tests.rs"]
+mod historical_creation_tests;

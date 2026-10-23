@@ -1,4 +1,4 @@
-import { blockResultEditable } from "./task-result.ts";
+import { blockResultEditable, historicalBlockCompletionLocked } from "./task-result.ts";
 
 export type ReviewDraft = {
   result: "completed" | "partial" | "not_completed" | null;
@@ -25,12 +25,13 @@ export function canRecordReview(date: string, today: string) {
 }
 
 export function canCaptureTaskResult(date: string, _today: string, block: {
-  task_status: string; review: unknown; execution_status: string;
+  task_status: string; review: { outcome?: string } | null; execution_status: string;
   execution_captured_at: string | null; actual_minutes: number | null; ends_at?: string;
   result_date?: string | null; result_ends_at?: string | null;
 }, now = Date.now()) {
   if (!["open", "scheduled", "done"].includes(block.task_status)) return false;
-  return blockResultEditable(date, now) && (block.result_date == null || block.result_date === date);
+  return blockResultEditable(date, now) && (block.result_date == null || block.result_date === date)
+    && !historicalBlockCompletionLocked(date, block, now);
 }
 
 export function canCaptureRecurringResult(date: string, today: string, outcome: string | null, writable: boolean) {

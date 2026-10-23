@@ -37,6 +37,27 @@ pub(super) fn require_task_window(connection: &Connection, id: &str) -> AppResul
     Ok(())
 }
 
+// Historical completion is a durable fact, even inside the old cross-midnight grace window.
+pub(super) fn require_task_reopenable(connection: &Connection, id: &str) -> AppResult<()> {
+    let task = load_task_dto_in_transaction(connection, id)?;
+    if task.status == "done" && task.result_date.as_deref().or(task.due_date.as_deref())
+        .is_some_and(|date| date < shanghai_today().as_str()) {
+        return Err(AppError::Domain("历史完成记录不支持取消".into()));
+    }
+    require_task_window(connection, id)
+}
+
+pub(super) fn require_block_outcome_change(connection: &Connection, id: &str, outcome: &str) -> AppResult<()> {
+    let (_, date, _) = block_context(connection, id)?;
+    if date < shanghai_today() && outcome != "completed" {
+        let completed: bool = connection.query_row("SELECT COALESCE(
+            (SELECT outcome FROM review_entries WHERE plan_block_id = pb.id), pb.execution_status) = 'completed'
+            FROM plan_blocks pb WHERE pb.id = ?1", [id], |row| row.get(0))?;
+        if completed { return Err(AppError::Domain("历史完成记录不支持取消".into())); }
+    }
+    Ok(())
+}
+
 pub(super) fn freeze_block(connection: &Connection, id: &str) -> AppResult<()> {
     connection.execute("UPDATE plan_blocks SET result_ends_at = COALESCE(result_ends_at, ends_at),
         result_date = COALESCE(result_date, (SELECT plan_date FROM daily_plans WHERE id = daily_plan_id)) WHERE id = ?1", [id])?;

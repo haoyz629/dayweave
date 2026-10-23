@@ -139,7 +139,7 @@ export type TaskHistoryEvent = {
   id: string;
   occurred_at: string | null;
   plan_date: string | null;
-  kind: "created" | "execution" | "status" | "restored" | "cleared";
+  kind: "created" | "execution" | "status" | "automatic_status" | "restored" | "cleared" | "cleared_incomplete" | "reopened";
   status: TaskStatus | "not_completed" | null;
   note: string | null;
   review_note: string | null;

@@ -23,12 +23,13 @@ test('legacy review navigation returns to the single Today schedule', () => {
   assert.deepEqual(normalizeTodayNavigation('任务'), { active: '任务' });
 });
 
-test('task blocks allow repeated corrections on any historical day, independent of saved state', () => {
+test('historical completed blocks are read-only while unfinished historical blocks remain writable', () => {
   const now=Date.parse('2026-10-16T12:00:00+08:00');
   const block = { task_status: 'scheduled', review: null, execution_status: 'planned', execution_captured_at: null, actual_minutes: null, ends_at:'2026-10-16T23:30:00+08:00' };
   for (const date of ['2026-10-16', '2026-10-15', '2026-10-09', '2020-01-01']) {
     for (const change of [{}, { execution_status: 'completed' }, { execution_status: 'blocked' }, { execution_captured_at: 'saved' }, { actual_minutes: 0 }, {review:{outcome:'completed'}}, {task_status:'done'}]) {
-      assert.equal(canCaptureTaskResult(date, '2026-10-16', {...block,...change},now),true);
+      const completed=(change.review?.outcome ?? change.execution_status) === 'completed';
+      assert.equal(canCaptureTaskResult(date, '2026-10-16', {...block,...change},now),date === '2026-10-16' || !completed);
     }
     assert.equal(canCaptureTaskResult(date,'2026-10-16',{...block,task_status:'deleted'},now),false);
   }

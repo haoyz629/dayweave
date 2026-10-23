@@ -14,7 +14,7 @@ const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const handlers = new Map();
 const renderExpressions = new Map();
-const names = ["quickCompleteTimelineBlock", "saveSelectedBlockExecution", "requestTimelineTaskCompletion", "completeTimelineTask", "CompletedTaskDetails", "reopen", "requestTaskChange", "applyTaskChange", "openIndependentDraft"];
+const names = ["quickCompleteTimelineBlock", "saveSelectedBlockExecution", "CompletedTaskDetails", "reopen", "requestTaskChange", "applyTaskChange", "openIndependentDraft"];
 let checkbox, dialogReopen;
 function collect(node) {
   if (ts.isFunctionDeclaration(node) && names.includes(node.name?.text)) handlers.set(node.name.text, node.getText(source));
@@ -46,7 +46,8 @@ function harness({ task = baseTask, block = baseBlock, selectedDate = previous, 
     independentTaskDraft, shanghaiDateValue: () => rules.resultToday(clock.value),
     quickCompletingBlockId: null, savingExecution: false, busy: false, loading: false,
     savingDraggedBlock: false, timelineDrag: null, preview: null, draftSaving: false, creating: false,
-    timelineCompletionTask: null, timelineCompletionNote: "", timelineCompletionError: null,
+    selectedTaskIsCrossDay: Boolean(task.earliest_start_date && task.due_date && task.earliest_start_date < task.due_date),
+    selectedMetadata: null,
     hasUnsavedChanges: false, preferredSelection: { current: null }, preparingIndependent: { current: false },
     taskDrafts: [], effectiveOutcome, taskCompleted: false, blockHasFact: false, blockIsSaving: false,
     selectedBlockDialog: rules.timelineTaskDialogState(block),
@@ -83,17 +84,19 @@ function harness({ task = baseTask, block = baseBlock, selectedDate = previous, 
   return { state, calls, clock, checkbox: () => button(checkbox), dialog: () => button(dialogReopen) };
 }
 
-test("historical completion cancels only the block from checkbox and dialog, inside and outside former grace", async () => {
-  for (const target of ["checkbox", "dialog"]) for (const now of [`${today}T05:00:00+08:00`, `${today}T12:00:00+08:00`, "2027-01-01T12:00:00+08:00"]) {
+test("historical completion cannot be cancelled from checkbox, dialog or task list, even inside former grace", async () => {
+  for (const now of [`${today}T05:00:00+08:00`, `${today}T12:00:00+08:00`, "2027-01-01T12:00:00+08:00"]) {
     const current = harness({ now });
-    const button = current[target]();
-    assert.equal(Boolean(button.props.disabled), false);
-    button.props.onClick({ stopPropagation() {} });
-    await settle();
-    assert.deepEqual(JSON.parse(JSON.stringify(current.calls[0])), ["clear", previous, "block"]);
-    assert.equal(current.calls.some(([type]) => ["reopen","result","history"].includes(type)),false);
-    assert.ok(current.calls.some(([type, title]) => type === "toast" && title === "已取消本次完成"));
-    assert.equal(current.state.quickCompletingBlockId, null);
+    for (const target of ["checkbox", "dialog"]) {
+      const button = current[target]();
+      assert.equal(Boolean(button.props.disabled), true);
+      assert.equal(button.props.title, rules.HISTORY_COMPLETION_LOCKED_MESSAGE);
+      button.props.onClick({ stopPropagation() {} });
+      await settle();
+    }
+    await current.state.reopen();
+    assert.deepEqual(current.calls, []);
+    assert.equal(current.state.feedback, rules.HISTORY_COMPLETION_LOCKED_MESSAGE);
   }
 });
 
@@ -105,20 +108,16 @@ test("historical checkbox cancels incomplete facts instead of completing them, r
     const current = harness({task,block,now:`${today}T12:00:00+08:00`});
     const button = current.checkbox();
     const incomplete = !["planned","completed"].includes(outcome);
-    assert.equal(button.props.disabled,reviewed && incomplete);
+    assert.equal(button.props.disabled,outcome === "completed" || (reviewed && incomplete));
     assert.equal(button.props["aria-pressed"],outcome !== "planned");
-    assert.equal(button.props.title,reviewed && incomplete ? "已有复盘记录，请在弹窗中修改结果" : outcome === "completed" ? "取消本次完成" : incomplete ? "取消本次未完成" : "标记本次完成");
+    assert.equal(button.props.title,outcome === "completed" ? rules.HISTORY_COMPLETION_LOCKED_MESSAGE : reviewed && incomplete ? "已有复盘记录，请在弹窗中修改结果" : incomplete ? "取消本次未完成" : "标记本次完成");
     button.props.onClick({stopPropagation(){}}); await settle();
-    if (reviewed && incomplete) { assert.deepEqual(current.calls,[]); continue; }
+    if (outcome === "completed" || (reviewed && incomplete)) { assert.deepEqual(current.calls,[]); continue; }
     if (incomplete) {
       assert.deepEqual(current.calls[0],["clear",previous,"block"]);
       assert.equal(current.calls.some(([type]) => ["history","result","reopen"].includes(type)),false);
       assert.ok(current.calls.some(([type,title]) => type === "toast" && title === "已取消本次未完成"));
-    } else if (outcome === "completed") {
-      assert.deepEqual(current.calls[0],["clear",previous,"block"]);
-      assert.equal(current.calls.some(([type]) => ["history","result","reopen"].includes(type)),false);
     } else {
-      assert.equal(current.calls[0][0],"history");
       assert.equal(current.calls[0][1],previous);
       assert.equal(current.calls[0][2].outcome,"completed");
       assert.equal(current.calls[0][2].note,reviewed?"复盘备注":null);
@@ -139,14 +138,11 @@ test("a button rendered today submits a block-only correction after Shanghai mid
   assert.equal(current.calls.some(([type])=>type==="result"),false);
 });
 
-test("correcting historical done to incomplete preserves its date and note without reopening the task", async () => {
+test("historical done cannot be saved as incomplete through the result dialog", async () => {
   const current = harness({ block: { ...baseBlock, review: { outcome: "completed", notes: "独立复盘" } } });
   await current.state.saveSelectedBlockExecution();
-  const call = current.calls.find(([type]) => type === "history");
-  assert.equal(call[1], previous);
-  assert.equal(call[2].outcome, "not_started");
-  assert.equal(call[2].note, "已更新的备注");
-  assert.equal(current.calls.some(([type])=>["reopen","result"].includes(type)),false);
+  assert.deepEqual(current.calls, []);
+  assert.equal(current.state.executionMessage, rules.HISTORY_COMPLETION_LOCKED_MESSAGE);
 });
 
 test("today completion and cancellation use the daily API and never reopen the whole task", async () => {
@@ -177,13 +173,18 @@ test("historical dialog save always uses the block-only API even for existing re
     const current = harness({ task, block, now });
     current.state.executionDraft = { outcome: "completed", result: "completed", note: "历史补录" };
     await current.state.saveSelectedBlockExecution();
-    assert.equal(current.calls[0][0], "history");
-    assert.equal(current.calls.some(([type]) => type === "result"), false);
+    if (outcome === "completed") {
+      assert.deepEqual(current.calls, []);
+      assert.equal(current.state.executionMessage, rules.HISTORY_COMPLETION_LOCKED_MESSAGE);
+    } else {
+      assert.equal(current.calls[0][0], "history");
+      assert.equal(current.calls.some(([type]) => type === "result"), false);
+    }
   }
 });
 
-test("task details share the same grace window and keep history read-only afterwards", async () => {
-  for (const [now, allowed] of [[`${today}T05:00:00+08:00`,true],[`${today}T05:30:01+08:00`,false]]) {
+test("task details never offer historical cancellation, overriding the former grace window", async () => {
+  for (const [now, allowed] of [[`${today}T05:00:00+08:00`,false],[`${today}T05:30:01+08:00`,false]]) {
     const { state, calls, clock } = harness({ now });
     const detail = state.CompletedTaskDetails({ task: baseTask, busy: false, now: clock.value, onReopen: () => state.requestTaskChange({ kind: "reopen" }), onComplete() {}, onTrash() {} });
     const tree = detail.type(detail.props);
@@ -193,7 +194,7 @@ test("task details share the same grace window and keep history read-only afterw
     const button = React.Children.toArray(primaryActions.props.children)[0];
     assert.equal(!button.props.disabled, allowed);
     if (allowed) { button.props.onClick(); await settle(); assert.deepEqual(calls[0], ["reopen", "task", today]); }
-    else assert.match(markup,/已超过结果修改时间/);
+    else assert.match(markup,/历史日期的已完成记录不可取消完成/);
   }
 });
 
@@ -248,7 +249,8 @@ test("future, invalid, mismatched and deleted history remain protected on submis
 });
 
 test("history save failure leaves block and task facts intact and permits retry", async () => {
-  const current = harness();
+  const block = {...baseBlock,result_date:today};
+  const current = harness({block,selectedDate:today});
   current.state.clearExecutionCapture = async () => { throw new Error("保存失败"); };
   await current.state.quickCompleteTimelineBlock(current.state.block);
   assert.equal(current.state.block.execution_status,"completed");
@@ -310,6 +312,11 @@ test("quick completion and cancellation show one result sentence without redunda
     const task = { ...baseTask, status: outcome === "completed" ? "done" : "scheduled", result_date: selectedDate, result_ends_at: end };
     const block = { ...baseBlock, task_status: task.status, execution_status: outcome, result_date: selectedDate, result_ends_at: end, ends_at: end };
     const current = harness({ task, block, selectedDate });
+    if (selectedDate === previous && outcome === "completed") {
+      await current.state.quickCompleteTimelineBlock(block);
+      assert.deepEqual(current.calls, []);
+      continue;
+    }
     await current.state.quickCompleteTimelineBlock(block);
     const toasts = current.calls.filter(([type]) => type === "toast");
     assert.equal(toasts.length, 1);
@@ -389,8 +396,8 @@ test("daily completion toast offers only the newly created block-result undo", a
 
 test("cancel completion clears the fact and returns the block dialog to executing", async () => {
   for (const reviewed of [false, true]) {
-    const block = { ...baseBlock, review: reviewed ? { outcome: "completed", notes: "独立复盘" } : null };
-    const current = harness({ block });
+    const block = { ...baseBlock, result_date: today, review: reviewed ? { outcome: "completed", notes: "独立复盘" } : null };
+    const current = harness({ block, selectedDate: today });
     current.state.clearExecutionCapture = async (date, id) => {
       current.calls.push(["clear", date, id]);
       block.execution_status = "planned";
@@ -402,44 +409,75 @@ test("cancel completion clears the fact and returns the block dialog to executin
   }
 });
 
-test("whole-task action opens confirmation before saving and uses the explicit completion API", async () => {
+test("whole-task choice saves through the existing dialog without a second confirmation", async () => {
   const task = { ...baseTask, status: "scheduled", result_date: null, execution_locked: true, earliest_start_date: previous, due_date: today };
-  const current = harness({ task });
-  current.state.requestTimelineTaskCompletion();
-  assert.equal(current.state.timelineCompletionTask.id, task.id);
-  assert.deepEqual(current.calls, []);
-  current.state.timelineCompletionNote = "  全部工作已结束  ";
-  await current.state.completeTimelineTask();
-  assert.deepEqual(current.calls[0], ["complete-task", task.id, null, "全部工作已结束"]);
+  const block = { ...baseBlock, task_status: "scheduled", execution_status: "planned" };
+  const current = harness({ task, block, now: `${today}T12:00:00+08:00` });
+  current.state.executionDraft = { outcome: "completed", result: "completed", wholeTask: true, note: "  全部工作已结束  " };
+  await current.state.saveSelectedBlockExecution();
+  assert.deepEqual(current.calls[0], ["complete-task", task.id, null, "全部工作已结束"], "whole completion uses the task context, not the expired historical block");
   assert.equal(current.calls.some(([type]) => ["history", "result", "clear"].includes(type)), false);
-  assert.equal(current.state.timelineCompletionTask, null);
+  assert.ok(current.calls.some(([type, title]) => type === "toast" && title === "整个任务已完成"));
+  assert.equal(current.state.selection, null);
   assert.equal(current.state.savingExecution, false);
 });
 
-test("whole-task completion guards stale or busy state and preserves confirmation after failure", async () => {
-  for (const update of [{ busy: true }, { savingExecution: true }, { loading: true }, { quickCompletingBlockId: "block" }, { tasks: [] }]) {
+test("whole-task save guards stale and busy state and retains the draft after failure", async () => {
+  for (const update of [{ busy: true }, { savingExecution: true }, { loading: true }, { preview: {} }, { quickCompletingBlockId: "block" }, { selectedTask: null }]) {
     const task = { ...baseTask, status: "scheduled", result_date: null, earliest_start_date: previous, due_date: today };
-    const current = harness({ task });
-    current.state.requestTimelineTaskCompletion();
+    const current = harness({ task, block: { ...baseBlock, task_status: "scheduled", execution_status: "planned" } });
+    current.state.executionDraft.wholeTask = true;
     Object.assign(current.state, update);
-    await current.state.completeTimelineTask();
+    await current.state.saveSelectedBlockExecution();
     assert.deepEqual(current.calls, []);
   }
   const task = { ...baseTask, status: "scheduled", result_date: null, earliest_start_date: previous, due_date: today };
-  const current = harness({ task });
-  current.state.requestTimelineTaskCompletion();
+  const current = harness({ task, block: { ...baseBlock, task_status: "scheduled", execution_status: "planned" } });
+  current.state.executionDraft.wholeTask = true;
+  current.state.selection = { kind: "block", id: "block" };
   current.state.completeTask = async () => { throw new Error("保存失败"); };
-  await current.state.completeTimelineTask();
-  assert.equal(current.state.timelineCompletionTask.id, task.id);
-  assert.match(current.state.timelineCompletionError, /保存失败/);
+  await current.state.saveSelectedBlockExecution();
+  assert.equal(current.state.selection.id, "block");
+  assert.equal(current.state.executionDraft.wholeTask, true);
+  assert.match(current.state.executionMessage, /保存失败/);
   assert.equal(current.state.savingExecution, false);
   assert.equal(current.calls.some(([type]) => type === "refresh"), false);
 });
 
-test("single-day task cannot open the timeline whole-task completion action", () => {
+test("single-day task cannot submit the cross-day whole-task choice", async () => {
   const task = { ...baseTask, status: "scheduled", result_date: null, earliest_start_date: today, due_date: today };
   const current = harness({ task });
-  current.state.requestTimelineTaskCompletion();
-  assert.equal(current.state.timelineCompletionTask, null);
+  current.state.executionDraft.wholeTask = true;
+  await current.state.saveSelectedBlockExecution();
   assert.deepEqual(current.calls, []);
+});
+
+test("unchecking a completed day of a globally done cross-day task always shows the concise toast", async () => {
+  for (const selectedDate of [previous, today]) {
+    const task = { ...baseTask, earliest_start_date: previous, due_date: today };
+    const block = { ...baseBlock, result_date: selectedDate, ends_at: `${selectedDate}T23:30:00+08:00`, result_ends_at: `${selectedDate}T23:30:00+08:00` };
+    const current = harness({ task, block, selectedDate });
+    current.checkbox().props.onClick({ stopPropagation() {} });
+    await settle();
+    if (selectedDate === previous) { assert.deepEqual(current.calls, []); continue; }
+    assert.deepEqual(current.calls[0], ["clear", selectedDate, "block"]);
+    assert.ok(current.calls.some(([type, title]) => type === "toast" && title === "已取消当天及整体完成"));
+    assert.equal(current.calls.some(([type]) => type === "reopen"), false, "backend must handle both state changes atomically");
+  }
+});
+
+test("completed checkbox and result form rendered before Shanghai midnight cannot cancel after midnight", async () => {
+  const task = { ...baseTask, result_date: today };
+  const block = { ...baseBlock, result_date: today };
+  const current = harness({ task, block, selectedDate: today, now: `${today}T23:59:59+08:00` });
+  const button = current.checkbox();
+  assert.equal(button.props.disabled, false);
+  current.clock.value = Date.parse("2026-10-21T00:00:00+08:00");
+  button.props.onClick({ stopPropagation() {} });
+  await settle();
+  await current.state.saveSelectedBlockExecution();
+  await current.state.reopen();
+  assert.deepEqual(current.calls, []);
+  assert.equal(current.state.executionMessage, rules.HISTORY_COMPLETION_LOCKED_MESSAGE);
+  assert.equal(current.state.feedback, rules.HISTORY_COMPLETION_LOCKED_MESSAGE);
 });

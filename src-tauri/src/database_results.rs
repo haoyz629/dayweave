@@ -266,17 +266,27 @@ pub(super) fn completion_candidate(connection: &Connection, task_id: &str) -> Ap
             WHERE pb.task_id = ?1 AND dp.plan_date = ?2 AND dp.status = 'confirmed'
             ORDER BY pb.starts_at DESC, pb.id LIMIT 1", params![task_id, today], |row| row.get(0)).optional()?);
     }
+    // A single-day task's current reservation is its completion target, not an
+    // older execution fact or an unconfirmed planning copy of the same task.
+    if status != "done" {
+        let reservation = connection.query_row("SELECT pb.id FROM tasks task
+            JOIN plan_blocks pb ON pb.task_id = task.id JOIN daily_plans dp ON dp.id = pb.daily_plan_id
+            WHERE task.id = ?1 AND task.earliest_start_date = task.due_date AND dp.plan_date = task.due_date
+                AND dp.status = 'confirmed' AND pb.starts_at = task.earliest_start_at AND pb.ends_at = task.due_at
+            ORDER BY pb.id LIMIT 1", [task_id], |row| row.get::<_, String>(0)).optional()?;
+        if reservation.is_some() { return Ok(reservation); }
+    }
     if result_date.is_some() {
         let fresh = if status != "done" {
             connection.query_row("SELECT pb.id FROM plan_blocks pb JOIN daily_plans dp ON dp.id = pb.daily_plan_id
-                WHERE pb.task_id = ?1 AND dp.plan_date = ?2 AND pb.id <> COALESCE(?3, '')
+                WHERE pb.task_id = ?1 AND dp.status = 'confirmed' AND dp.plan_date = ?2 AND pb.id <> COALESCE(?3, '')
                 AND (dp.plan_date > ?4 OR pb.result_date IS NULL) ORDER BY pb.starts_at DESC, pb.id LIMIT 1",
                 params![task_id, today, saved, result_date], |row| row.get::<_, String>(0)).optional()?
         } else { None };
         Ok(fresh.or(saved))
     } else {
         Ok(connection.query_row("SELECT pb.id FROM plan_blocks pb JOIN daily_plans dp ON dp.id = pb.daily_plan_id
-            WHERE pb.task_id = ?1 ORDER BY (dp.plan_date > ?2),
+            WHERE pb.task_id = ?1 AND dp.status = 'confirmed' ORDER BY (dp.plan_date > ?2),
                 CASE WHEN dp.plan_date <= ?2 THEN dp.plan_date END DESC, dp.plan_date, pb.starts_at, pb.id LIMIT 1",
             params![task_id, today], |row| row.get(0)).optional()?)
     }

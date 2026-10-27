@@ -60,7 +60,7 @@ test("plan draft time editor stays compact and supports focused manual adjustmen
     assert.equal(stylesSource.includes(phrase), false, `plan draft editor still contains redundant styles: ${phrase}`);
   }
   assert.match(appSource, /<BlockEditorTimeRangeRail[^>]*minimumDuration=\{MIN_TASK_BLOCK_MINUTES\}/);
-  assert.match(appSource, /手写 1 分钟 · 时间轴与方向键 5 分钟 · 最短 15 分钟/);
+  assert.match(appSource, /手写 1 分钟 · 时间轴与方向键 5 分钟 · 最短 \{minimumDuration\} 分钟/);
   assert.match(appSource, /normalizeClockInput\(/);
   assert.match(appSource, /focusedTimeRangePresentation\(/);
   assert.match(appSource, /type="text" inputMode="numeric"/);
@@ -145,7 +145,7 @@ test("plan draft time editor stays compact and supports focused manual adjustmen
 
 test("task schedule picker edits the full range with the shared timeline rail", () => {
   assert.match(appSource, /type TaskSchedulePicker = \{[\s\S]*?activeField: "start" \| "end";[\s\S]*?earliest_start_date: string;[\s\S]*?due_time: string;/);
-  assert.match(appSource, /className="schedule-picker-boundaries"/);
+  assert.match(appSource, /className="schedule-picker-boundaries schedule-picker-rows apple-schedule-rows"/);
   assert.match(appSource, /renderBoundaryCard\("start", "开始"/);
   assert.match(appSource, /renderBoundaryCard\("end", "结束"/);
   assert.match(appSource, /className="schedule-picker-range-panel"/);
@@ -163,7 +163,7 @@ test("task schedule picker edits the full range with the shared timeline rail", 
   assert.match(appSource, /endMinuteOffset=\{pickerEndMinuteOffset\}/);
   assert.match(appSource, /showPresets=\{pickerSpanDays === 1\}/);
   assert.match(appSource, /const endMinute = endMinuteOffset \+ clockMinutes\(end\)/);
-  assert.match(appSource, /const displayClock = \(minute: number\) => minutesClock/);
+  assert.match(appSource, /const displayClock = \(minute: number\) => allowMidnightEnd[^;]*"24:00" : minutesClock/);
   assert.match(appSource, /className="schedule-picker-summary"/);
   assert.doesNotMatch(appSource, /schedule-timeline-list/);
   assert.doesNotMatch(stylesSource, /schedule-timeline-list/);
@@ -171,7 +171,7 @@ test("task schedule picker edits the full range with the shared timeline rail", 
   assert.match(stylesSource, /\.schedule-picker-body \{[^}]*grid-template-columns: minmax\(360px, \.95fr\) minmax\(410px, 1\.05fr\)/);
   assert.match(stylesSource, /\.schedule-picker-range-panel \.time-range-rail\.block-editor \.time-rail-surface/);
   assert.match(stylesSource, /\.schedule-boundary-time-control:focus-within/);
-  assert.match(stylesSource, /\.schedule-boundary-field\.time\.is-invalid \.schedule-boundary-time-control/);
+  assert.match(stylesSource, /\.schedule-picker-rows \.schedule-time-control\.is-invalid \.schedule-boundary-time-control/);
   assert.match(stylesSource, /\.schedule-picker-footer-error/);
   assert.match(stylesSource, /@media \(max-width: 760px\) \{[\s\S]*?\.schedule-picker-body \{ grid-template-columns: minmax\(0, 1fr\); \}/);
 });
@@ -182,10 +182,10 @@ test("task capsule hover actions do not stay open after a pointer click", () => 
 });
 
 test("task list selection is visually distinct in light and dark modes", () => {
-  assert.match(stylesSource, /\.ledger-row\.task-capsule-row \{[^}]*border-bottom: 1px solid var\(--task-row-divider\);[^}]*border-radius: 0;[^}]*background: var\(--jx-raised\);/);
-  assert.match(stylesSource, /\.ledger-row\.task-capsule-row:not\(\.selected\):hover/);
-  assert.match(stylesSource, /\.ledger-row\.task-capsule-row\.selected \{[^}]*background: var\(--jx-focus-soft\);[^}]*box-shadow: none;/);
-  assert.match(stylesSource, /html\[data-mode="dark"\] \.next-workspace \.ledger-row\.task-capsule-row\.selected \{[^}]*background: var\(--jx-focus-soft\);/);
+  assert.match(stylesSource, /\.task-ledger-list \.ledger-row\.task-capsule-row \{[^}]*border: 1px solid var\(--task-card-border\);[^}]*border-radius: 14px;[^}]*background: var\(--task-card-bg\);/);
+  assert.match(stylesSource, /\.task-ledger-list \.ledger-row\.task-capsule-row:not\(\.selected\):hover/);
+  assert.match(stylesSource, /\.task-ledger-list \.ledger-row\.task-capsule-row\.selected \{[^}]*border-color: var\(--task-card-selected-border\);[^}]*background: var\(--task-card-selected-bg\);/);
+  assert.match(stylesSource, /html\[data-mode="dark"\] \.next-workspace \.task-ledger-list \{[^}]*--task-card-selected-border: #6975b0;[^}]*--task-card-selected-bg: linear-gradient/);
 });
 
 test("task inspector keeps a single column and centers in wide desktop workspace", () => {
@@ -422,10 +422,10 @@ test("cross-day daily workload input resets focus styles and recurring items use
   assert.match(appSource, /有效日期范围/);
   assert.match(appSource, /设为长期有效/);
   assert.match(appSource, /recurring-validity-card/);
-  assert.match(appSource, /className="recurring-schedule-grid"/);
-  assert.match(appSource, /recurring-presets-chips/);
-  assert.match(appSource, /recurring-display-time-control/);
-  assert.match(appSource, /preset-duration-chip/);
+  assert.match(appSource, /className="apple-schedule-rows"/);
+  assert.match(appSource, /schedule-validity-presets/);
+  assert.match(appSource, /schedule-time-control/);
+  assert.match(appSource, /time-duration-presets/);
   assert.match(appSource, /starts_on:\s*draftStartsOn,\s*ends_on:\s*draftEndsOn/);
 });
 test("switching between task and recurring tabs preserves inputs without modal prompt", () => {
@@ -439,30 +439,32 @@ test("ordinary and recurring task time inputs enforce 4-digit limit and preserve
   assert.match(appSource, /function updatePickerTimeInput\(field: TaskSchedulePicker\["activeField"\], value: string\) \{[\s\S]*?sanitizeTimeInput\(value\)/);
   assert.match(appSource, /function commitPickerTimeInput\(field: TaskSchedulePicker\["activeField"\], value: string\) \{[\s\S]*?sanitizeTimeInput\(value\)/);
   assert.match(appSource, /<input type="text" inputMode="numeric" autoComplete="off" spellCheck=\{false\} maxLength=\{5\} value=\{inputValue\}/);
-  assert.match(appSource, /isDisplayTimeFocusedRef/);
-  assert.match(appSource, /function updateDisplayTimeInput\(value: string\)/);
-  assert.match(appSource, /function commitDisplayTimeInput\(value: string\)/);
-  assert.match(appSource, /function handleDisplayTimeKeyDown\(event: KeyboardEvent<HTMLInputElement>\)/);
+  assert.match(appSource, /function updateTimeInput\(field: TimeRangeEdge, raw: string, commit = false\)/);
+  assert.match(appSource, /function commitTimeInput\(field: TimeRangeEdge, raw: string\)/);
+  assert.match(appSource, /function handleTimeKeyDown\(event: KeyboardEvent<HTMLInputElement>, field: TimeRangeEdge\)/);
+  assert.match(appSource, /cancelledTimeBlurRef/);
 });
 
-test("recurring item editor converges display time and duration into date picker and shows preview inline with title", () => {
+test("recurring item editor uses start/end dates and times with inline occurrence preview", () => {
   // Title wrap contains both label and inline recent occurrences preview
   assert.match(appSource, /recurring-validity-title-wrap/);
   assert.match(appSource, /recurring-inline-preview/);
   assert.match(appSource, /最近发生：/);
 
-  // Schedule rows display date + time on row 1, date + duration on row 2
-  assert.match(appSource, /form\.starts_on[\s\S]*?form\.display_time[\s\S]*?form\.ends_on[\s\S]*?form\.display_duration_minutes/);
+  // Both boundaries expose a date and a clock, not a duration field.
+  assert.match(appSource, /const clockRange = recurringClockRange\(form\)/);
+  assert.match(appSource, /结束时间：\$\{clockRange\.end/);
+  assert.doesNotMatch(appSource.slice(appSource.indexOf("function RecurringItemEditor"), appSource.indexOf("function RecurringItemEditor") + 20000), /设置时长|htmlFor="recurring-picker-duration"/);
 
   // Standalone recurring-display-group removed from editor
   assert.doesNotMatch(appSource, /<div className="recurring-display-group">/);
   assert.doesNotMatch(appSource, /<div className="recurring-preview" role="status"/);
 
-  // RecurringValidityPicker houses both boundary time and duration editing controls
-  assert.match(appSource, /schedule-boundary-duration-control/);
+  assert.match(appSource, /renderBoundary\("start", "开始", draftStartsOn\)/);
+  assert.match(appSource, /renderBoundary\("end", "结束", draftEndsOn\)/);
   assert.match(stylesSource, /\.recurring-validity-title-wrap/);
   assert.match(stylesSource, /\.recurring-inline-preview/);
-  assert.match(stylesSource, /\.schedule-boundary-duration-control/);
+  assert.match(stylesSource, /\.schedule-picker-boundaries\.schedule-picker-rows[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
 });
 
 test("draft capsule keeps layout stable during autosave and active editing", () => {
@@ -484,44 +486,26 @@ test("draft capsule keeps layout stable during autosave and active editing", () 
   assert.match(appSource, /current\.map\(\(item\) => \(item\.id === saved\.id \? saved : item\)\)/);
 });
 
-test("recurring validity picker modal matches Stitch layout structure and components", () => {
-  // Modal container and header
-  assert.match(appSource, /recurring-validity-dialog/);
-  assert.match(appSource, /recurring-modal-header/);
-  assert.match(appSource, /recurring-cycle-badge/);
-  assert.match(appSource, /周期循环/);
-
-  // Symmetrical 2x2 panel with row connectors
-  assert.match(appSource, /recurring-symmetrical-panel/);
-  assert.match(appSource, /recurring-form-row/);
-  assert.match(appSource, /recurring-status-card/);
-  assert.match(appSource, /recurring-connector-badge/);
-  assert.match(appSource, /开始日期/);
-  assert.match(appSource, /截止日期/);
-
-  // 5:7 workarea with calendar and shortcuts
-  assert.match(appSource, /recurring-workarea-grid/);
-  assert.match(appSource, /recurring-calendar-container/);
-  assert.match(appSource, /recurring-target-tabs/);
-  assert.match(appSource, /recurring-shortcuts-panel/);
-  assert.match(appSource, /recurring-chips-grid cols-6/);
-  assert.match(appSource, /recurring-occurrence-cards/);
-
-  // Footer summary
-  assert.match(appSource, /recurring-summary-box/);
-  assert.match(appSource, /recurring-btn-confirm/);
-
-  // Validity shortcuts switch active tab to end date
-  assert.match(appSource, /applyValidityPreset\(action: "open" \| "days" \| "year_end"/);
-  assert.match(appSource, /function applyValidityPreset[\s\S]*?setActiveField\("end"\)/);
-
-  // CSS verification
-  assert.match(stylesSource, /\.recurring-validity-dialog\s*\{/);
-  assert.match(stylesSource, /\.recurring-symmetrical-panel\s*\{/);
-  assert.match(stylesSource, /\.recurring-workarea-grid\s*\{/);
-  assert.match(stylesSource, /\.recurring-occurrence-cards\s*\{/);
-  assert.match(stylesSource, /\.schedule-picker-backdrop:has\(\.recurring-validity-dialog\)/);
-  assert.match(stylesSource, /\.recurring-validity-dialog \.schedule-boundary-duration-control input[\s\S]*?border:\s*0/);
+test("recurring validity picker shares ordinary date grid, range rail, boundary feedback and footer", () => {
+  const picker = appSource.slice(appSource.indexOf("function RecurringValidityPicker"), appSource.indexOf("function RecurringItemEditor"));
+  assert.match(picker, /schedule-picker-dialog recurring-schedule-dialog/);
+  assert.match(picker, /schedule-picker-header/);
+  assert.match(picker, /schedule-picker-boundaries schedule-picker-rows apple-schedule-rows/);
+  assert.match(picker, /<ScheduleDateGrid/);
+  assert.match(picker, /<BlockEditorTimeRangeRail[^>]*allowMidnightEnd/);
+  assert.match(picker, /schedule-picker-range-panel/);
+  assert.match(picker, /schedule-occurrence-preview/);
+  assert.match(picker, /schedule-picker-summary/);
+  assert.match(picker, /schedule-picker-confirm/);
+  assert.doesNotMatch(picker, /recurring-target-tabs|recurring-calendar-grid|schedule-duration-control/);
+  assert.match(picker, /applyValidityPreset\(action: "open" \| "days" \| "year_end"/);
+  assert.match(picker, /schedule-validity-presets/);
+  assert.match(picker, /长期有效/);
+  assert.match(picker, /onConfirm\(draftStartsOn, draftEndsOn, timeInput.display_time, timeInput.display_duration_minutes\)/);
+  assert.match(stylesSource, /\.schedule-picker-rows \.apple-schedule-row/);
+  assert.match(stylesSource, /\.schedule-picker-boundaries \.schedule-boundary-row\.is-active/);
+  assert.match(stylesSource, /\.schedule-validity-presets button\.is-active/);
+  assert.match(stylesSource, /\.schedule-picker-rows :is\(\.schedule-boundary-time-control, \.schedule-duration-control\) input[^}]*border: 0/);
 
   // Frequency excludes weekdays and monthly expands into 3-column single row
   assert.doesNotMatch(appSource, /<option value="weekdays">/);
@@ -552,8 +536,8 @@ test("task draft autosave starts after editing and flushes on task switch", () =
 
 test("recurring task draft autosave, draft list presentation, and label unification", () => {
   // Label unification: 生效开始日期 -> 开始日期
-  assert.match(appSource, /<label className="recurring-card-label">开始日期<\/label>/);
-  assert.match(appSource, /<span className="apple-schedule-label">开始日期<\/span>/);
+  assert.match(appSource, /renderBoundary\("start", "开始", draftStartsOn\)/);
+  assert.match(appSource, /aria-label=\{`开始日期：\$\{pickerDateLabel\(form.starts_on\)\}/);
   assert.doesNotMatch(appSource, /生效开始/);
 
   // Type is a property of each persisted draft; both variants share one list and save flow.
@@ -566,7 +550,7 @@ test("recurring task draft autosave, draft list presentation, and label unificat
 
 });
 
-test("recurring task page synchronizes with new Stitch prototypes (daily convention, weekly pills, monthly banner, 2x2 grid)", () => {
+test("recurring task page keeps frequency controls and shares cross-day schedule rows", () => {
   // Daily convention radio group
   assert.match(appSource, /日常规约：/);
   assert.match(appSource, /所有自然日/);
@@ -585,11 +569,12 @@ test("recurring task page synchronizes with new Stitch prototypes (daily convent
   // User explicitly discarded the switch to weekly shortcut button
   assert.doesNotMatch(appSource, /切换为每周重复/);
 
-  // 2x2 schedule grid with individual labels and triggers
-  assert.match(appSource, /recurring-schedule-grid/);
-  assert.match(appSource, /recurring-schedule-field/);
-  assert.match(stylesSource, /\.recurring-schedule-grid\s*\{/);
-  assert.match(stylesSource, /\.recurring-schedule-btn\s*\{/);
+  // Recurring editor inherits the ordinary editor's date/time row styles, not picker overrides.
+  const recurringEditor = appSource.slice(appSource.indexOf("function RecurringItemEditor"), appSource.indexOf("function RecurringItemEditor") + 20000);
+  assert.match(recurringEditor, /className="apple-schedule-rows"/);
+  assert.doesNotMatch(recurringEditor, /schedule-picker-rows|recurring-schedule-grid|recurring-schedule-field/);
+  assert.match(stylesSource, /\.task-compact-body \.apple-schedule-row/);
+  assert.match(stylesSource, /\.task-compact-body \.apple-schedule-values button/);
 });
 
 test("execution records live in timeline dialogs, not a separate Today subview", () => {

@@ -1206,6 +1206,7 @@ impl Database {
             database_execution::complete_historical_creation(&transaction, &task_id)?;
         } else {
             sync_single_day_task_schedule(&transaction, &task_id, None, &current_drafts)?;
+            schedule_new_cross_day_task(&transaction, &task_id, &current_drafts)?;
         }
         let task = load_task_dto_in_transaction(&transaction, &task_id)?;
         if !historical {
@@ -4135,6 +4136,7 @@ fn apply_operation(transaction: &Transaction<'_>, operation: &AiOperation, destr
                 database_execution::complete_historical_creation(transaction, &id)?;
             } else {
                 sync_single_day_task_schedule(transaction, &id, None, &current_drafts)?;
+                schedule_new_cross_day_task(transaction, &id, &current_drafts)?;
             }
             Ok(ApplyResult { affected_task_ids: vec![id], plan_id: None })
         }
@@ -4250,6 +4252,50 @@ fn ensure_task_content_editable(task: &TaskDto) -> AppResult<()> {
     Ok(())
 }
 
+fn schedule_new_cross_day_task(transaction: &Transaction<'_>, task_id: &str, dates: &[String]) -> AppResult<()> {
+    let task = load_task_dto_in_transaction(transaction, task_id)?;
+    let (Some(start), Some(end), Some(total)) = (
+        task.earliest_start_at.as_deref(), task.due_at.as_deref(),
+        task.remaining_workload_minutes.or(task.total_workload_minutes),
+    ) else { return Ok(()); };
+    let start = crate::domain::parse_shanghai_timestamp(start)?;
+    let end = crate::domain::parse_shanghai_timestamp(end)?;
+    let days = (end.date_naive() - start.date_naive()).num_days() + 1;
+    if days <= 1 || total / days < MIN_TASK_BLOCK_MINUTES { return Ok(()); }
+    let workday_start: String = transaction.query_row(
+        "SELECT workday_start FROM availability_settings WHERE id = 1", [], |row| row.get(0),
+    ).optional()?.unwrap_or_else(|| AvailabilitySettings::default().workday_start);
+    let preferred_time = parse_clock(&workday_start)?;
+    for day in 0..days {
+        let date = start.date_naive() + Duration::days(day);
+        let midnight = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+        let lower = shanghai_timestamp(date, midnight)?.max(start);
+        let upper = shanghai_timestamp(date + Duration::days(1), midnight)?.min(end);
+        let minutes = (total / days + i64::from(day < total % days)).min((upper - lower).num_minutes());
+        if minutes < MIN_TASK_BLOCK_MINUTES { continue; }
+        let starts_at = shanghai_timestamp(date, preferred_time)?.max(lower).min(upper - Duration::minutes(minutes));
+        let ends_at = starts_at + Duration::minutes(minutes);
+        let plan_date = date.to_string();
+        let plan_id: String = transaction.query_row(
+            "SELECT id FROM daily_plans WHERE plan_date = ?1 AND status = 'confirmed'", [&plan_date], |row| row.get(0),
+        ).optional()?.unwrap_or_else(|| Uuid::new_v4().to_string());
+        transaction.execute(
+            "INSERT OR IGNORE INTO daily_plans (id, plan_date, status, source, created_at, confirmed_at)
+             VALUES (?1, ?2, 'confirmed', 'manual', ?3, ?3)", params![plan_id, plan_date, now()],
+        )?;
+        transaction.execute(
+            "INSERT INTO plan_blocks (id, daily_plan_id, task_id, starts_at, ends_at, source, review_required, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'manual', 1, ?6, ?6)",
+            params![Uuid::new_v4().to_string(), plan_id, task_id, starts_at.to_rfc3339(), ends_at.to_rfc3339(), now()],
+        )?;
+    }
+    if !load_task_schedule_blocks(transaction, task_id)?.is_empty() {
+        set_task_status(transaction, task_id, TaskStatus::Scheduled, "manual")?;
+        refresh_task_in_plan_drafts(transaction, task_id, dates)?;
+    }
+    Ok(())
+}
+
 fn single_day_range(start: Option<&str>, end: Option<&str>) -> AppResult<Option<(String, i64)>> {
     let (Some(start), Some(end)) = (start, end) else { return Ok(None); };
     let start = crate::domain::parse_shanghai_timestamp(start)?;
@@ -4317,16 +4363,19 @@ fn refresh_task_in_plan_drafts(transaction: &Transaction<'_>, task_id: &str, dat
         let mut preview = stored.preview;
         let existing = preview.blocks.iter().any(|block| block.task_id == task_id)
             || preview.unscheduled.iter().any(|item| item.task_id == task_id);
-        let automatic = if single_day_range(task.earliest_start_at.as_deref(), task.due_at.as_deref())?.is_some()
-            && blocks.len() == 1 && blocks[0].plan_date == *date && task.status == "scheduled"
-        { Some(&blocks[0].block) } else { None };
+        let automatic = if blocks.iter().filter(|block| block.plan_date == *date).count() == 1 {
+            blocks.iter().find(|block| block.plan_date == *date && task.status == "scheduled"
+                && task.earliest_start_at.as_ref().is_some_and(|start| block.block.starts_at >= *start)
+                && task.due_at.as_ref().is_some_and(|end| block.block.ends_at <= *end)).map(|block| &block.block)
+        } else { None };
         if !existing && automatic.is_none() { continue; }
         preview.blocks.retain(|block| block.task_id != task_id);
         preview.unscheduled.retain(|item| item.task_id != task_id);
         if let Some(block) = automatic {
             preview.blocks.push(RulePlanBlock { task_id: task_id.into(), task_title: task.title.clone(),
                 starts_at: block.starts_at.clone(), ends_at: block.ends_at.clone(),
-                estimated_minutes: single_day_range(Some(&block.starts_at), Some(&block.ends_at))?.unwrap().1 });
+                estimated_minutes: (crate::domain::parse_shanghai_timestamp(&block.ends_at)?
+                    - crate::domain::parse_shanghai_timestamp(&block.starts_at)?).num_minutes() });
         } else if matches!(task.status.as_str(), "open" | "scheduled")
             && task.earliest_start_date.as_deref().is_some_and(|start| start <= date.as_str())
             && task.due_date.as_deref().is_some_and(|end| end >= date.as_str())
@@ -6244,7 +6293,12 @@ mod tests {
         input.due_time = Some("18:00".into());
         input.total_workload_minutes = Some(240);
         let draft = database.create_manual_task_draft(input).unwrap();
-        database.confirm_task_draft(&draft.id, &draft.confirmation_token).unwrap()
+        let task = database.confirm_task_draft(&draft.id, &draft.confirmation_token).unwrap();
+        // Preserve a legacy waiting task to exercise manual allocation independently of creation.
+        database.connection.execute("DELETE FROM plan_blocks WHERE task_id = ?1", [&task.id]).unwrap();
+        database.connection.execute("DELETE FROM daily_plans WHERE NOT EXISTS(SELECT 1 FROM plan_blocks WHERE daily_plan_id = daily_plans.id)", []).unwrap();
+        database.connection.execute("UPDATE tasks SET status = 'open' WHERE id = ?1", [&task.id]).unwrap();
+        database.get_task(&task.id).unwrap()
     }
 
     fn include_input(task: &TaskDto, date: &str, start: &str, end: &str) -> PlanTaskInclude {
@@ -6844,9 +6898,9 @@ mod tests {
         input.earliest_start_date = Some(date.clone());
         let draft = database.create_manual_task_draft(input).unwrap();
         let cross_day = database.confirm_task_draft(&draft.id, &draft.confirmation_token).unwrap();
-        assert_eq!(cross_day.status, "open");
-        assert!(database.get_day_schedule(&date).unwrap().task_blocks.is_empty());
-        let preview = database.preview_rule_based_plan(&date).unwrap();
+        assert_eq!(cross_day.status, "scheduled");
+        assert_eq!(database.get_day_schedule(&date).unwrap().task_blocks.len(), 1);
+        let preview = database.start_manual_plan_draft(&date).unwrap();
         let mut blocks = preview.blocks;
         blocks[0].starts_at = format!("{date}T13:00:00+08:00");
         blocks[0].ends_at = format!("{date}T13:45:00+08:00");
@@ -9391,3 +9445,7 @@ mod historical_creation_tests;
 #[cfg(test)]
 #[path = "database_recurring_tests.rs"]
 mod database_recurring_tests;
+
+#[cfg(test)]
+#[path = "database_cross_day_tests.rs"]
+mod cross_day_tests;

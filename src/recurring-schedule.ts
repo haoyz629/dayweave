@@ -43,3 +43,18 @@ export function recurringTimeRange(input: Pick<RecurringItemInput, "display_time
   const end = hours * 60 + minutes + input.display_duration_minutes!;
   return `${input.display_time}–${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}`;
 }
+
+export function recurringClockRange(input: Pick<RecurringItemInput, "display_time" | "display_duration_minutes">) {
+  const start = input.display_time ?? "";
+  if (recurringTimeBlockIssue(input)) return { start, end: "" };
+  const [hours, minutes] = start.split(":").map(Number);
+  const end = hours * 60 + minutes + input.display_duration_minutes!;
+  return { start, end: `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}` };
+}
+
+export function recurringRangeInput(range: { start: string; end: string }) {
+  const validStart = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(range.start);
+  const validEnd = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(range.end) || range.end === "24:00";
+  const minute = (clock: string) => { const [hours, minutes] = clock.split(":").map(Number); return hours * 60 + minutes; };
+  return { display_time: range.start, display_duration_minutes: validStart && validEnd ? minute(range.end) - minute(range.start) : null };
+}

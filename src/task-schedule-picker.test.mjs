@@ -10,9 +10,10 @@ import { taskRangeIsValid } from "./task-workload.ts";
 const source = ts.createSourceFile("App.tsx", readFileSync(new URL("./App.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const component = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "TaskScheduleEditor");
 const handlers = component.body.statements.filter(ts.isFunctionDeclaration).map(node => node.getText(source));
+const gridComponent = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "ScheduleDateGrid");
 let calendarExpression, calendarHintExpression, focusEffect;
 function collect(node) {
-  if (ts.isJsxElement(node) && node.openingElement.getText(source).includes('className="apple-date-grid"')) {
+  if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(source) === "ScheduleDateGrid") {
     calendarExpression = node.getText(source);
   }
   if (ts.isJsxElement(node) && node.openingElement.tagName.getText(source) === "strong" && node.getText(source).includes("已选历史日期")) calendarHintExpression = node.getText(source);
@@ -44,6 +45,7 @@ function picker({ start = "2026-10-23", end = start, existing = false } = {}) {
     if (batching) queued.push(apply); else apply();
   };
   const context = vm.createContext(state);
+  vm.runInContext(compile(gridComponent.getText(source)), context);
   vm.runInContext(compile(handlers.join("\n")), context);
   const evaluate = code => vm.runInContext(compile(code), context);
   function effects() {
@@ -56,18 +58,30 @@ function picker({ start = "2026-10-23", end = start, existing = false } = {}) {
   function calendar() {
     state.todayDate = today;
     state.cells = ["2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24", "2026-10-25"].map(key => ({ key, day: Number(key.slice(8)), inMonth: true }));
-    return evaluate(`(${calendarExpression})`).props.children;
+    return renderCalendar().props.children;
+  }
+  function renderCalendar() {
+    const element = evaluate(`(${calendarExpression})`);
+    return element.type(element.props);
   }
   return {
     state, calls, effects, calendar, today(value) { today = value; },
     hint() { state.todayDate = today; return evaluate(`(${calendarHintExpression})`).props.children; },
-    leaveCalendar() { return evaluate(`(${calendarExpression})`).props.onPointerLeave(); },
+    leaveCalendar() { return renderCalendar().props.onPointerLeave(); },
     batch(action) { batching = true; try { action(); } finally { batching = false; queued.splice(0).forEach(apply => apply()); } }
   };
 }
 
-function timeInput(card) { return card.props.children[1].props.children[1].props.children[1].props.children[1]; }
-function dateButton(card) { return card.props.children[1].props.children[0]; }
+function findElement(node, type) {
+  if (!React.isValidElement(node)) return;
+  if (node.type === type) return node;
+  for (const child of React.Children.toArray(node.props.children)) {
+    const match = findElement(child, type);
+    if (match) return match;
+  }
+}
+function timeInput(card) { return findElement(card, "input"); }
+function dateButton(card) { return findElement(card, "button"); }
 function assertDates(state, start, end = start) {
   assert.equal(state.openPicker.earliest_start_date, start);
   assert.equal(state.openPicker.due_date, end);
@@ -77,7 +91,7 @@ test("ordinary picker has no single/multi-day modes or endpoint tabs", () => {
   const text = component.getText(source);
   assert.doesNotMatch(text, /dateMode|selectPickerDateMode|schedule-picker-date-mode|role="tablist"|当前操作目标/);
   assert.match(text, /较早的日期自动作为开始日/);
-  assert.match(text, /历史日期仅支持单日/);
+  assert.match(gridComponent.getText(source), /历史日期仅支持单日/);
   assert.doesNotMatch(text, /schedule-picker-date-help|选定一天后，悬停预览范围，再点击完成选择/);
 });
 
@@ -470,4 +484,21 @@ test("recommended tasks stay single-day at every hour, including month and year 
     assert.equal(form.estimated_minutes, 60); assert.equal(taskRangeIsValid(form), true);
     assert.ok(new Date(`${form.earliest_start_date}T${form.earliest_start_time}:00+08:00`) > now);
   }
+});
+
+test("picker endpoints share compact cross-day rows with a single accessible date and time control", () => {
+  const { state } = picker({ end: "2026-10-25" });
+  state.openSchedulePicker("start");
+  for (const [edge, label] of [["start", "开始"], ["end", "结束"]]) {
+    const row = state.renderBoundaryCard(edge, label, "2026-10-23");
+    assert.match(row.props.className, /apple-schedule-row schedule-boundary-row/);
+    assert.doesNotMatch(row.props.className, /schedule-boundary-card/);
+    assert.equal(row.props["aria-label"], `${label}时间`);
+    assert.equal(dateButton(row).props["aria-label"], `选择${label}日期`);
+    assert.equal(timeInput(row).props["aria-label"], `输入${label}时间`);
+    assert.equal(timeInput(row).props["aria-describedby"], "schedule-picker-time-input-help");
+    assert.equal(timeInput(row).props["aria-invalid"], false);
+  }
+  state.pickerTimeInputs.end = "99:99";
+  assert.equal(timeInput(state.renderBoundaryCard("end", "结束", "2026-10-25")).props["aria-invalid"], true);
 });

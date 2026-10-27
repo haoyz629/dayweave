@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 import React from "react";
-import { recurringTimeBlockIssue, recurringOccurrenceInput, recurringChangeIssue, recurringTimeRange } from "./recurring-schedule.ts";
+import { recurringTimeBlockIssue, recurringOccurrenceInput, recurringChangeIssue, recurringTimeRange, recurringClockRange, recurringRangeInput } from "./recurring-schedule.ts";
 
 const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -28,6 +28,20 @@ test("recurring creation requires a valid within-day time block, including exact
   for (const fields of [ { display_time: null }, { display_time: "" }, { display_time: "24:00" }, { display_time: "9:00" }, { display_duration_minutes: null }, { display_duration_minutes: 0 }, { display_duration_minutes: 1.5 }, { display_duration_minutes: 1441 }, { display_time: "23:30", display_duration_minutes: 31 } ]) assert.ok(recurringTimeBlockIssue({ ...input, ...fields }));
   for (const fields of [ {}, { display_time: "23:30", display_duration_minutes: 30 }, { display_time: "00:00", display_duration_minutes: 1440 }, { display_duration_minutes: 1 } ]) assert.equal(recurringTimeBlockIssue({ ...input, ...fields }), null);
   assert.equal(recurringTimeRange({ display_time: "23:30", display_duration_minutes: 30 }), "23:30–24:00");
+});
+
+test("recurring range UI round-trips storage with one-minute precision and 24:00 boundary", () => {
+  for (const [start, end, duration] of [["09:00", "10:00", 60], ["09:31", "09:32", 1], ["23:59", "24:00", 1], ["00:00", "24:00", 1440]]) {
+    const range = { start, end };
+    const stored = recurringRangeInput(range);
+    assert.deepEqual(stored, { display_time: start, display_duration_minutes: duration });
+    assert.equal(recurringTimeBlockIssue(stored), null);
+    assert.deepEqual(recurringClockRange(stored), range);
+  }
+  for (const [start, end] of [["24:00", "24:00"], ["23:59", "24:01"], ["23:30", "00:30"], ["10:00", "10:00"], ["", "10:00"]]) {
+    assert.ok(recurringTimeBlockIssue(recurringRangeInput({ start, end })));
+  }
+  assert.deepEqual(recurringClockRange({ display_time: "09:00", display_duration_minutes: null }), { start: "09:00", end: "" });
 });
 
 test("occurrence inputs keep rule phase and use the single block's edited fields", () => {

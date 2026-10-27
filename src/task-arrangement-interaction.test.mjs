@@ -144,6 +144,6 @@ test("deadline capsule fact uses an icon and keeps its complete accessible date 
   const earliest = state.TaskCapsuleFact({ icon: "calendar", label: "最早 今天 09:30" });
   assert.equal(React.Children.toArray(earliest.props.children).at(-1), "最早 今天 09:30");
   const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
-  assert.match(css, /\.task-capsule-content:not\(\.recurring\) \.task-capsule-facts \{ flex-wrap: nowrap; gap: 6px; \}/);
-  assert.match(css, /\.task-capsule-facts > span \{ flex-shrink: 0; \}/);
+  assert.match(css, /\.task-ledger-list \.task-capsule-content \.task-capsule-facts \{[^}]*flex-wrap: wrap; gap: 6px 10px; \}/);
+  assert.match(css, /\.task-ledger-list \.task-capsule-facts > span \{ max-width: 100%; flex-shrink: 0; \}/);
 });

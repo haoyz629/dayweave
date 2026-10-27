@@ -17,7 +17,7 @@ import { Logo, ProductBrand, logoUrl } from "./logo";
 import { compactBlockDuration, taskBlockType, taskBlockTypeLabels, TaskBlockType } from "./task-block-display";
 import { TimelineTaskCreate, TimelineCreateRange } from "./timeline-task-create";
 import { isTaskTimelineTooltip, TaskTimelineHoverCard, TimelineTooltipContent, TimelineTooltipState } from "./timeline-hover-card";
-import { recurringTimeBlockIssue, recurringOccurrenceInput, recurringChangeIssue, recurringTimeRange, RecurringScheduleChange, RecurringEditScope } from "./recurring-schedule";
+import { recurringTimeBlockIssue, recurringOccurrenceInput, recurringChangeIssue, recurringTimeRange, recurringClockRange, recurringRangeInput, RecurringScheduleChange, RecurringEditScope } from "./recurring-schedule";
 import { RecurringScopeConfirmation } from "./recurring-scope-confirmation";
 import { setAppLogoMode, setAppWindowTitle } from "./tauri";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -106,7 +106,7 @@ import {
   focusedTimeRangeWindow,
   normalizeClockInput,
   sanitizeTimeInput,
-  selectDateBoundary,
+  selectDateRange,
   selectTaskDateBoundary,
   taskDateRangeIncludesHistory,
   shiftTimeRangeFromStart,
@@ -309,7 +309,8 @@ function newTaskDefaultForm(now = new Date()): NewTaskForm {
   };
 }
 
-function recurringItemDefaultForm(today = shanghaiDateValue()): RecurringItemForm {
+function recurringItemDefaultForm(today = shanghaiDateValue(), now = new Date()): RecurringItemForm {
+  const schedule = newTaskDefaultForm(now);
   return {
     title: "",
     notes: "",
@@ -319,8 +320,8 @@ function recurringItemDefaultForm(today = shanghaiDateValue()): RecurringItemFor
     month_day: Number(today.slice(8, 10)),
     starts_on: today,
     ends_on: "",
-    display_time: "",
-    display_duration_minutes: null,
+    display_time: schedule.earliest_start_time,
+    display_duration_minutes: schedule.estimated_minutes,
     tags: []
   };
 }
@@ -376,7 +377,8 @@ function recurringFormForDraft(draft: TaskDraft, today: string): RecurringItemFo
   return {
     ...recurringItemDefaultForm(today), ...settings,
     title: draft.title, notes: draft.notes ?? "", tags: draft.tags,
-    ends_on: settings?.ends_on ?? "", display_time: settings?.display_time ?? ""
+    ends_on: settings?.ends_on ?? "", display_time: settings?.display_time ?? "",
+    display_duration_minutes: settings?.display_duration_minutes ?? null
   };
 }
 
@@ -745,6 +747,24 @@ function WorkloadTimeDigits({ minutes }: { minutes: number | null | undefined })
   return <span className="workload-time-digits"><b className="workload-digit">{hours}</b><span className="workload-unit"> h </span><b className="workload-digit">{remainder}</b><span className="workload-unit"> m</span></span>;
 }
 
+function ScheduleDateGrid({ cells, today, start, end, range, historySingleDay = false, onSelect, onHover }: {
+  cells: ReturnType<typeof calendarCells>;
+  today: string;
+  start: string;
+  end: string;
+  range: { start: string; end: string; preview: boolean };
+  historySingleDay?: boolean;
+  onSelect: (date: string) => void;
+  onHover: (date: string | null) => void;
+}) {
+  return <div className="apple-date-grid" onPointerLeave={() => onHover(null)}>{cells.map((cell) => {
+    const inRange = cell.key >= range.start && cell.key <= range.end;
+    const historical = historySingleDay && cell.key < today;
+    const classes = [cell.inMonth ? "" : "outside", cell.key === today ? "today" : "", inRange ? "in-range" : "", cell.key === range.start ? "range-start" : "", cell.key === range.end ? "range-end" : "", inRange && range.preview ? "is-preview" : "", cell.key === range.start || cell.key === range.end ? "selected" : ""].filter(Boolean).join(" ");
+    return <button key={cell.key} type="button" className={classes} title={historical ? "历史日期仅支持单日，点击后将改为当天的单日任务" : undefined} aria-label={`${cell.key}${cell.key === today ? "，今天" : ""}${historical ? "，历史日期，仅支持单日" : ""}`} aria-current={cell.key === today ? "date" : undefined} aria-pressed={cell.key === start || cell.key === end} onPointerEnter={(event) => { if (event.pointerType !== "touch") onHover(cell.key); }} onFocus={() => onHover(cell.key)} onBlur={() => onHover(null)} onClick={() => onSelect(cell.key)}>{cell.day}</button>;
+  })}</div>;
+}
+
 function TaskScheduleEditor({ form, disabled, compact = false, estimateId, allowExistingHistoricalRange = false, onChange, onScheduleChange }: {
   form: NewTaskForm;
   disabled: boolean;
@@ -1023,11 +1043,11 @@ function TaskScheduleEditor({ form, disabled, compact = false, estimateId, allow
     const active = openPicker?.activeField === field;
     const inputValue = pickerTimeInputs[field];
     const inputValid = validDraftClock(normalizeClockInput(inputValue));
-    return <section className={`schedule-boundary-card ${field}${active ? " is-active" : ""}`} aria-label={`${label}时间`} onClick={() => selectPickerField(field, true)}>
-      <button type="button" className="schedule-boundary-select" aria-pressed={active} onClick={(e) => { e.stopPropagation(); selectPickerField(field, true); }}><i className={`time-range-marker ${field}`} aria-hidden="true" />{label}时间</button>
-      <div className="schedule-boundary-fields">
-        <button type="button" className="schedule-boundary-field date" onClick={(e) => { e.stopPropagation(); selectPickerField(field, true); }}><small>日期</small><strong><Icon name="calendar" size={14} />{pickerDateLabel(date)}</strong></button>
-        <label className={`schedule-boundary-field time${inputValid ? "" : " is-invalid"}`} onClick={(e) => e.stopPropagation()}><small>时间</small><span className="schedule-boundary-time-control"><Icon name="clock" size={14} /><input type="text" inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={5} value={inputValue} aria-label={`输入${label}时间`} aria-describedby="schedule-picker-time-input-help" aria-invalid={!inputValid} onFocus={(event) => { selectPickerField(field); event.currentTarget.select(); }} onChange={(event) => updatePickerTimeInput(field, event.target.value)} onKeyDown={(event) => handlePickerTimeKeyDown(event, field)} onBlur={(event) => commitPickerTimeInput(field, event.currentTarget.value)} /></span></label>
+    return <section className={`apple-schedule-row schedule-boundary-row ${field}${active ? " is-active" : ""}`} aria-label={`${label}时间`} onClick={() => selectPickerField(field, true)}>
+      <span className="apple-schedule-label">{label}</span>
+      <div className="apple-schedule-values">
+        <button type="button" className={active ? "is-active" : ""} aria-label={`选择${label}日期`} aria-pressed={active} onClick={(e) => { e.stopPropagation(); selectPickerField(field, true); }}><Icon name="calendar" size={14} />{pickerDateLabel(date)}</button>
+        <label className={`schedule-time-control${inputValid ? "" : " is-invalid"}`} onClick={(e) => e.stopPropagation()}><span className="sr-only">{label}时间</span><span className="schedule-boundary-time-control"><Icon name="clock" size={14} /><input type="text" inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={5} value={inputValue} aria-label={`输入${label}时间`} aria-describedby="schedule-picker-time-input-help" aria-invalid={!inputValid} onFocus={(event) => { selectPickerField(field); event.currentTarget.select(); }} onChange={(event) => updatePickerTimeInput(field, event.target.value)} onKeyDown={(event) => handlePickerTimeKeyDown(event, field)} onBlur={(event) => commitPickerTimeInput(field, event.currentTarget.value)} /></span></label>
       </div>
     </section>;
   }
@@ -1079,9 +1099,8 @@ function TaskScheduleEditor({ form, disabled, compact = false, estimateId, allow
           <div><h2 id="schedule-picker-title">时间范围</h2><p>点选一天，或连续点选两个日期；较早的日期自动作为开始日。</p></div>
           <div className="schedule-picker-header-actions">{pickerTimeChanged && <button type="button" className="schedule-picker-reset" onClick={resetSchedulePicker}>重置时间</button>}<button type="button" className="schedule-picker-clear" onClick={clearSchedulePicker}>清除时间</button><button type="button" className="schedule-picker-close" aria-label="关闭时间范围" onClick={closeSchedulePicker}><Icon name="close" size={18} /></button></div>
         </header>
-        <div className="schedule-picker-boundaries">
+        <div className="schedule-picker-boundaries schedule-picker-rows apple-schedule-rows">
           {renderBoundaryCard("start", "开始", openPicker.earliest_start_date)}
-          <span className="schedule-boundary-arrow" aria-hidden="true"><Icon name="chevron-right" size={18} /></span>
           {renderBoundaryCard("end", "结束", openPicker.due_date)}
           <span id="schedule-picker-time-input-help" className="sr-only">可输入 9、930 或 09:30，精确到 1 分钟。</span>
         </div>
@@ -1089,28 +1108,13 @@ function TaskScheduleEditor({ form, disabled, compact = false, estimateId, allow
           <section className="schedule-picker-calendar" aria-label="选择日期">
             <header><strong>{calendarYear}年{calendarMonth}月</strong><div><button type="button" aria-label="上个月" onClick={() => shiftPickerMonth(-1)}><Icon name="chevron-left" size={17} /></button><button type="button" aria-label="下个月" onClick={() => shiftPickerMonth(1)}><Icon name="chevron-right" size={17} /></button></div></header>
             <div className="apple-date-weekdays" aria-hidden="true">{["一", "二", "三", "四", "五", "六", "日"].map((day) => <span key={day}>{day}</span>)}</div>
-            <div className="apple-date-grid" onPointerLeave={() => setPickerHoverDate(null)}>{cells.map((cell) => {
-              const range = pickerCalendarRange(openPicker);
-              const inRange = cell.key >= range.start && cell.key <= range.end;
-              const isBoundary = cell.key === openPicker.earliest_start_date || cell.key === openPicker.due_date;
-              const isDisplayBoundary = cell.key === range.start || cell.key === range.end;
-              const classes = [
-                cell.inMonth ? "" : "outside",
-                cell.key === todayDate ? "today" : "",
-                inRange ? "in-range" : "",
-                cell.key === range.start ? "range-start" : "",
-                cell.key === range.end ? "range-end" : "",
-                inRange && range.preview ? "is-preview" : "",
-                isDisplayBoundary ? "selected" : ""
-              ].filter(Boolean).join(" ");
-              return <button key={cell.key} type="button" className={classes} title={cell.key < todayDate ? "历史日期仅支持单日，点击后将改为当天的单日任务" : undefined} aria-label={`${cell.key}${cell.key === todayDate ? "，今天" : ""}${cell.key < todayDate ? "，历史日期，仅支持单日" : ""}`} aria-current={cell.key === todayDate ? "date" : undefined} aria-pressed={isBoundary} onPointerEnter={(event) => { if (event.pointerType !== "touch") setPickerHoverDate(cell.key); }} onFocus={() => setPickerHoverDate(cell.key)} onBlur={() => setPickerHoverDate(null)} onClick={() => updatePickerDate(cell.key)}>{cell.day}</button>;
-            })}</div>
+            <ScheduleDateGrid cells={cells} today={todayDate} start={openPicker.earliest_start_date} end={openPicker.due_date} range={pickerCalendarRange(openPicker)} historySingleDay onSelect={updatePickerDate} onHover={setPickerHoverDate} />
             <footer aria-live="polite">
               <strong>{openPicker.earliest_start_date === openPicker.due_date ? openPicker.earliest_start_date < todayDate ? "已选历史日期，仅支持单日" : openPicker.dateAnchor && openPicker.dateAnchor >= todayDate ? "已选单日，可再选一天组成多日范围" : "已选单日，点击日期可重新选择" : openPicker.dateAnchor && openPicker.dateAnchor >= todayDate ? "已选多日，点击新日期后自动排序" : "已选多日，点击日期可重新选择"}</strong>
             </footer>
           </section>
           <section className="schedule-picker-range-panel" aria-label="调整时间范围">
-            <header><div><strong>调整时间范围</strong><span>{pickerSpanDays && pickerSpanDays > 1 ? `跨 ${pickerSpanDays} 天` : pickerDurationLabel}</span></div><output>{openPicker.earliest_start_time} → {openPicker.due_time}</output></header>
+            <header><div><strong>调整时间范围</strong><span>{pickerSpanDays && pickerSpanDays > 1 ? `跨 ${pickerSpanDays} 天` : pickerDurationLabel}</span></div></header>
             {pickerSpanDays === null ? <p className="schedule-picker-range-error" role="alert">结束日期不能早于开始日期，请先在左侧调整日期。</p> : <BlockEditorTimeRangeRail
               start={openPicker.earliest_start_time}
               end={openPicker.due_time}
@@ -1315,17 +1319,7 @@ function isoWeekParts(dateKey: string) {
   return { year, week: Math.ceil(((thursday.getTime() - yearStart) / 86_400_000 + 1) / 7) };
 }
 
-function RecurringValidityPicker({
-  startsOn,
-  endsOn,
-  displayTime = "",
-  displayDurationMinutes = null,
-  initialField = "start",
-  todayDate,
-  previewForm,
-  onConfirm,
-  onClose
-}: {
+function RecurringValidityPicker({ startsOn, endsOn, displayTime = "", displayDurationMinutes = null, initialField = "start", todayDate, previewForm, onConfirm, onClose }: {
   startsOn: string;
   endsOn: string;
   displayTime?: string;
@@ -1336,41 +1330,28 @@ function RecurringValidityPicker({
   onConfirm: (startsOn: string, endsOn: string, displayTime: string, displayDurationMinutes: number | null) => void;
   onClose: () => void;
 }) {
-  const [activeField, setActiveField] = useState<"start" | "end">(
-    initialField === "end" || initialField === "duration" ? "end" : "start"
-  );
-  const [draftStartsOn, setDraftStartsOn] = useState(startsOn || todayDate);
-  const [draftEndsOn, setDraftEndsOn] = useState(endsOn || "");
-  const [draftDisplayTime, setDraftDisplayTime] = useState(displayTime || "");
-  const [displayTimeInput, setDisplayTimeInput] = useState(displayTime || "");
-  const [draftDurationMinutes, setDraftDurationMinutes] = useState<number | null>(displayDurationMinutes ?? null);
-  const isDisplayTimeFocusedRef = useRef(false);
-  const initialDisplayTimeRef = useRef(displayTime || "");
-  const timeInputRef = useRef<HTMLInputElement>(null);
-  const durationInputRef = useRef<HTMLInputElement>(null);
-  const [monthKey, setMonthKey] = useState(() => {
-    const targetDate = (initialField === "end" || initialField === "duration") && endsOn ? endsOn : (startsOn || todayDate);
-    return targetDate.slice(0, 7) || todayDate.slice(0, 7);
-  });
+  const [activeField, setActiveField] = useState<TimeRangeEdge>(initialField === "end" || initialField === "duration" ? "end" : "start");
+  const [dates, setDates] = useState(() => ({ start: startsOn || todayDate, end: endsOn || "", dateAnchor: endsOn && endsOn !== startsOn ? initialField === "end" || initialField === "duration" ? startsOn || todayDate : endsOn : null }));
+  const draftStartsOn = dates.start;
+  const draftEndsOn = dates.end;
+  const [hoverDate, setHoverDate] = useState<string | null>(null);
+  const [monthKey, setMonthKey] = useState(() => ((initialField === "end" && endsOn) || startsOn || todayDate).slice(0, 7));
+  const [timeInputs, setTimeInputs] = useState(() => recurringClockRange({ display_time: displayTime, display_duration_minutes: displayDurationMinutes }));
+  const [railRange, setRailRange] = useState(() => recurringTimeBlockIssue({ display_time: displayTime, display_duration_minutes: displayDurationMinutes }) ? { start: "09:00", end: "10:00" } : recurringClockRange({ display_time: displayTime, display_duration_minutes: displayDurationMinutes }));
   const dialogRef = useRef<HTMLDivElement>(null);
-
+  const timeInputRef = useRef<HTMLInputElement>(null);
+  const endTimeInputRef = useRef<HTMLInputElement>(null);
+  const cancelledTimeBlurRef = useRef<TimeRangeEdge | null>(null);
+  const triggerRef = useRef(document.activeElement as HTMLElement | null);
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const frame = window.requestAnimationFrame(() => {
-      if (initialField === "time") {
-        timeInputRef.current?.focus();
-        timeInputRef.current?.select();
-      } else if (initialField === "duration") {
-        durationInputRef.current?.focus();
-        durationInputRef.current?.select();
-      } else {
-        dialogRef.current?.focus();
-      }
+      const input = initialField === "time" ? timeInputRef.current : initialField === "duration" ? endTimeInputRef.current : null;
+      if (input) { input.focus(); input.select(); } else dialogRef.current?.focus();
     });
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (event.key !== "Escape" || event.defaultPrevented || target?.closest(".schedule-boundary-time-control") || target?.closest(".schedule-boundary-duration-control")) return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
       onClose();
     };
@@ -1379,532 +1360,131 @@ function RecurringValidityPicker({
       window.cancelAnimationFrame(frame);
       window.removeEventListener("keydown", closeOnEscape);
       document.body.style.overflow = previousOverflow;
+      window.requestAnimationFrame(() => triggerRef.current?.focus());
     };
   }, [initialField, onClose]);
-
   const cells = useMemo(() => calendarCells(monthKey), [monthKey]);
   const [calendarYear, calendarMonth] = monthKey.split("-").map(Number);
-  const hasEnd = Boolean(draftEndsOn);
-  const daySpan = hasEnd && draftEndsOn >= draftStartsOn
-    ? taskDateSpanDays({ earliest_start_date: draftStartsOn, due_date: draftEndsOn })
-    : null;
-  const currentYear = Number((draftStartsOn || todayDate).slice(0, 4)) || new Date().getFullYear();
-  const currentYearEnd = `${currentYear}-12-31`;
-  const isYearEndActive = Boolean(hasEnd && draftEndsOn === currentYearEnd);
-  const activePresetDays = hasEnd && !isYearEndActive
-    ? Math.round((new Date(`${draftEndsOn}T00:00:00+08:00`).getTime() - new Date(`${draftStartsOn}T00:00:00+08:00`).getTime()) / 86400000)
-    : null;
-  const timeBlockIssue = recurringTimeBlockIssue({ display_time: normalizeClockInput(displayTimeInput), display_duration_minutes: draftDurationMinutes });
-  const displayTimeValid = !timeBlockIssue;
-  const validityRangeValid = draftStartsOn !== "" && (!hasEnd || draftEndsOn >= draftStartsOn) && displayTimeValid;
-  const previewDates = recurringItemPreviewDates({
-    ...previewForm,
-    starts_on: draftStartsOn,
-    ends_on: draftEndsOn
-  });
+  const normalizedRange = { start: normalizeClockInput(timeInputs.start), end: normalizeClockInput(timeInputs.end) };
+  const timeInput = recurringRangeInput(normalizedRange);
+  const timeError = !validRecurringClock("start", timeInputs.start) || !validRecurringClock("end", timeInputs.end)
+    ? "请输入有效的开始和结束时间；结束时间可到 24:00。"
+    : recurringTimeBlockIssue(timeInput) ? "结束时间必须晚于开始时间，且不能超过当天 24:00。" : "";
+  const validityRangeValid = Boolean(draftStartsOn) && (!draftEndsOn || draftEndsOn >= draftStartsOn) && !timeError;
+  const previewDates = recurringItemPreviewDates({ ...previewForm, starts_on: draftStartsOn, ends_on: draftEndsOn });
+  const range = dates.dateAnchor && hoverDate ? { ...selectDateRange(dates.dateAnchor, hoverDate), preview: true } : { start: draftStartsOn, end: draftEndsOn || draftStartsOn, preview: false };
 
-  function updateDisplayTimeInput(value: string) {
-    const sanitized = sanitizeTimeInput(value);
-    setDisplayTimeInput(sanitized);
-    if (!sanitized.trim()) {
-      if (draftDisplayTime) {
-        setDraftDisplayTime("");
-      }
-      return;
-    }
-    const normalized = normalizeClockInput(sanitized);
-    if (validDraftClock(normalized)) {
-      setDraftDisplayTime(normalized);
-    } else {
-      setDraftDisplayTime(sanitized);
+  function validRecurringClock(field: TimeRangeEdge, value: string) {
+    const normalized = normalizeClockInput(value);
+    return validDraftClock(normalized) || (field === "end" && normalized === "24:00");
+  }
+  function selectField(field: TimeRangeEdge, revealDate = false) {
+    setActiveField(field);
+    if (revealDate) {
+      setHoverDate(null);
+      setDates((current) => ({ ...current, dateAnchor: field === "start" ? current.end || null : current.start }));
+      setMonthKey((field === "start" ? draftStartsOn : draftEndsOn || draftStartsOn).slice(0, 7));
     }
   }
-
-  function commitDisplayTimeInput(value: string) {
-    const sanitized = sanitizeTimeInput(value);
-    if (!sanitized.trim()) {
-      setDisplayTimeInput("");
-      if (draftDisplayTime) {
-        setDraftDisplayTime("");
-      }
+  function handleDateClick(date: string) {
+    setHoverDate(null);
+    setDates((current) => {
+      const next = selectDateRange(current.dateAnchor, date);
+      return !current.end && !current.dateAnchor ? { ...next, end: "" } : next;
+    });
+    if (date.slice(0, 7) !== monthKey) setMonthKey(date.slice(0, 7));
+  }
+  function shiftPickerMonth(offset: number) {
+    setHoverDate(null);
+    setMonthKey(shiftMonthKey(monthKey, offset));
+  }
+  function applyValidityPreset(action: "open" | "days" | "year_end", days = 0) {
+    setHoverDate(null);
+    setDates((current) => ({ ...current, end: action === "open" ? "" : action === "year_end" ? `${current.start.slice(0, 4)}-12-31` : shiftDateValue(current.start, days), dateAnchor: null }));
+  }
+  function updateTimeRange(next: { start: string; end: string }) {
+    setTimeInputs(next);
+    setRailRange(next);
+  }
+  function updateTimeInput(field: TimeRangeEdge, raw: string, commit = false) {
+    const sanitized = sanitizeTimeInput(raw);
+    const value = commit && validRecurringClock(field, sanitized) ? normalizeClockInput(sanitized) : sanitized;
+    setTimeInputs((current) => ({ ...current, [field]: value }));
+  }
+  function commitTimeInput(field: TimeRangeEdge, raw: string) {
+    if (cancelledTimeBlurRef.current === field) {
+      cancelledTimeBlurRef.current = null;
       return;
     }
-    const normalized = normalizeClockInput(sanitized);
-    if (validDraftClock(normalized)) {
-      setDisplayTimeInput(normalized);
-      setDraftDisplayTime(normalized);
-    } else {
-      setDisplayTimeInput(sanitized);
-      setDraftDisplayTime(sanitized);
-    }
+    updateTimeInput(field, raw, true);
   }
-
-  function handleDisplayTimeKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+  useEffect(() => {
+    if (!timeError) setRailRange(normalizedRange);
+  }, [normalizedRange.start, normalizedRange.end, timeError]);
+  function handleTimeKeyDown(event: KeyboardEvent<HTMLInputElement>, field: TimeRangeEdge) {
     if (event.key === "Enter") {
       event.preventDefault();
-      commitDisplayTimeInput(event.currentTarget.value);
+      updateTimeInput(field, event.currentTarget.value, true);
       event.currentTarget.select();
-      return;
-    }
-    if (event.key === "Escape") {
+    } else if (event.key === "Escape") {
       event.preventDefault();
-      const fallback = initialDisplayTimeRef.current || "";
-      setDisplayTimeInput(fallback);
-      setDraftDisplayTime(fallback);
+      event.stopPropagation();
+      cancelledTimeBlurRef.current = field;
+      setTimeInputs((current) => ({ ...current, [field]: railRange[field] }));
       event.currentTarget.blur();
-      return;
     }
   }
-
-  function handleDateClick(dateKey: string) {
-    const next = selectDateBoundary(draftStartsOn, draftEndsOn, activeField, dateKey);
-    setDraftStartsOn(next.start);
-    setDraftEndsOn(next.end);
-    setActiveField(next.activeField);
+  function confirmRange() {
+    if (!validityRangeValid) return;
+    onConfirm(draftStartsOn, draftEndsOn, timeInput.display_time, timeInput.display_duration_minutes);
+    onClose();
   }
-
-  function applyValidityPreset(action: "open" | "days" | "year_end", days = 0) {
-    setActiveField("end");
-    if (action === "open") {
-      setDraftEndsOn("");
-      return;
-    }
-    if (action === "year_end") {
-      const year = Number(draftStartsOn.slice(0, 4)) || new Date().getFullYear();
-      const target = `${year}-12-31`;
-      setDraftEndsOn(target);
-      setMonthKey(target.slice(0, 7));
-      return;
-    }
-    const target = shiftDateValue(draftStartsOn, days);
-    setDraftEndsOn(target);
-    setMonthKey(target.slice(0, 7));
-  }
-
-  function selectField(field: "start" | "end") {
-    setActiveField(field);
-    const targetDate = field === "start" ? draftStartsOn : (draftEndsOn || draftStartsOn);
-    if (targetDate) setMonthKey(targetDate.slice(0, 7));
-  }
-
-  return createPortal(
-    <div className="schedule-picker-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="schedule-picker-dialog recurring-validity-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="recurring-validity-title" tabIndex={-1}>
-        {/* BEGIN: ModalHeader */}
-        <header className="recurring-modal-header">
-          <div className="recurring-header-copy">
-            <div className="recurring-header-title-row">
-              <h2 id="recurring-validity-title">有效日期范围</h2>
-              <span className="recurring-cycle-badge">周期循环</span>
-            </div>
-            <p className="recurring-header-subtitle">
-              设置有效日期及每次任务块的开始时间与时长；截止日期留空表示长期有效。
-            </p>
-          </div>
-          <div className="recurring-header-actions">
-            <button type="button" className="schedule-picker-close recurring-close-btn" aria-label="关闭窗口" onClick={onClose}>
-              <Icon name="close" size={18} />
-            </button>
-          </div>
-        </header>
-
-        {/* BEGIN: ModalBody */}
-        <main className="recurring-modal-body">
-          {/* Symmetrical Two-Rows Form */}
-          <section className="recurring-symmetrical-panel" aria-label="排期参数与展示设定">
-            <div className="recurring-symmetrical-grid">
-              {/* Row 1: Dates */}
-              <div className="recurring-form-row">
-                {/* Start Date Card */}
-                <div
-                  className={`recurring-status-card${activeField === "start" ? " is-active" : ""}`}
-                  onClick={() => selectField("start")}
-                >
-                  <div className="recurring-card-header">
-                    <div className="recurring-card-title-wrap">
-                      <span className="recurring-dot-indicator start">
-                        {activeField === "start" && <span className="animate-pulse-dot" />}
-                        <span className="recurring-dot" />
-                      </span>
-                      <label className="recurring-card-label">开始日期</label>
-                    </div>
-                  </div>
-                  <div className="recurring-card-input-box">
-                    <Icon name="calendar" size={15} />
-                    <input
-                      type="text"
-                      readOnly
-                      value={pickerDateLabel(draftStartsOn)}
-                      className="recurring-card-date-input"
-                    />
-                  </div>
-                </div>
-
-                {/* Connector -> */}
-                <div className="recurring-connector-wrap" aria-hidden="true">
-                  <div className="recurring-connector-badge arrow">
-                    <Icon name="chevron-right" size={14} />
-                  </div>
-                </div>
-
-                {/* End Date Card */}
-                <div
-                  className={`recurring-status-card${activeField === "end" ? " is-active" : ""}`}
-                  onClick={() => selectField("end")}
-                >
-                  <div className="recurring-card-header">
-                    <div className="recurring-card-title-wrap">
-                      <span className="recurring-dot-indicator end">
-                        <span className="recurring-dot" />
-                      </span>
-                      <label className="recurring-card-label">截止日期</label>
-                    </div>
-                    <span className="recurring-card-sublabel">自动终止</span>
-                  </div>
-                  <div className="recurring-card-input-box">
-                    <Icon name="calendar" size={15} />
-                    <input
-                      type="text"
-                      readOnly
-                      value={draftEndsOn ? pickerDateLabel(draftEndsOn) : "长期有效（无截止日）"}
-                      className="recurring-card-date-input"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Row 2: Time & Duration */}
-              <div className="recurring-form-row">
-                {/* Display Time Card */}
-                <div
-                  className={`recurring-status-card recurring-display-time-control${!displayTimeValid ? " is-invalid" : ""}`}
-                  onClick={() => timeInputRef.current?.focus()}
-                >
-                  <div className="recurring-card-header">
-                    <label className="recurring-card-label">
-                      开始时间 <span className="recurring-card-optional">(必填)</span>
-                    </label>
-                    <span className="recurring-card-sublabel">任务块生效时刻</span>
-                  </div>
-                  <div className="recurring-card-input-box schedule-boundary-time-control">
-                    <Icon name="clock" size={15} />
-                    <input
-                      ref={timeInputRef}
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      spellCheck={false}
-                      maxLength={5}
-                      placeholder="09:00"
-                      value={displayTimeInput}
-                      aria-label="输入开始时间"
-                      aria-invalid={!displayTimeValid}
-                      onFocus={(e) => {
-                        isDisplayTimeFocusedRef.current = true;
-                        initialDisplayTimeRef.current = draftDisplayTime || "";
-                        e.currentTarget.select();
-                      }}
-                      onChange={(e) => updateDisplayTimeInput(e.target.value)}
-                      onKeyDown={handleDisplayTimeKeyDown}
-                      onBlur={(e) => {
-                        isDisplayTimeFocusedRef.current = false;
-                        commitDisplayTimeInput(e.currentTarget.value);
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {/* Connector "与" */}
-                <div className="recurring-connector-wrap" aria-hidden="true">
-                  <div className="recurring-connector-badge text">
-                    <span>与</span>
-                  </div>
-                </div>
-
-                {/* Duration Card */}
-                <div
-                  className="recurring-status-card schedule-boundary-duration-control"
-                  onClick={() => durationInputRef.current?.focus()}
-                >
-                  <div className="recurring-card-header">
-                    <label className="recurring-card-label">时间块时长</label>
-                  </div>
-                  <div className="recurring-card-input-box duration-box">
-                    <input
-                      ref={durationInputRef}
-                      type="number"
-                      min={1}
-                      max={1440}
-                      step={5}
-                      value={draftDurationMinutes ?? ""}
-                      placeholder="90"
-                      aria-label="输入时间块时长"
-                      onChange={(e) => setDraftDurationMinutes(e.target.value ? Number(e.target.value) : null)}
-                    />
-                    <span className="recurring-unit-suffix">分钟</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* Interactive Workarea (Calendar 5 cols + Shortcuts 7 cols) */}
-          <section className="recurring-workarea-grid">
-            {/* Left: Calendar */}
-            <div className="recurring-calendar-container" aria-label="日历选择">
-              <div className="recurring-calendar-header">
-                <h3>{calendarYear}年{calendarMonth}月</h3>
-                <div className="recurring-calendar-nav">
-                  <button type="button" aria-label="上个月" onClick={() => setMonthKey(shiftMonthKey(monthKey, -1))}>
-                    <Icon name="chevron-left" size={16} />
-                  </button>
-                  <button type="button" aria-label="下个月" onClick={() => setMonthKey(shiftMonthKey(monthKey, 1))}>
-                    <Icon name="chevron-right" size={16} />
-                  </button>
-                </div>
-              </div>
-              <div className="recurring-calendar-weekdays" aria-hidden="true">
-                {["一", "二", "三", "四", "五", "六", "日"].map((day) => <span key={day}>{day}</span>)}
-              </div>
-              <div className="recurring-calendar-grid">
-                {cells.map((cell, index) => {
-                  const inRange = hasEnd && cell.key >= draftStartsOn && cell.key <= draftEndsOn;
-                  const isStart = cell.key === draftStartsOn;
-                  const isEnd = hasEnd && cell.key === draftEndsOn;
-                  const isToday = cell.key === todayDate;
-                  const isSelected = (activeField === "start" && isStart) || (activeField === "end" && (isEnd || (!hasEnd && isStart)));
-                  const isRowStart = index % 7 === 0;
-                  const isRowEnd = index % 7 === 6;
-
-                  const isStartWithRange = isStart && inRange && !isEnd;
-                  const isEndWithRange = isEnd && inRange && !isStart;
-                  const isSingleSelected = (isStart && isEnd) || (isStart && !hasEnd);
-
-                  if (isStartWithRange) {
-                    return (
-                      <div
-                        key={cell.key}
-                        className={`recurring-calendar-cell is-start${isSelected ? " selected" : ""}`}
-                        onClick={() => handleDateClick(cell.key)}
-                      >
-                        {!isRowEnd && <div className="recurring-calendar-half-bar right" aria-hidden="true" />}
-                        <button type="button" className="recurring-calendar-btn circle" aria-pressed={isSelected}>
-                          {cell.day}
-                        </button>
-                        {isToday && <span className="recurring-today-dot on-circle" aria-hidden="true" />}
-                      </div>
-                    );
-                  }
-
-                  if (isEndWithRange) {
-                    return (
-                      <div
-                        key={cell.key}
-                        className={`recurring-calendar-cell is-end${isSelected ? " selected" : ""}`}
-                        onClick={() => handleDateClick(cell.key)}
-                      >
-                        {!isRowStart && <div className="recurring-calendar-half-bar left" aria-hidden="true" />}
-                        <button type="button" className="recurring-calendar-btn circle" aria-pressed={isSelected}>
-                          {cell.day}
-                        </button>
-                        {isToday && <span className="recurring-today-dot on-circle" aria-hidden="true" />}
-                      </div>
-                    );
-                  }
-
-                  if (isSingleSelected) {
-                    return (
-                      <div
-                        key={cell.key}
-                        className={`recurring-calendar-cell is-single-selected${isSelected ? " selected" : ""}`}
-                        onClick={() => handleDateClick(cell.key)}
-                      >
-                        <button type="button" className="recurring-calendar-btn circle" aria-pressed={isSelected}>
-                          {cell.day}
-                        </button>
-                        {isToday && <span className="recurring-today-dot on-circle" aria-hidden="true" />}
-                      </div>
-                    );
-                  }
-
-                  if (inRange) {
-                    return (
-                      <div
-                        key={cell.key}
-                        className={`recurring-calendar-cell in-range-middle${isRowStart ? " row-start" : ""}${isRowEnd ? " row-end" : ""}${!cell.inMonth ? " outside" : ""}`}
-                        onClick={() => handleDateClick(cell.key)}
-                      >
-                        <span className="recurring-range-day-num">{cell.day}</span>
-                        {isToday && <span className="recurring-today-dot" aria-hidden="true" />}
-                      </div>
-                    );
-                  }
-
-                  // Non-range cell
-                  return (
-                    <div
-                      key={cell.key}
-                      className={`recurring-calendar-cell normal${cell.inMonth ? "" : " outside"}`}
-                      onClick={() => handleDateClick(cell.key)}
-                    >
-                      {cell.inMonth ? (
-                        <button type="button" className="recurring-calendar-btn normal">
-                          {cell.day}
-                        </button>
-                      ) : (
-                        <span className="recurring-outside-day">{cell.day}</span>
-                      )}
-                      {isToday && <span className="recurring-today-dot" aria-hidden="true" />}
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="recurring-calendar-footer">
-                <span className="recurring-target-label">当前操作目标：</span>
-                <div className="recurring-target-tabs" role="tablist" aria-label="切换编辑起止日期">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={activeField === "start"}
-                    className={`recurring-target-tab${activeField === "start" ? " is-active" : ""}`}
-                    onClick={() => selectField("start")}
-                  >
-                    <span className="recurring-tab-dot start" />
-                    开始日期
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={activeField === "end"}
-                    className={`recurring-target-tab${activeField === "end" ? " is-active" : ""}`}
-                    onClick={() => selectField("end")}
-                  >
-                    <span className="recurring-tab-dot end" />
-                    截止日期
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Right: Shortcuts & Presets Panel */}
-            <div className="recurring-shortcuts-panel">
-              {/* Section 1: 有效期限快捷选项 */}
-              <div className="recurring-panel-section">
-                <div className="recurring-section-header">
-                  <h4>有效期限快捷选项</h4>
-                  <span className="recurring-section-sub">快速设置常用周期</span>
-                </div>
-                <div className="recurring-presets-chips recurring-chips-grid cols-6">
-                  <button
-                    type="button"
-                    className={`preset-chip recurring-preset-chip${!draftEndsOn ? " is-active" : ""}`}
-                    onClick={() => applyValidityPreset("open")}
-                  >
-                    长期有效
-                  </button>
-                  <button type="button" className={`preset-chip recurring-preset-chip${activePresetDays === 30 ? " is-active" : ""}`} onClick={() => applyValidityPreset("days", 30)}>1 个月</button>
-                  <button type="button" className={`preset-chip recurring-preset-chip${activePresetDays === 90 ? " is-active" : ""}`} onClick={() => applyValidityPreset("days", 90)}>3 个月</button>
-                  <button type="button" className={`preset-chip recurring-preset-chip${activePresetDays === 180 ? " is-active" : ""}`} onClick={() => applyValidityPreset("days", 180)}>半年</button>
-                  <button type="button" className={`preset-chip recurring-preset-chip${activePresetDays === 365 ? " is-active" : ""}`} onClick={() => applyValidityPreset("days", 365)}>1 年</button>
-                  <button type="button" className={`preset-chip recurring-preset-chip${isYearEndActive ? " is-active" : ""}`} onClick={() => applyValidityPreset("year_end")}>至今年底</button>
-                </div>
-              </div>
-
-              {/* Section 2: 今日展示快捷时长 */}
-              <div className="recurring-panel-section">
-                <div className="recurring-section-header">
-                  <h4>时间块快捷时长</h4>
-                </div>
-                <div className="recurring-presets-chips recurring-chips-grid cols-6" role="group" aria-label="快捷时长">
-                  {[15, 30, 45, 60, 90, 120].map((mins) => (
-                    <button
-                      key={mins}
-                      type="button"
-                      className={`preset-chip preset-duration-chip recurring-preset-chip${draftDurationMinutes === mins ? " is-active" : ""}`}
-                      onClick={() => {
-                        const nextTime = draftDisplayTime || "09:00";
-                        setDisplayTimeInput(nextTime);
-                        setDraftDisplayTime(nextTime);
-                        setDraftDurationMinutes(mins);
-                      }}
-                    >
-                      {mins} 分钟
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Section 3: 近期发生预览 */}
-              <div className="recurring-panel-section occurrence-preview-section">
-                <div className="recurring-section-header">
-                  <div className="recurring-preview-title">
-                    <Icon name="calendar" size={14} />
-                    <h4>近期发生预览</h4>
-                  </div>
-                </div>
-                {previewDates.length > 0 ? (
-                  <div className="recurring-occurrence-cards">
-                    {previewDates.slice(0, 3).map((date, index) => {
-                      const isFirst = index === 0;
-                      return (
-                        <div key={date} className="recurring-occurrence-card">
-                          <div className="recurring-occurrence-top">
-                            <span className={`recurring-occurrence-badge${isFirst ? " first" : " subsequent"}`}>
-                              <span className="badge-dot" />
-                              {isFirst ? "首次生效" : `第 ${index + 1} 次`}
-                            </span>
-                            <span className="recurring-occurrence-weekday">{weekdayLabel(date)}</span>
-                          </div>
-                          <div className="recurring-occurrence-bottom">
-                            <strong className="recurring-occurrence-date">{pickerDateLabel(date)}</strong>
-                            <span className="recurring-occurrence-time-tag">
-                              {draftDisplayTime || "未设时间"}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="recurring-picker-empty-note">当前设置没有可发生日期，请调整频率或有效开始日期。</p>
-                )}
-              </div>
-            </div>
-          </section>
-        </main>
-
-        {/* BEGIN: ModalFooter */}
-        <footer className="recurring-modal-footer">
-          <output className="schedule-picker-summary recurring-summary-box">
-            <Icon name="calendar" size={15} />
-            <span>
-              已选 <strong>{pickerDateLabel(draftStartsOn)}</strong> 开始 · 截止至 <strong>{draftEndsOn ? pickerDateLabel(draftEndsOn) : "长期有效"}</strong>
-              {daySpan ? <span className="recurring-dayspan-tag"> (共 {daySpan} 天)</span> : ""}
-              {timeBlockIssue ? <span role="status"> · {timeBlockIssue}</span> : <> · <strong>{recurringTimeRange({ display_time: draftDisplayTime, display_duration_minutes: draftDurationMinutes })}</strong></>}
-            </span>
-          </output>
-          <div className="recurring-footer-actions">
-            <button type="button" className="recurring-btn-cancel" onClick={onClose}>
-              取消
-            </button>
-            <button
-              type="button"
-              className="schedule-picker-confirm recurring-btn-confirm"
-              disabled={!validityRangeValid}
-              onClick={() => {
-                const finalTime = displayTimeInput ? normalizeClockInput(displayTimeInput) : "";
-                onConfirm(draftStartsOn, draftEndsOn, finalTime, draftDurationMinutes);
-                onClose();
-              }}
-            >
-              确认安排
-            </button>
-          </div>
-        </footer>
+  function renderBoundary(field: TimeRangeEdge, label: string, date: string) {
+    const active = activeField === field;
+    const inputValid = validRecurringClock(field, timeInputs[field]);
+    return <section className={`apple-schedule-row schedule-boundary-row ${field}${active ? " is-active" : ""}`} aria-label={`${label}时间`} onClick={() => selectField(field, true)}>
+      <span className="apple-schedule-label">{label}</span>
+      <div className="apple-schedule-values">
+        <button type="button" className={active ? "is-active" : ""} aria-label={`选择${label}日期`} aria-pressed={active} onClick={(event) => { event.stopPropagation(); selectField(field, true); }}><Icon name="calendar" size={14} />{date ? pickerDateLabel(date) : "长期有效"}</button>
+        <label className={`schedule-time-control${inputValid ? "" : " is-invalid"}`} onClick={(event) => event.stopPropagation()}><span className="sr-only">{label}时间</span><span className="schedule-boundary-time-control"><Icon name="clock" size={14} /><input ref={field === "start" ? timeInputRef : endTimeInputRef} type="text" inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={5} value={timeInputs[field]} aria-label={`输入${label}时间`} aria-describedby="recurring-time-input-help" aria-invalid={!inputValid} onFocus={(event) => { selectField(field); event.currentTarget.select(); }} onChange={(event) => updateTimeInput(field, event.target.value)} onBlur={(event) => commitTimeInput(field, event.currentTarget.value)} onKeyDown={(event) => handleTimeKeyDown(event, field)} /></span></label>
       </div>
-    </div>,
-    document.body
-  );
+    </section>;
+  }
+  return createPortal(<div className="schedule-picker-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="schedule-picker-dialog recurring-schedule-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="recurring-validity-title" tabIndex={-1}>
+      <header className="schedule-picker-header">
+        <div><h2 id="recurring-validity-title">有效日期范围</h2><p>点选一天，或连续点选两个日期；较早的日期自动作为开始日。</p></div>
+        <div className="schedule-picker-header-actions"><button type="button" className="schedule-picker-close" aria-label="关闭时间范围" onClick={onClose}><Icon name="close" size={18} /></button></div>
+      </header>
+      <div className="schedule-picker-boundaries schedule-picker-rows apple-schedule-rows">
+        {renderBoundary("start", "开始", draftStartsOn)}
+        {renderBoundary("end", "结束", draftEndsOn)}
+        <span id="recurring-time-input-help" className="sr-only">可输入 9、930 或 09:30；结束时间可到当天 24:00。</span>
+      </div>
+      <div className="schedule-picker-body">
+        <section className="schedule-picker-calendar" aria-label="选择日期">
+          <header><strong>{calendarYear}年{calendarMonth}月</strong><div><button type="button" aria-label="上个月" onClick={() => shiftPickerMonth(-1)}><Icon name="chevron-left" size={17} /></button><button type="button" aria-label="下个月" onClick={() => shiftPickerMonth(1)}><Icon name="chevron-right" size={17} /></button></div></header>
+          <div className="apple-date-weekdays" aria-hidden="true">{["一", "二", "三", "四", "五", "六", "日"].map((day) => <span key={day}>{day}</span>)}</div>
+          <ScheduleDateGrid cells={cells} today={todayDate} start={draftStartsOn} end={draftEndsOn} range={range} onSelect={handleDateClick} onHover={setHoverDate} />
+          <div className="schedule-validity-presets" role="group" aria-label="有效期限快捷选项">
+            <button type="button" className={!draftEndsOn ? "is-active" : ""} aria-pressed={!draftEndsOn} onClick={() => applyValidityPreset("open")}>长期有效</button>
+            {[30, 90, 180, 365].map((days, index) => <button key={days} type="button" onClick={() => applyValidityPreset("days", days)}>{["1 个月", "3 个月", "半年", "1 年"][index]}</button>)}
+            <button type="button" onClick={() => applyValidityPreset("year_end")}>至今年底</button>
+          </div>
+          <footer aria-live="polite"><strong>{!draftEndsOn ? dates.dateAnchor ? "长期有效，可再选一天设置结束日期" : "已选长期有效，点击日期调整开始日" : draftStartsOn === draftEndsOn ? dates.dateAnchor ? "已选单日，可再选一天组成多日范围" : "已选单日，点击日期可重新选择" : dates.dateAnchor ? "已选多日，点击新日期后自动排序" : "已选多日，点击日期可重新选择"}</strong></footer>
+        </section>
+        <section className="schedule-picker-range-panel" aria-label="调整时间范围">
+          <header><div><strong>调整时间范围</strong><span>{timeError ? "每次任务" : formatWorkloadMinutes(timeInput.display_duration_minutes!)}</span></div></header>
+          <BlockEditorTimeRangeRail start={railRange.start} end={railRange.end} minimumDuration={1} maxMinute={24 * 60} allowMidnightEnd describedBy="recurring-picker-range-help" onChange={updateTimeRange} />
+          <div className="schedule-occurrence-preview"><strong>近期发生预览</strong><p>{previewDates.length ? previewDates.slice(0, 3).map(pickerDateLabel).join("、") : "当前设置没有可发生日期，请调整频率或有效开始日期。"}</p></div>
+        </section>
+      </div>
+      <footer className="schedule-picker-footer">
+        {timeError ? <p className="schedule-picker-footer-error" role="alert">{timeError}</p> : <output className="schedule-picker-summary"><i className="apple-schedule-workload-icon" aria-hidden="true"><Icon name="clock" size={15} /></i><span>已选 <strong>{pickerDateLabel(draftStartsOn)} — {draftEndsOn ? pickerDateLabel(draftEndsOn) : "长期有效"}</strong> · 每次 <strong>{normalizedRange.start}–{normalizedRange.end}</strong></span></output>}
+        <div><button type="button" className="secondary-action" onClick={onClose}>取消</button><button type="button" className="schedule-picker-confirm" disabled={!validityRangeValid} onClick={confirmRange}>确认安排</button></div>
+      </footer>
+    </div>
+  </div>, document.body);
 }
 
 function RecurringItemEditor({ form, disabled, idPrefix, autoFocusTitle = false, compact = false, isCreating = false, availableTags = [], onChange }: {
@@ -1959,7 +1539,7 @@ function RecurringItemEditor({ form, disabled, idPrefix, autoFocusTitle = false,
   const weekdayLabels = ["一", "二", "三", "四", "五", "六", "日"];
   const isDailyLike = form.frequency === "daily" || form.frequency === "weekdays";
   const intervalUnit = form.frequency === "weekdays" ? "工作日" : form.frequency === "daily" ? "天" : form.frequency === "monthly" ? "个月" : "周";
-  const displayHelp = recurringTimeBlockIssue(form) ?? `每次 ${recurringTimeRange(form)}，在日程中显示为独立时间块。`;
+  const clockRange = recurringClockRange(form);
 
   return <div className="recurring-editor-surface" ref={editorRef}>
     {/* BEGIN: EventBasicInfo */}
@@ -2166,71 +1746,20 @@ function RecurringItemEditor({ form, disabled, idPrefix, autoFocusTitle = false,
           )}
         </div>
 
-        <div className="recurring-schedule-grid">
-          <div className="recurring-schedule-field">
-            <span className="apple-schedule-label">开始日期</span>
-            <button
-              type="button"
-              className={`recurring-schedule-btn${validityPicker?.activeField === "start" ? " is-active" : ""}`}
-              disabled={disabled}
-              aria-haspopup="dialog"
-              aria-expanded={validityPicker?.activeField === "start"}
-              aria-label={`开始日期：${pickerDateLabel(form.starts_on)}`}
-              onClick={() => setValidityPicker({ activeField: "start" })}
-            >
-              <Icon name="calendar" size={16} />
-              <span className="recurring-schedule-val">{pickerDateLabel(form.starts_on)}</span>
-            </button>
+        <div className="apple-schedule-rows">
+          <div className="apple-schedule-row">
+            <span className="apple-schedule-label">开始</span>
+            <div className="apple-schedule-values">
+              <button type="button" className={validityPicker?.activeField === "start" ? "is-active" : ""} disabled={disabled} aria-haspopup="dialog" aria-expanded={validityPicker?.activeField === "start"} aria-label={`开始日期：${pickerDateLabel(form.starts_on)}`} onClick={() => setValidityPicker({ activeField: "start" })}><Icon name="calendar" size={14} />{pickerDateLabel(form.starts_on)}</button>
+              <button type="button" className={validityPicker?.activeField === "time" ? "is-active" : ""} disabled={disabled} aria-haspopup="dialog" aria-expanded={validityPicker?.activeField === "time"} aria-label={`开始时间：${form.display_time || "未设置（必填）"}`} onClick={() => setValidityPicker({ activeField: "time" })}><Icon name="clock" size={14} />{form.display_time || "选择时间"}</button>
+            </div>
           </div>
-
-          <div className="recurring-schedule-field">
-            <span className="apple-schedule-label">截止日期</span>
-            <button
-              type="button"
-              className={`recurring-schedule-btn${validityPicker?.activeField === "end" ? " is-active" : ""}${!form.ends_on ? " is-open-ended" : ""}`}
-              disabled={disabled}
-              aria-haspopup="dialog"
-              aria-expanded={validityPicker?.activeField === "end"}
-              aria-label={`截止日期：${form.ends_on ? pickerDateLabel(form.ends_on) : "长期有效"}`}
-              onClick={() => setValidityPicker({ activeField: "end" })}
-            >
-              <Icon name="calendar" size={16} />
-              <span className="recurring-schedule-val">{form.ends_on ? pickerDateLabel(form.ends_on) : "长期有效（无截止日）"}</span>
-            </button>
-          </div>
-
-          <div className="recurring-schedule-field">
-            <span className="apple-schedule-label">开始时间（必填）</span>
-            <button
-              type="button"
-              className={`recurring-schedule-btn${validityPicker?.activeField === "time" ? " is-active" : ""}${!form.display_time ? " is-unset" : ""}`}
-              disabled={disabled}
-              aria-haspopup="dialog"
-              aria-expanded={validityPicker?.activeField === "time"}
-              aria-label={`开始时间：${form.display_time || "未设置（必填）"}`}
-              onClick={() => setValidityPicker({ activeField: "time" })}
-            >
-              <Icon name="clock" size={16} />
-              <span className="recurring-schedule-val">{form.display_time || "未设置"}</span>
-            </button>
-          </div>
-
-          <div className="recurring-schedule-field">
-            <span className="apple-schedule-label">时长</span>
-            <button
-              type="button"
-              className={`recurring-schedule-btn${validityPicker?.activeField === "duration" ? " is-active" : ""}${!form.display_duration_minutes ? " is-unset" : ""}`}
-              disabled={disabled}
-              aria-haspopup="dialog"
-              aria-expanded={validityPicker?.activeField === "duration"}
-              aria-label={`时长：${form.display_duration_minutes ? `${form.display_duration_minutes} 分钟` : "未设置"}`}
-              onClick={() => setValidityPicker({ activeField: "duration" })}
-            >
-              <Icon name="clock" size={16} />
-              <span className="recurring-schedule-val">
-                {form.display_duration_minutes ? `${form.display_duration_minutes} 分钟` : "设置时长（必填）"}
-              </span>
-            </button>
+          <div className="apple-schedule-row">
+            <span className="apple-schedule-label">结束</span>
+            <div className="apple-schedule-values">
+              <button type="button" className={validityPicker?.activeField === "end" ? "is-active" : ""} disabled={disabled} aria-haspopup="dialog" aria-expanded={validityPicker?.activeField === "end"} aria-label={`结束日期：${form.ends_on ? pickerDateLabel(form.ends_on) : "长期有效"}`} onClick={() => setValidityPicker({ activeField: "end" })}><Icon name="calendar" size={14} />{form.ends_on ? pickerDateLabel(form.ends_on) : "长期有效"}</button>
+              <button type="button" className={validityPicker?.activeField === "duration" ? "is-active" : ""} disabled={disabled} aria-haspopup="dialog" aria-expanded={validityPicker?.activeField === "duration"} aria-label={`结束时间：${clockRange.end || "未设置（必填）"}`} onClick={() => setValidityPicker({ activeField: "duration" })}><Icon name="clock" size={14} />{clockRange.end || "选择时间"}</button>
+            </div>
           </div>
         </div>
       </div>
@@ -2349,7 +1878,7 @@ function RecurringModalDialog({
               </div>
               <div className="recurring-type-text">
                 <div className="recurring-type-name">普通任务</div>
-                <div className="recurring-type-hint">时间完整后进入待处理</div>
+                <div className="recurring-type-hint">创建后自动安排，跨日按每日投入分配</div>
               </div>
             </button>
 
@@ -2655,6 +2184,7 @@ function TaskStatusHistory({ task, metadata, busy, onNewTask }: {
   task: Task; metadata: TaskMetadata | null; busy: boolean; onNewTask: () => void;
 }) {
   const history = taskDisplayHistory(task, metadata?.history ?? []);
+  const singleDay = Boolean(task.earliest_start_date && task.earliest_start_date === task.due_date);
   const crossDay = Boolean(task.earliest_start_date && task.due_date && task.earliest_start_date < task.due_date);
   const latestEvent = history.at(-1);
   const historyDate = latestEvent?.plan_date ?? (latestEvent?.occurred_at && Number.isFinite(Date.parse(latestEvent.occurred_at)) ? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(latestEvent.occurred_at)) : task.created_at.slice(0, 10));
@@ -2662,11 +2192,12 @@ function TaskStatusHistory({ task, metadata, busy, onNewTask }: {
   const labelFor = (event: TaskHistoryEvent & { display_label?: string }) => {
     if (event.display_label) return event.display_label;
     const { kind, status, plan_date } = event;
+    const taskDay = singleDay && plan_date === task.earliest_start_date;
     const day = plan_date ? `${Number(plan_date.slice(5, 7))}月${Number(plan_date.slice(8, 10))}日：` : "";
     if (kind === "automatic_status") return status === "done" ? crossDay ? "所有日期均已完成，整个任务已自动完成" : "任务已完成" : crossDay ? "已取消整个任务完成" : "已取消任务完成";
-    if (kind === "execution") return `${day}${status === "done" ? "当天任务已完成" : "当天任务未完成"}`;
-    if (kind === "cleared") return `${day}已取消当天完成`;
-    if (kind === "cleared_incomplete") return `${day}已取消当天未完成`;
+    if (kind === "execution") return taskDay ? status === "done" ? "任务已完成" : "任务未完成" : `${day}${status === "done" ? "当天任务已完成" : "当天任务未完成"}`;
+    if (kind === "cleared") return taskDay ? "已取消任务完成" : `${day}已取消当天完成`;
+    if (kind === "cleared_incomplete") return taskDay ? "已取消任务未完成" : `${day}已取消当天未完成`;
     if (kind === "reopened") return crossDay ? "已取消整个任务完成" : "已取消任务完成";
     if (kind === "status" && status === "done") return crossDay ? "整个任务已完成" : "任务已完成";
     return kind === "created" ? "执行记录已建立" : kind === "restored" ? `恢复为${statusLabel(status) ?? "任务"}` : `状态更新为${statusLabel(status) ?? "未知"}`;
@@ -3993,6 +3524,7 @@ function TaskWorkspace({
         ...(successToast.undoId ? [{ label: "撤销", onClick: () => void undoLastChange(successToast.undoId!) }] : []),
         ...(successToast.openToday ? [{ label: "查看安排", onClick: () => onOpenToday(successToast.date, successToast.taskId) }] : [])
       ]} />}
+      {feedback && <Toast title={feedback} duration={5000} onDismiss={() => setFeedback(null)} />}
       <div ref={ledgerRef} className={`task-ledger${resizingLedger ? " is-resizing" : ""}`} style={ledgerListWidth ? { "--task-list-width": `${ledgerListWidth}px` } as CSSProperties : undefined}>
         <div className="task-ledger-list" aria-busy={loading}>
           <header className="task-queue-header">
@@ -4028,7 +3560,6 @@ function TaskWorkspace({
             </div>
             {(availableTags.length > 0 || tagFilter) && <div className="task-tag-filter"><label htmlFor="task-tag-filter">标签</label><select id="task-tag-filter" value={tagFilter} onChange={(event) => setTagFilter(event.target.value)}><option value="">全部标签</option>{uniqueTags([...availableTags, tagFilter]).map((tag) => <option key={tag} value={tag}>{tag}</option>)}</select>{tagFilter && <button type="button" onClick={() => setTagFilter("")}>清除</button>}</div>}
           </header>
-          <p className="workspace-feedback" role="status" aria-live="polite">{feedback ?? ""}</p>
           {showUnsavedCreateCapsule && (
             <div className={`ledger-row selected task-ledger-row task-capsule-row capsule-type-${createItemType} status-row-draft`}>
               <button
@@ -4087,7 +3618,8 @@ function TaskWorkspace({
                 {view === "deleted" && item.deleted_at && <button type="button" className="ledger-quick-action icon-only" data-tooltip="恢复" aria-label={`恢复${item.title}`} disabled={busy} onClick={() => void restoreSelectedRecurringItem(item)}><Icon name="restore" size={15} /></button>}
                 {view === "deleted" && item.deleted_at && <button type="button" className="ledger-quick-action icon-only danger" data-tooltip="永久删除" aria-label={`永久删除${item.title}`} disabled={busy} onClick={() => { setSelectedId(null); setSelectedRecurringId(item.id); setPendingPermanentRecurringItem(true); }}><Icon name="trash" size={15} /></button>}
                 {view === "recurring" && item.status !== "ended" && selectedRecurringId !== item.id && <button type="button" className="ledger-quick-action" onClick={() => void selectRecurringItem(item)}>编辑</button>}
-                {view === "recurring" && item.status === "ended" && <button type="button" className="ledger-quick-action danger" aria-label={`将${item.title}移入回收站`} onClick={() => setPendingTrashRecurringItem(item)}><Icon name="trash" size={14} /><span>回收站</span></button>}
+                {view === "recurring" && !item.deleted_at && item.status !== "ended" && <button type="button" className="ledger-quick-action danger" aria-label={`结束${item.title}`} disabled={busy} onClick={() => setPendingEndRecurringItem(item)}><Icon name="check" size={14} /><span>结束</span></button>}
+                {view === "recurring" && item.status === "ended" && <button type="button" className="ledger-quick-action danger" aria-label={`将${item.title}移入回收站`} disabled={busy} onClick={() => setPendingTrashRecurringItem(item)}><Icon name="trash" size={14} /><span>回收站</span></button>}
               </div>
             </div>
           ))}
@@ -4152,7 +3684,7 @@ function TaskWorkspace({
                   <div className="create-type-switch" role="radiogroup" aria-label="创建类型" data-autosaving={draftSaving && !busy}>
                     <button type="button" role="radio" disabled={busy || draftSaving} aria-checked={createItemType === "task"} onClick={() => requestCreateItemType("task")}>
                       <Icon name="tasks" size={16} />
-                      <span><strong>普通任务</strong><small>时间完整后进入待处理</small></span>
+                      <span><strong>普通任务</strong><small>创建后自动安排，跨日按每日投入分配</small></span>
                     </button>
                     <button type="button" role="radio" disabled={busy || draftSaving} aria-checked={createItemType === "recurring"} onClick={() => requestCreateItemType("recurring")}>
                       <Icon name="restore" size={16} />
@@ -4725,7 +4257,8 @@ function BlockEditorTimeRangeRail({
   minimumDuration = MIN_TASK_BLOCK_MINUTES,
   disabled = false,
   describedBy,
-  showPresets = true
+  showPresets = true,
+  allowMidnightEnd = false
 }: {
   start: string;
   end: string;
@@ -4739,6 +4272,7 @@ function BlockEditorTimeRangeRail({
   disabled?: boolean;
   describedBy?: string;
   showPresets?: boolean;
+  allowMidnightEnd?: boolean;
 }) {
   const railStep = 5;
   const collapseThreshold = 4 * 60;
@@ -4758,10 +4292,10 @@ function BlockEditorTimeRangeRail({
   const startDomainMin = Math.max(minMinute, startMinuteOffset);
   const startDomainMax = Math.min(maxMinute, startMinuteOffset + 23 * 60 + 59);
   const endDomainMin = Math.max(minMinute, endMinuteOffset);
-  const endDomainMax = Math.min(maxMinute, endMinuteOffset + 23 * 60 + 59);
+  const endDomainMax = Math.min(maxMinute, endMinuteOffset + (allowMidnightEnd ? 24 * 60 : 23 * 60 + 59));
   const safeStartMinute = Math.max(startDomainMin, Math.min(startMinute, startDomainMax, endMinute - minimumDuration));
   const safeEndMinute = Math.min(endDomainMax, Math.max(endMinute, endDomainMin, safeStartMinute + minimumDuration));
-  const displayClock = (minute: number) => minutesClock(((minute % (24 * 60)) + 24 * 60) % (24 * 60));
+  const displayClock = (minute: number) => allowMidnightEnd && minute === endMinuteOffset + 24 * 60 ? "24:00" : minutesClock(((minute % (24 * 60)) + 24 * 60) % (24 * 60));
   const [inputValues, setInputValues] = useState(() => ({
     start: displayClock(safeStartMinute),
     end: displayClock(safeEndMinute)
@@ -4854,7 +4388,7 @@ function BlockEditorTimeRangeRail({
 
   function commitInput(edge: TimeRangeEdge, rawValue = inputValues[edge]) {
     const normalized = normalizeClockInput(sanitizeTimeInput(rawValue));
-    if (!validDraftClock(normalized)) {
+    if (!validDraftClock(normalized) && !(allowMidnightEnd && edge === "end" && normalized === "24:00")) {
       setInputValues({ start: displayClock(safeStartMinute), end: displayClock(safeEndMinute) });
       return;
     }
@@ -5034,7 +4568,7 @@ function BlockEditorTimeRangeRail({
     </div>
     {describedBy && <small id={describedBy} className="sr-only">{collapsedPresentation
       ? <>拖动两侧端点 · 中间不可拖动</>
-      : <>手写 1 分钟 · 时间轴与方向键 5 分钟 · 最短 15 分钟</>}</small>}
+      : <>手写 1 分钟 · 时间轴与方向键 5 分钟 · 最短 {minimumDuration} 分钟</>}</small>}
     <div className="time-rail-surface">
       {collapsedPresentation ? <div className="time-rail-scale collapsed" aria-hidden="true">
         <span className="time-rail-scale-zone start"><i>{displayClock(collapsedPresentation.startWindow.start)}</i><strong>{displayClock(safeStartMinute)}</strong><i>{displayClock(collapsedPresentation.startWindow.end)}</i></span>

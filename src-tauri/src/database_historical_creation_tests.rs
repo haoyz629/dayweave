@@ -241,6 +241,9 @@ fn existing_historical_multiday_ranges_survive_reload_content_edits_and_can_move
             let mut db = Database::open(&path).unwrap();
             let draft = db.create_manual_task_draft(input(PAST, due)).unwrap();
             let task = db.confirm_task_draft(&draft.id, &draft.confirmation_token).unwrap();
+            // Model a pre-auto-scheduling task without altering the historical edit checks.
+            db.connection.execute("DELETE FROM plan_blocks WHERE task_id = ?1", [&task.id]).unwrap();
+            db.connection.execute("UPDATE tasks SET status = 'open' WHERE id = ?1", [&task.id]).unwrap();
             let before = snapshot(&db);
             drop(db);
             let _next = TestNow::new("2026-11-01T18:00:00+08:00");
@@ -309,6 +312,6 @@ fn shanghai_midnight_rechecks_draft_creation_and_edits_without_using_the_utc_dat
         assert_eq!(completed.result_date.as_deref(), Some("2026-10-31"));
         assert_eq!(db.get_day_schedule("2026-10-31").unwrap().task_blocks[0].execution_note.as_deref(), Some(AUTOMATIC_NOTE));
         let today = make_draft(&mut db, input(TODAY, FUTURE));
-        assert_eq!(db.confirm_task_draft(&today.id, &today.confirmation_token).unwrap().status, "open");
+        assert_eq!(db.confirm_task_draft(&today.id, &today.confirmation_token).unwrap().status, "scheduled");
     }
 }

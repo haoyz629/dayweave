@@ -301,7 +301,7 @@ test("copy controls show a delayed hint on pointer or keyboard focus and cancel 
   assert.match(renderToStaticMarkup(h.render()), /复制到剪贴板/);
 });
 
-test("URL and note copy the complete text, show a check and local success, then reset independently after 1.8s", async () => {
+test("URL and note copy the complete text, show only an icon that turns into a check, then reset after 1.8s", async () => {
   const copied = [];
   const url = buttonHarness(content.url, async text => { copied.push(text); }, "Win32", "url");
   const note = buttonHarness(content.note, async text => { copied.push(text); });
@@ -313,17 +313,18 @@ test("URL and note copy the complete text, show a check and local success, then 
     const html = renderToStaticMarkup(h.render());
     assert.match(html, /is-copied/);
     assert.match(html, /is-success/);
-    assert.match(html, /已复制！/);
+    assert.match(html, /aria-label="已复制"/);
+    assert.doesNotMatch(html, />(?:已复制！|复制)</);
     assert.doesNotMatch(html, /role="tooltip"|timeline-hover-feedback|Toast/);
     assert.equal(h.timers.size, 1);
   }
   url.flush(1799);
-  assert.match(renderToStaticMarkup(url.render()), /已复制！/);
+  assert.match(renderToStaticMarkup(url.render()), /aria-label="已复制"/);
   url.flush(1800);
-  assert.doesNotMatch(renderToStaticMarkup(url.render()), /已复制！|is-copied|is-success/);
-  assert.match(renderToStaticMarkup(note.render()), /已复制！/);
+  assert.doesNotMatch(renderToStaticMarkup(url.render()), /aria-label="已复制"|is-copied|is-success/);
+  assert.match(renderToStaticMarkup(note.render()), /aria-label="已复制"/);
   note.flush(1800);
-  assert.doesNotMatch(renderToStaticMarkup(note.render()), /已复制！/);
+  assert.doesNotMatch(renderToStaticMarkup(note.render()), /aria-label="已复制"/);
 });
 
 test("clipboard rejection selects the entire unabridged text and uses only a platform-specific shortcut bubble", async () => {
@@ -377,7 +378,7 @@ test("compact card CSS truncates notes to three lines and keeps copy feedback su
   assert.match(css, /\.timeline-hover-url \{[^}]*overflow: hidden;[^}]*-webkit-line-clamp: 2;/);
   assert.match(css, /\.interactive-hover-card \.timeline-hover-note \{ -webkit-line-clamp: 3;/);
   assert.doesNotMatch(css, /\.interactive-hover-card :is\(\.timeline-hover-url, \.timeline-hover-note\)[^}]*unset/);
-  assert.match(css, /\.interactive-hover-card \.timeline-hover-copy \{[^}]*opacity: \.6;[^}]*cursor: pointer/);
+  assert.match(css, /\.interactive-hover-card \.timeline-hover-copy \{[^}]*width: 28px;[^}]*min-width: 28px;[^}]*cursor: pointer/);
   assert.match(css, /\.timeline-copy-icon\.is-success \{ animation: timeline-copy-pop/);
   assert.match(css, /prefers-reduced-motion: reduce[^}]*\.timeline-copy-icon\.is-success \{ animation: none/);
 });

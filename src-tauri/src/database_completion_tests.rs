@@ -341,9 +341,13 @@ fn confirmed_cross_day_draft(db: &mut Database, due: &str) -> String {
         remaining_workload_minutes: Some(75), field_states_json: "{}".into(), tags: vec![], recurrence: None,
     }).unwrap();
     let task = db.confirm_task_draft(&draft.id, &draft.confirmation_token).unwrap();
-    assert_eq!(task.status, "open");
+    assert_eq!(task.status, "scheduled");
+    // Legacy waiting tasks still need manual planning and missing-date completion coverage.
+    db.connection.execute("DELETE FROM plan_blocks WHERE task_id = ?1", [&task.id]).unwrap();
+    db.connection.execute("DELETE FROM daily_plans WHERE NOT EXISTS(SELECT 1 FROM plan_blocks WHERE daily_plan_id = daily_plans.id)", []).unwrap();
+    db.connection.execute("UPDATE tasks SET status = 'open' WHERE id = ?1", [&task.id]).unwrap();
     assert!(db.get_day_schedule(FIRST).unwrap().task_blocks.is_empty());
-    assert!(db.get_day_schedule(due).unwrap().task_blocks.is_empty(), "cross-day confirmation does not materialize dates");
+    assert!(db.get_day_schedule(due).unwrap().task_blocks.is_empty());
     task.id
 }
 
@@ -370,7 +374,7 @@ fn plan_day(db: &mut Database, id: &str, date: &str, flow: &str) -> String {
 }
 
 #[test]
-fn real_cross_day_creation_and_daily_planning_keep_unscheduled_future_and_auto_complete_only_all_results() {
+fn legacy_cross_day_daily_planning_keeps_unscheduled_future_and_auto_completes_only_all_results() {
     for flow in ["direct", "draft", "rule"] {
         for api in ["resolve", "capture", "review"] {
             for plan_future_first in [false, true] {
@@ -1006,4 +1010,98 @@ fn cross_day_task_page_reopen_preserves_independent_completed_days() {
     assert_state(&db, &id, false);
     assert_eq!(rows(&db, &first), first_before);
     assert_eq!(rows(&db, &second), second_before);
+}
+
+#[test]
+fn single_day_incomplete_task_page_completion_updates_visible_block_not_plan_drafts() {
+    let _clock = TestNow::new("2026-10-21T18:00:00+08:00");
+    for api in ["resolve", "capture", "review"] {
+        for reopened in [false, true] {
+            for with_draft in [false, true] {
+                let mut db = Database::in_memory().unwrap();
+                let (id, current) = confirmed_single_day_task(&mut db);
+                if reopened {
+                    db.complete_task(&id, None).unwrap();
+                    db.reopen_manual_task(&id, FIRST).unwrap();
+                }
+                write(&mut db, api, FIRST, &id, &current, ReviewOutcome::NotStarted).unwrap();
+                assert!(db.get_task(&id).unwrap().is_incomplete);
+                let draft = with_draft.then(|| {
+                    let plan = Uuid::new_v4().to_string();
+                    let block = Uuid::new_v4().to_string();
+                    db.connection.execute("INSERT INTO daily_plans(id, plan_date, status, source, created_at)
+                        VALUES (?1, ?2, 'draft', 'manual', ?3)", params![plan, FIRST, now()]).unwrap();
+                    let hour = if reopened { "15" } else { "08" };
+                    db.connection.execute("INSERT INTO plan_blocks(id, daily_plan_id, task_id, starts_at, ends_at, source, created_at, updated_at)
+                        VALUES (?1, ?2, ?3, ?4, ?5, 'manual', ?6, ?6)",
+                        params![block, plan, id, format!("{FIRST}T{hour}:00:00+08:00"), format!("{FIRST}T{hour}:30:00+08:00"), now()]).unwrap();
+                    let before = rows(&db, &block);
+                    (block, before)
+                });
+                db.complete_task_with_note(&id, None, Some("任务页完成备注".into())).unwrap();
+                let task = db.get_task(&id).unwrap();
+                assert_eq!(task.status, "done");
+                assert!(!task.is_incomplete);
+                let schedule = db.get_day_schedule(FIRST).unwrap();
+                assert_eq!(schedule.task_blocks.len(), 1);
+                let saved = &schedule.task_blocks[0];
+                assert_eq!(saved.id, current);
+                assert_eq!(saved.execution_status, "completed", "{api}, reopened={reopened}, draft={with_draft}");
+                assert_eq!(saved.execution_note.as_deref(), Some("任务页完成备注"));
+                if let Some(review) = &saved.review { assert_eq!(review.outcome, "completed"); }
+                if let Some((block, before)) = draft { assert_eq!(rows(&db, &block), before, "draft must remain untouched"); }
+                assert_eq!(db.get_task_metadata(&id).unwrap().latest_execution.unwrap().plan_block_id, current);
+            }
+        }
+    }
+}
+
+#[test]
+fn single_day_task_page_completion_matches_current_reservation_before_older_same_day_facts() {
+    let _clock = TestNow::new("2026-10-21T18:00:00+08:00");
+    for captured in [false, true] {
+        let mut db = Database::in_memory().unwrap();
+        let (id, current) = confirmed_single_day_task(&mut db);
+        let older = block(&db, &id, FIRST, "08");
+        write(&mut db, "capture", FIRST, &id, &older, ReviewOutcome::NotStarted).unwrap();
+        if captured { write(&mut db, "resolve", FIRST, &id, &current, ReviewOutcome::NotStarted).unwrap(); }
+        let before = rows(&db, &older);
+        db.complete_task(&id, None).unwrap();
+        let schedule = db.get_day_schedule(FIRST).unwrap();
+        let saved = schedule.task_blocks.iter().find(|block| block.id == current).unwrap();
+        assert_eq!(saved.task_status, "done");
+        assert_eq!(saved.execution_status, "completed", "the visible reservation must not remain incomplete or be hidden as planned");
+        assert_eq!(rows(&db, &older), before, "earlier independent execution facts remain unchanged");
+    }
+}
+
+#[test]
+fn single_day_incomplete_complete_then_reopen_resets_result_instead_of_replaying_incomplete_snapshot() {
+    let _clock = TestNow::new("2026-10-21T18:00:00+08:00");
+    for api in ["resolve", "capture", "review"] {
+        for outcome in [ReviewOutcome::NotStarted, ReviewOutcome::Partial, ReviewOutcome::Blocked, ReviewOutcome::Cancelled] {
+            if api == "resolve" && outcome != ReviewOutcome::NotStarted { continue; }
+            let mut db = Database::in_memory().unwrap();
+            let (id, current) = confirmed_single_day_task(&mut db);
+            write(&mut db, api, FIRST, &id, &current, outcome).unwrap();
+            assert!(db.get_task(&id).unwrap().is_incomplete);
+            db.complete_task_with_note(&id, None, Some("完成备注".into())).unwrap();
+            let reopened = db.reopen_manual_task(&id, FIRST).unwrap();
+            assert_eq!(reopened.status, "scheduled");
+            assert!(!reopened.is_incomplete, "{api} must not restore the incomplete snapshot");
+            assert_eq!(reopened.remaining_workload_minutes, Some(30));
+            let schedule = db.get_day_schedule(FIRST).unwrap();
+            assert_eq!(schedule.task_blocks.len(), 1);
+            assert_eq!(schedule.task_blocks[0].id, current);
+            assert_eq!(schedule.task_blocks[0].execution_status, "planned");
+            assert!(schedule.task_blocks[0].review.is_none());
+            let history = db.get_task_metadata(&id).unwrap().history;
+            assert!(history.iter().any(|event| event.note.as_deref() == Some("block note")
+                || event.review_note.as_deref() == Some("block note")));
+            assert!(history.iter().any(|event| event.note.as_deref() == Some("完成备注")));
+            db.complete_task(&id, None).unwrap();
+            assert_eq!(execution_snapshot(&db.connection, &current).unwrap().execution_status, "completed");
+            assert!(!db.reopen_manual_task(&id, FIRST).unwrap().is_incomplete);
+        }
+    }
 }

@@ -103,13 +103,12 @@ export function TimelineHoverCopyButton({ field, text, targetRef }: {
   const showTooltip = hintVisible && phase !== "success";
   return <span className="timeline-copy-control">
     <button type="button" ref={buttonRef} className={`timeline-hover-copy${phase === "success" ? " is-copied" : ""}`}
-      aria-label={field === "url" ? "复制任务链接" : "复制任务备注"} aria-describedby={showTooltip ? hintId : undefined}
+      aria-label={phase === "success" ? "已复制" : field === "url" ? "复制任务链接" : "复制任务备注"} aria-describedby={showTooltip ? hintId : undefined}
       onPointerEnter={showHint} onPointerLeave={() => { if (document.activeElement !== buttonRef.current) hideHint(); }}
       onFocus={showHint} onBlur={hideHint} onClick={() => void copy()}>
-      <svg className={phase === "success" ? "timeline-copy-icon is-success" : "timeline-copy-icon"} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <svg className={phase === "success" ? "timeline-copy-icon is-success" : "timeline-copy-icon"} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         {phase === "success" ? <path d="m5 12 4 4L19 6" /> : <><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></>}
       </svg>
-      <span role="status" aria-live="polite">{phase === "success" ? "已复制！" : "复制"}</span>
     </button>
     {showTooltip && <span id={hintId} className="timeline-copy-hint" role="tooltip">{phase === "fallback" ? `复制失败，请按 ${shortcut} 完成复制` : "复制到剪贴板"}</span>}
   </span>;

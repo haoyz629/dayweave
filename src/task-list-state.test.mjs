@@ -159,7 +159,7 @@ test("history summary uses current task state rather than a historical block out
   for (const [status, label] of [["done", "已完成"], ["deleted", "回收站"]]) {
     const html = renderToStaticMarkup(state.TaskStatusHistory({ task: { ...original, status }, metadata: { history: history.slice(0, 2) }, busy: false, ...callbacks }));
     assert.match(html.match(/<summary>[\s\S]*?<\/summary>/)?.[0] ?? "", new RegExp(`>${label}<`));
-    assert.match(html, /10月20日：当天任务未完成/);
+    assert.match(html, /<strong>任务未完成<\/strong>/);
   }
 });
 
@@ -206,14 +206,14 @@ test("detail typography, neutral timeline and completion modal are explicitly sc
   assert.match(text, /initialFocus="textarea:not\(:disabled\)"/);
 });
 
-test("execution history distinguishes dated daily results from whole-task status and preserves notes", () => {
+test("single-day execution history uses concise result labels and preserves notes", () => {
   const { state } = harness();
   for (const [kind, status, label] of [
-    ["execution", "done", "10月20日：当天任务已完成"],
-    ["execution", "not_completed", "10月20日：当天任务未完成"],
+    ["execution", "done", "任务已完成"],
+    ["execution", "not_completed", "任务未完成"],
     ["status", "done", "任务已完成"],
     ["reopened", "scheduled", "已取消任务完成"],
-    ["cleared_incomplete", "scheduled", "10月20日：已取消当天未完成"]
+    ["cleared_incomplete", "scheduled", "已取消任务未完成"]
   ]) {
     const event = { ...history[1], kind, status, plan_date: "2026-10-20" };
     const before = structuredClone(event);
@@ -232,7 +232,7 @@ test("cleared history has its own neutral tone instead of inheriting task comple
     const event = { ...history[1], id: "clear", kind: "cleared", status, note: null, review_note: null };
     const html = renderToStaticMarkup(state.TaskStatusHistory({ task: original, metadata: { history: [event] }, busy: false, ...callbacks }));
     assert.match(html, /<li[^>]*data-status="cleared"/);
-    assert.match(html, /<strong>10月20日：已取消当天完成<\/strong>/);
+    assert.match(html, /<strong>已取消任务完成<\/strong>/);
   }
   const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
   assert.match(css, /\.ordinary-task-detail \.task-detail-event\[data-status="cleared"\]::after \{ background: var\(--task-detail-secondary\);/);
@@ -429,4 +429,33 @@ test("equivalent timestamps with offsets correlate and repeated notes render onc
   const displayed = state.taskDisplayHistory(original, events);
   assert.equal(displayed.length, 1);
   assert.equal(displayed[0].display_notes.length, 2);
+});
+
+test("single-day execution and cancellation labels omit the redundant date for completed and incomplete results", () => {
+  const { state } = harness();
+  const cases = [
+    ["execution", "done", "任务已完成", "10月20日：当天任务已完成"],
+    ["execution", "not_completed", "任务未完成", "10月20日：当天任务未完成"],
+    ["cleared", "scheduled", "已取消任务完成", "10月20日：已取消当天完成"],
+    ["cleared_incomplete", "scheduled", "已取消任务未完成", "10月20日：已取消当天未完成"]
+  ];
+  for (const [kind, status, singleLabel, datedLabel] of cases) {
+    const event = { ...history[1], kind, status };
+    const before = structuredClone(event);
+    for (const [task, label] of [
+      [original, singleLabel],
+      [{ ...original, due_date: "2026-10-21" }, datedLabel],
+      [{ ...original, earliest_start_date: null, due_date: null }, datedLabel]
+    ]) {
+      const html = renderToStaticMarkup(state.TaskStatusHistory({ task, metadata: { history: [event] }, busy: false, ...callbacks }));
+      assert.ok(html.includes(`<strong>${label}</strong>`), html);
+      assert.match(html, /执行备注\n第二行/);
+      assert.match(html, /单独复盘备注/);
+      assert.match(html, /<time[^>]*>10:00:00<\/time>/);
+    }
+    const otherDate = { ...event, plan_date: "2026-10-19" };
+    const html = renderToStaticMarkup(state.TaskStatusHistory({ task: original, metadata: { history: [otherDate] }, busy: false, ...callbacks }));
+    assert.match(html, /<strong>10月19日：/);
+    assert.deepEqual(event, before);
+  }
 });

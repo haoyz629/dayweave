@@ -341,6 +341,9 @@ pub(super) fn reopen_in_transaction(transaction: &Transaction<'_>, task_id: &str
         return Err(AppError::Domain("只有已完成任务可以取消完成".into()));
     }
     database_results::require_task_reopenable(transaction, task_id)?;
+    let today = shanghai_today();
+    let single_day = current.earliest_start_date.as_deref() == Some(today.as_str())
+        && current.due_date.as_deref() == Some(today.as_str());
     let snapshot: Option<(String, Option<String>)> = transaction.query_row(
         "SELECT before_json, block_after_json FROM task_completion_snapshots WHERE task_id = ?1", [task_id],
         |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
@@ -360,7 +363,7 @@ pub(super) fn reopen_in_transaction(transaction: &Transaction<'_>, task_id: &str
         if let Some(before) = &payload.task { remaining = before.remaining_workload_minutes; }
         let old_facts_unchanged = after_json.is_none()
             && database_results::facts_match(&fact_fingerprint(transaction, "task_completion", task_id)?, &payload.after_facts);
-        if let Some(block) = payload.block {
+        if let Some(block) = payload.block.filter(|block| !single_day || block.execution_status == "planned") {
             let current_block = match execution_snapshot(transaction, &block.id) {
                 Ok(snapshot) => Some(snapshot),
                 Err(AppError::Database(rusqlite::Error::QueryReturnedNoRows)) => None,
@@ -389,17 +392,15 @@ pub(super) fn reopen_in_transaction(transaction: &Transaction<'_>, task_id: &str
             }
         }
     }
-    // Automatic completion has no block snapshot. A single-day task must cancel
-    // its completed day as well; cross-day execution facts remain independent.
-    let today = shanghai_today();
-    if current.earliest_start_date.as_deref() == Some(today.as_str())
-        && current.due_date.as_deref() == Some(today.as_str()) {
+    // Single-day cancellation resets the current result instead of replaying an
+    // earlier incomplete snapshot. Cross-day execution facts remain independent.
+    if single_day {
         let blocks = {
             let mut statement = transaction.prepare("SELECT pb.id, review.id IS NOT NULL
                 FROM plan_blocks pb JOIN daily_plans dp ON dp.id = pb.daily_plan_id
                 LEFT JOIN review_entries review ON review.plan_block_id = pb.id
                 WHERE pb.task_id = ?1 AND dp.status = 'confirmed' AND dp.plan_date = ?2
-                    AND COALESCE(review.outcome, pb.execution_status) = 'completed'")?;
+                    AND COALESCE(review.outcome, pb.execution_status) <> 'planned'")?;
             let rows = statement.query_map(params![task_id, today], |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?)))?
                 .collect::<Result<Vec<_>, _>>()?;
             rows

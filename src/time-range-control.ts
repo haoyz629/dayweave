@@ -17,17 +17,15 @@ export function taskDateRangeIncludesHistory(start: string, end: string, today: 
   return Boolean(start && end && start !== end && start < today);
 }
 
+export function selectDateRange(anchorDate: string | null, date: string) {
+  if (!anchorDate) return { start: date, end: date, dateAnchor: date };
+  return { start: date < anchorDate ? date : anchorDate, end: date > anchorDate ? date : anchorDate, dateAnchor: null };
+}
+
 export function selectTaskDateBoundary(anchorDate: string | null, date: string, today: string) {
   // History is always a new single-day selection, never one end of a range.
   if (date < today) return { start: date, end: date, dateAnchor: null };
-  if (!anchorDate || anchorDate < today) {
-    return { start: date, end: date, dateAnchor: date };
-  }
-  return {
-    start: date < anchorDate ? date : anchorDate,
-    end: date > anchorDate ? date : anchorDate,
-    dateAnchor: null
-  };
+  return selectDateRange(anchorDate && anchorDate >= today ? anchorDate : null, date);
 }
 
 export type MinuteRange = {

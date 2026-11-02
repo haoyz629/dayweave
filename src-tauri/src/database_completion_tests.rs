@@ -1105,3 +1105,66 @@ fn single_day_incomplete_complete_then_reopen_resets_result_instead_of_replaying
         }
     }
 }
+
+#[test]
+fn historical_reopened_single_day_can_complete_from_task_details_like_its_timeline() {
+    for api in ["task", "capture"] {
+        for incomplete in [false, true] {
+            let _clock = TestNow::new("2026-10-21T18:00:00+08:00");
+            let mut db = Database::in_memory().unwrap();
+            let (id, current) = confirmed_single_day_task(&mut db);
+            db.complete_task(&id, None).unwrap();
+            db.reopen_manual_task(&id, FIRST).unwrap();
+            if incomplete { write(&mut db, "review", FIRST, &id, &current, ReviewOutcome::NotStarted).unwrap(); }
+            let _later = TestNow::new("2026-10-23T18:00:00+08:00");
+            assert!(db.get_task_metadata(&id).unwrap().completion_backfill_allowed,
+                "an unfinished original block must remain completable from task details");
+            if api == "task" { db.complete_task_with_note(&id, None, Some("补录完成".into())).unwrap(); }
+            else { write(&mut db, "capture", FIRST, &id, &current, ReviewOutcome::Completed).unwrap(); }
+            let saved_task = db.get_task(&id).unwrap();
+            assert_eq!(saved_task.status, "done");
+            assert!(!saved_task.is_incomplete);
+            assert_eq!(saved_task.result_date.as_deref(), Some(FIRST));
+            let schedule = db.get_day_schedule(FIRST).unwrap();
+            assert_eq!(schedule.task_blocks.len(), 1);
+            assert_eq!(schedule.task_blocks[0].id, current);
+            assert_eq!(schedule.task_blocks[0].execution_status, "completed");
+            if let Some(review) = &schedule.task_blocks[0].review { assert_eq!(review.outcome, "completed"); }
+            assert!(db.get_day_schedule("2026-10-23").unwrap().task_blocks.is_empty());
+            assert!(!db.get_task_metadata(&id).unwrap().completion_backfill_allowed);
+            assert!(db.reopen_manual_task(&id, "2026-10-23").is_err());
+        }
+    }
+}
+
+#[test]
+fn historical_reopened_completion_requires_its_own_unfinished_original_date() {
+    for change in ["other-task", "other-date", "completed-block", "completed-review", "other-reservation"] {
+        let _clock = TestNow::new("2026-10-21T18:00:00+08:00");
+        let mut db = Database::in_memory().unwrap();
+        let (id, current) = confirmed_single_day_task(&mut db);
+        db.complete_task(&id, None).unwrap();
+        db.reopen_manual_task(&id, FIRST).unwrap();
+        match change {
+            "other-task" => {
+                let other = task(&mut db);
+                let other_block = block(&db, &other, FIRST, "09");
+                db.connection.execute("UPDATE tasks SET result_block_id = ?2 WHERE id = ?1", params![id, other_block]).unwrap();
+            },
+            "other-date" => { db.connection.execute("UPDATE tasks SET result_date = ?2 WHERE id = ?1", params![id, SECOND]).unwrap(); },
+            "completed-block" => { db.connection.execute("UPDATE plan_blocks SET execution_status = 'completed' WHERE id = ?1", [&current]).unwrap(); },
+            "completed-review" => {
+                write(&mut db, "review", FIRST, &id, &current, ReviewOutcome::Completed).unwrap();
+                db.connection.execute("UPDATE tasks SET status = 'scheduled' WHERE id = ?1", [&id]).unwrap();
+                db.connection.execute("UPDATE plan_blocks SET execution_status = 'planned' WHERE id = ?1", [&current]).unwrap();
+            },
+            "other-reservation" => { block(&db, &id, SECOND, "09"); },
+            _ => unreachable!(),
+        }
+        let _later = TestNow::new("2026-10-23T18:00:00+08:00");
+        let before = fact_fingerprint(&db.connection, "task_completion", &id).unwrap();
+        assert!(!db.get_task_metadata(&id).unwrap().completion_backfill_allowed, "{change}");
+        assert!(db.complete_task(&id, None).is_err(), "{change}");
+        assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), before, "{change}");
+    }
+}

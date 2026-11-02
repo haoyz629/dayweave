@@ -10,13 +10,14 @@ import { independentTaskDraft } from "./task-followup.ts";
 import { splitTaskNotes, taskResourceUrl } from "./task-notes.ts";
 import { formatWorkloadMinutes } from "./task-workload.ts";
 import { recycleCleanupMessage } from "./recycle-retention.ts";
+import { CopySeparator } from "./copy-separator.test-helper.mjs";
 
 const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const functions = new Map(), expressions = new Map();
 let capsule, editableCompletionButton;
 function collect(node) {
-  if (ts.isFunctionDeclaration(node) && ["taskMatchesView", "taskIsEditable", "TaskCapsuleFact", "TaskCapsuleContent", "CompletedTaskDetails", "DeletedTaskDetails", "TaskDetailContent", "TaskDetailResources", "taskDisplayHistory", "TaskStatusHistory", "TaskCompletionDialog"].includes(node.name?.text)) functions.set(node.name.text, node.getText(source));
+  if (ts.isFunctionDeclaration(node) && ["taskMatchesView", "taskIsEditable", "TaskCapsuleFact", "TaskCapsuleContent", "CompletedTaskDetails", "DeletedTaskDetails", "TaskPageHeader", "TaskDetailContent", "TaskDetailResources", "taskDisplayHistory", "TaskStatusHistory", "TaskCompletionDialog"].includes(node.name?.text)) functions.set(node.name.text, node.getText(source));
   if (ts.isVariableDeclaration(node) && ["statusCopy", "taskViewCopy", "taskViewGroups", "taskEmptyCopy", "counts"].includes(node.name.getText(source))) expressions.set(node.name.getText(source), node.initializer.getText(source));
   if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(source) === "TaskCapsuleContent" && node.attributes.properties.some(attr => attr.name?.getText(source) === "statusTone" && attr.initializer?.getText(source) === "{taskListStatus(task)}")) capsule = node.getText(source);
   if (ts.isJsxElement(node) && node.openingElement.tagName.getText(source) === "button" && node.getText(source).includes('className="task-compact-complete"') && node.getText(source).includes('requestTaskChange({ kind: "transition", status: "done" })')) editableCompletionButton = node.getText(source);
@@ -26,8 +27,9 @@ collect(source);
 const compile = code => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
 function harness(tasks = []) {
   const state = {
-    React, taskListStatus, taskResultEditable, historicalTaskCompletionLocked, HISTORY_COMPLETION_LOCKED_MESSAGE, tasks, taskDrafts: [], recurringItems: [],
-    useMemo: fn => fn(), useState: React.useState, Icon: () => null, TaskTagList: () => null, TaskCapsuleFact: () => null,
+    React, CopySeparator, taskListStatus, taskResultEditable, historicalTaskCompletionLocked, HISTORY_COMPLETION_LOCKED_MESSAGE, tasks, taskDrafts: [], recurringItems: [],
+    useMemo: fn => fn(), useState: React.useState, useRef: React.useRef, Icon: () => null, TaskTagList: () => null, TaskCapsuleFact: () => null,
+    TimelineHoverCopyButton: ({ field }) => React.createElement("button", { "aria-label": field === "url" ? "复制任务链接" : "复制任务备注" }),
     splitTaskNotes, taskResourceUrl, formatWorkloadMinutes, recycleCleanupMessage,
     priorityCopy: { high: "高优先级", medium: "中优先级", low: "低优先级" }, taskTimingFact: () => null, today: "2026-10-20",
     ConfirmationDialog: ({ children, initialFocus, ...props }) => React.createElement("section", props, children)
@@ -38,6 +40,18 @@ function harness(tasks = []) {
   return { state, context };
 }
 const original = { id: "original", title: "原任务", tags: [], notes: null, priority: "medium", estimated_minutes: 60, earliest_start_date: "2026-10-20", earliest_start_time: "09:00", due_date: "2026-10-20", due_time: "10:00", created_at: "2026-10-20T08:00:00+08:00", deleted_at: null, status: "scheduled", is_incomplete: true, execution_locked: true, result_date: null };
+
+test("capsule puts tags after priority in its heading and only shows AI attribution", () => {
+  const { state } = harness();
+  state.TaskTagList = ({ tags }) => React.createElement("span", { className: "task-list-tags" }, tags.join("、"));
+  for (const sourceType of ["manual", "ai_assistant"]) {
+    const markup = renderToStaticMarkup(state.TaskCapsuleContent({ title: "一个很长的任务标题", priority: "medium", tags: ["开发", "产品"], sourceType, status: "已安排" }));
+    assert.match(markup, /task-capsule-heading[\s\S]*中优先级<\/span><span class="task-list-tags">开发、产品<\/span>/);
+    assert.doesNotMatch(markup, /手动创建|source-manual/);
+    assert.equal(markup.includes('aria-label="AI 创建"'), sourceType === "ai_assistant");
+    assert.match(markup, /title="一个很长的任务标题"/);
+  }
+});
 
 test("unfinished is a separate filter with exclusive counts, not open or scheduled", () => {
   const tasks = [original, { ...original, id: "pending", is_incomplete: false }, { ...original, id: "open", status: "open", is_incomplete: false }, { ...original, id: "done", status: "done" }, { ...original, id: "deleted", status: "deleted" }];
@@ -188,14 +202,34 @@ test("detail values and action groups match the approved presentation without ch
   const { state } = harness();
   const html = renderToStaticMarkup(state.CompletedTaskDetails({ task: { ...original, execution_locked: false, notes: "URL: https://example.com/docs\n\n任务资料" }, metadata: { history }, now, busy: false, ...callbacks }));
   assert.match(html, /60<span class="task-detail-unit">分钟<\/span>/);
-  assert.match(html, /href="https:\/\/example.com\/docs"[^>]*><span>example.com\/docs<\/span>/);
+  assert.match(html, /href="https:\/\/example.com\/docs"[^>]*><span>https:\/\/example.com\/docs<\/span>/);
   assert.match(html, /task-detail-primary-actions[\s\S]*完成任务[\s\S]*编辑任务/);
+});
+
+test("detail URL and note reuse the timeline copy control with complete independent texts and refs", () => {
+  const { state } = harness();
+  const url = "https://example.com/a?long=" + "x".repeat(500);
+  const body = "第一行\n第二行\n".repeat(20);
+  for (const [notes, expected] of [[null, []], ["", []], [`URL: ${url}`, [["url", url]]], [body, [["note", body]]], [`URL: ${url}\n\n${body}`, [["url", url], ["note", body]]], ["URL: 1\n\n1", [["url", "1"], ["note", "1"]]]]) {
+    const controls = [];
+    state.TimelineHoverCopyButton = props => { controls.push(props); return React.createElement("button"); };
+    renderToStaticMarkup(React.createElement(state.TaskDetailResources, { notes }));
+    assert.deepEqual(controls.map(({ field, text }) => [field, text]), expected);
+    assert.ok(controls.every(({ targetRef }) => targetRef && targetRef.current === null));
+    if (controls.length === 2) assert.notEqual(controls[0].targetRef, controls[1].targetRef);
+  }
+  const resources = functions.get("TaskDetailResources");
+  assert.doesNotMatch(resources, /copyUrl|setCopied|navigator\.clipboard/);
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.ordinary-task-detail \.task-detail-resource-row \{[^}]*grid-template-columns: 14px minmax\(0, 1fr\) 28px/);
+  assert.match(css, /\.ordinary-task-detail \.task-detail-resource-row \{[^}]*grid-template-columns: 14px minmax\(0, 1fr\) 28px/);
+  assert.doesNotMatch(css, /\.task-detail-copy\b/);
 });
 
 test("detail typography, neutral timeline and completion modal are explicitly scoped", () => {
   const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
-  assert.match(css, /\.ordinary-task-detail \{[^}]*font: 13px\/1\.6 "Segoe UI", "Microsoft YaHei UI"/);
-  assert.match(css, /\.ordinary-task-detail > header h2 \{[^}]*font-size: 29px;[^}]*line-height: 1\.4/);
+  assert.match(css, /\.ordinary-task-detail \{[^}]*font: 13px\/1\.6 var\(--jx-font-sans\)/);
+  assert.match(css, /\.ordinary-task-detail > header h2 \{[^}]*font-size: 26px;[^}]*line-height: 1\.45/);
   assert.match(css, /\.ordinary-task-detail \.task-detail-event \{[^}]*background: transparent/);
   assert.match(css, /\.ordinary-task-detail \.task-detail-event\[data-status="deleted"\]::after/);
   assert.match(css, /\.ordinary-task-detail \.task-detail-actions button\.task-compact-complete \{[^}]*border-color: #cbd9cd/);
@@ -204,6 +238,29 @@ test("detail typography, neutral timeline and completion modal are explicitly sc
   assert.match(css, /html\[data-mode="dark"\] \.task-inspector:has\(\.ordinary-task-detail\)/);
   assert.match(css, /\.task-completion-backdrop \{ padding: 16px;/);
   assert.match(text, /initialFocus="textarea:not\(:disabled\)"/);
+});
+
+test("A detail keeps status above title and all tags, with boxed facts and links before notes", () => {
+  const { state } = harness();
+  state.TaskTagList = ({ tags, expanded }) => React.createElement("div", { className: "task-list-tags", "data-expanded": expanded }, tags.map(tag => React.createElement("span", { key: tag }, tag)));
+  for (const status of ["scheduled", "done", "deleted"]) {
+    const task = { ...original, status, title: "完整任务标题".repeat(20), tags: ["开发", "长标签".repeat(20)], notes: "URL: https://example.com/docs\n\n多行备注\n第二行" };
+    const before = structuredClone(task);
+    const html = renderToStaticMarkup(React.createElement(state.TaskDetailContent, { task, metadata: { history: [] }, busy: false, onNewTask() {} }));
+    assert.match(html, /task-page-header[\s\S]*terminal-task-status[\s\S]*<\/header><section[^>]*ordinary-task-detail[\s\S]*<header><h2>/);
+    const header = html.match(/<header>[\s\S]*?<\/header>/)?.[0] ?? "";
+    assert.ok(header.includes(task.title));
+    assert.match(header, /<\/h2><div class="task-list-tags" data-expanded="true">/);
+    for (const tag of task.tags) assert.ok(header.includes(tag));
+    assert.doesNotMatch(header, /terminal-task-status/);
+    assert.ok(html.indexOf('class="task-detail-url"') < html.indexOf('class="task-detail-note"'));
+    assert.deepEqual(task, before);
+  }
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.ordinary-task-detail > header \{ display: block;/);
+  assert.match(css, /\.ordinary-task-detail > header \.task-list-tags > span \{[^}]*max-width: 100%;[^}]*white-space: normal;[^}]*overflow-wrap: anywhere/);
+  assert.match(css, /\.ordinary-task-detail \.task-detail-facts \{[^}]*repeat\(2, minmax\(0, 1fr\)\)[^}]*border: 1px solid[^}]*border-radius: var\(--task-page-card-radius\)/);
+  assert.match(css, /\.ordinary-task-detail \.task-detail-resources \{[^}]*border-radius: var\(--task-page-card-radius\)/);
 });
 
 test("single-day execution history uses concise result labels and preserves notes", () => {
@@ -457,5 +514,22 @@ test("single-day execution and cancellation labels omit the redundant date for c
     const html = renderToStaticMarkup(state.TaskStatusHistory({ task: original, metadata: { history: [otherDate] }, busy: false, ...callbacks }));
     assert.match(html, /<strong>10月19日：/);
     assert.deepEqual(event, before);
+  }
+});
+
+test("detail and editor headers share breadcrumb, derived status and status icon", () => {
+  const { state } = harness();
+  state.Icon = ({ name }) => React.createElement("svg", { "data-icon": name, "aria-hidden": true });
+  for (const [status, is_incomplete, label, icon] of [["scheduled", false, "已安排", "clock"], ["open", false, "待处理", "clock"], ["scheduled", true, "未完成", "clock"], ["done", false, "已完成", "check"], ["deleted", false, "回收站", "trash"]]) {
+    const task = { ...original, status, is_incomplete };
+    for (const editing of [false, true]) {
+      const html = renderToStaticMarkup(React.createElement(state.TaskPageHeader, { task, editing }));
+      assert.match(html, /<header class="task-compact-header task-page-header">/);
+      assert.ok(html.includes(editing ? "编辑任务" : "任务详情"));
+      assert.match(html, new RegExp(`<svg data-icon="${icon}" aria-hidden="true"></svg>${label}`));
+      assert.doesNotMatch(html, /手动创建|AI 创建|task-compact-source/);
+    }
+    const detail = renderToStaticMarkup(React.createElement(state.TaskDetailContent, { task, metadata: null, busy: false, onNewTask() {} }));
+    assert.ok(detail.indexOf('task-page-header') < detail.indexOf('ordinary-task-detail'));
   }
 });

@@ -211,3 +211,33 @@ test("recurring defaults do not overwrite saved item or draft times, including i
   assert.equal(incomplete.display_time, "");
   assert.equal(incomplete.display_duration_minutes, null);
 });
+
+test("recurring pages reuse the ordinary header with lifecycle status icons", () => {
+  const state = {
+    React, Icon: ({ name }) => React.createElement("svg", { "data-icon": name }),
+    TaskTagList: () => null, TaskDetailResources: () => React.createElement("div", { className: "resources" }),
+  };
+  const names = ["recurringItemStatusLabel", "recurringScheduleLabel", "TaskPageHeader", "DeletedRecurringItemDetails", "EndedRecurringItemDetails"];
+  Object.assign(state, evaluate(`${names.map(name => functions.get(name).getText(source)).join("\n")}\n({ ${names.join(",")} });`, state));
+  for (const [status, label, icon] of [["active", "生效中", "clock"], ["paused", "已暂停", "pause"], ["ended", "已结束", "check"], ["deleted", "回收站", "trash"]]) {
+    const task = { ...item, frequency: "weekly", status: status === "deleted" ? "ended" : status, deleted_at: status === "deleted" ? "2026-10-27" : null };
+    const html = renderToStaticMarkup(state.TaskPageHeader({ task, editing: !["ended", "deleted"].includes(status) }));
+    assert.match(html, /task-compact-header task-page-header/);
+    assert.match(html, new RegExp(`data-icon="${icon}"`));
+    assert.match(html, new RegExp(`${label}</span>`));
+    assert.match(html, status === "deleted" ? /回收站<\/span>/ : /任务<\/span>/);
+    assert.doesNotMatch(html, /task-compact-source|·重复事项/);
+  }
+  for (const name of ["DeletedRecurringItemDetails", "EndedRecurringItemDetails"]) {
+    const component = functions.get(name).getText(source);
+    assert.match(component, /<TaskPageHeader task=\{item\}/);
+    assert.match(component, /<TaskDetailResources key=\{item.id\} notes=\{item.notes\}/);
+    assert.match(component, /ordinary-task-detail/);
+  }
+  assert.match(functions.get("RecurringItemEditor").getText(source), /TaskNotesInputs[^\n]*icons/);
+});
+
+test("ordinary notes consume spare height without changing planning controls", () => {
+  assert.match(css, /:is\(#new-task-form, #task-editor-form\) \.task-notes-region \{ flex: 1 0 150px; height: auto; \}/);
+  assert.match(css, /#recurring-editor-form \.recurring-editor-surface \{ gap: 24px; \}/);
+});

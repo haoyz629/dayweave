@@ -4,17 +4,19 @@ import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 import React from "react";
-import { taskResultEditable, taskListStatus, visibleTaskScheduleBlocks, historicalTaskCompletionLocked, HISTORY_COMPLETION_LOCKED_MESSAGE } from "./task-result.ts";
+import { taskResultEditable, taskListStatus, visibleTaskScheduleBlocks, timelineTaskCompletionAction, historicalTaskCompletionLocked, HISTORY_COMPLETION_LOCKED_MESSAGE } from "./task-result.ts";
 
 const source = ts.createSourceFile("App.tsx", readFileSync(new URL("./App.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const handlers = new Map(), summaries = new Map();
-let poolButton;
+let poolButton, detailCompletionButton, editableCompletionButton;
 function collect(node) {
   if (ts.isFunctionDeclaration(node) && ["transition", "reopen", "taskCommitted"].includes(node.name?.text)) handlers.set(node.name.text, node.getText(source));
   if (ts.isVariableDeclaration(node) && ["summaryTaskBlocks", "plannedTaskCount", "completedPlannedTaskCount", "plannedMinutes", "planProgress"].includes(node.name.getText(source))) summaries.set(node.name.getText(source), node.initializer.getText(source));
   if (ts.isJsxElement(node) && node.openingElement.tagName.getText(source) === "button") {
     const attribute = node.openingElement.attributes.properties.find(attr => attr.name?.getText(source) === "className");
     if (attribute?.initializer?.getText(source) === '"waiting-pool-add"') poolButton = node.getText(source);
+    if (attribute?.initializer?.getText(source).includes('task.status === "done" ? "secondary-action" : "task-compact-complete"')) detailCompletionButton = node.getText(source);
+    if (attribute?.initializer?.getText(source) === '"task-compact-complete"' && node.getText(source).includes('requestTaskChange({ kind: "transition", status: "done" })')) editableCompletionButton = node.getText(source);
   }
   ts.forEachChild(node, collect);
 }
@@ -93,4 +95,23 @@ test("committed historical tasks refresh the selected schedule and statistics fo
     assert.equal(context.plannedMinutes, 30);
     assert.equal(context.planProgress, execution_status === "completed" ? 100 : 0);
   }
+});
+
+test("reopened historical task completion stays enabled in read-only and editing details like the timeline", () => {
+  const now = Date.parse("2026-10-28T18:00:00+08:00");
+  const task = { id: "reopened-26", title: "123213123213123213123213123213123213123213123213", status: "scheduled",
+    earliest_start_date: "2026-10-26", due_date: "2026-10-26", result_date: "2026-10-26", result_ends_at: "2026-10-26T09:30:00+08:00", deleted_at: null };
+  const metadata = { task_id: task.id, completion_date: task.result_date, completion_ends_at: task.result_ends_at, completion_backfill_allowed: true };
+  const block = { id: "original-block", task_id: task.id, task_status: task.status, result_date: task.result_date, execution_status: "planned", review: null };
+  assert.equal(timelineTaskCompletionAction(block, task, task.result_date, "2026-10-28", now), "complete-block");
+  for (const editing of [false, true]) for (const busy of [false, true]) {
+    const calls = [];
+    const state = { React, Icon: () => null, task, busy, editable: taskResultEditable(task, now, metadata),
+      selectedTask: task, selectedMetadata: metadata, resultNow: now, taskResultEditable, historicalTaskCompletionLocked, HISTORY_COMPLETION_LOCKED_MESSAGE,
+      onComplete: () => calls.push("complete"), requestTaskChange: change => calls.push(change.status) };
+    const button = vm.runInNewContext(compile(`(${editing ? editableCompletionButton : detailCompletionButton})`), state);
+    assert.equal(button.props.disabled, busy);
+    if (!busy) { button.props.onClick(); assert.deepEqual(calls, [editing ? "done" : "complete"]); }
+  }
+  assert.equal(taskResultEditable({ ...task, status: "done" }, now, metadata), false, "historical completion stays locked");
 });

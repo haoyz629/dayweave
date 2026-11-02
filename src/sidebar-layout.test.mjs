@@ -15,37 +15,23 @@ test("sidebar uses a responsive proportion without draggable or saved width cont
   assert.match(app, /setUiSetting\(SHELL_SIDEBAR_COLLAPSED_SETTING, String\(nextCollapsed\)\)/);
 });
 
-test("sidebar matches the visible square logo to the three-line text height", () => {
-  assert.match(brand, /<h1 className="product-brand-name">今序 · Dayweave<\/h1>/);
-  assert.doesNotMatch(brand, /brand-wordmark\.svg/);
-  assert.match(styles, /\.product-brand-logo \{ width: var\(--product-brand-height\); height: var\(--product-brand-height\)/);
-  assert.match(styles, /--product-brand-height: calc\(1\.2 \* var\(--product-brand-name-size\) \+ 32\.9 \* var\(--brand-unit\) \+ 2 \* var\(--product-brand-copy-gap\)\)/);
-  assert.match(styles, /\.product-brand-logo img \{ position: absolute; width: 116\.363636%; height: 116\.363636%;[^}]*left: -8\.181818%; top: -5%/);
-  assert.match(styles, /\.product-brand-text \{ min-width: 0; padding: 0; \}/);
-  assert.match(styles, /\.product-brand-heading \{ display: grid; grid-template-columns: max-content max-content;[^}]*gap: calc\(10 \* var\(--brand-unit\)\);[^}]*width: max-content;[^}]*margin-inline: auto/);
-  assert.doesNotMatch(styles, /product-brand-text \{[^}]*justify-self: end/);
-  assert.match(styles, /\.product-brand-logo \{[^}]*justify-self: center/);
-  assert.match(styles, /--brand-unit: clamp\(1px, \.46728972cqw, 1\.30841122px\)/);
+test("brand lives once in the integrated topbar, not in the collapsible sidebar", () => {
+  const titlebar = asset("./app-titlebar.tsx");
+  assert.match(titlebar, /<ProductBrand weekLabel=\{weekLabel\} \/>/);
+  assert.doesNotMatch(app, /<ProductBrand/);
+  assert.match(app, /<AppTitlebar viewSlotRef=\{setHeaderViewSlot\} onError=\{notifyWindowError\}/);
+  assert.doesNotMatch(app, /calendarSlotRef|setHeaderCalendarSlot/);
+  assert.match(brand, /<h1 className="product-brand-name">今序<CopySeparator \/>dayweave<\/h1>/);
+  assert.match(brand, /<p className="product-brand-copy"><span className="product-brand-chinese">让今天，井然有序<\/span><CopySeparator \/>/);
+  assert.match(brand, /lang="en">Bring order to your day\./);
 });
 
-test("brand uses the approved geometric sans typography and slate hierarchy", () => {
-  assert.match(styles, /--product-brand-font: 'Inter', 'PingFang SC', MiSans, 'HarmonyOS Sans SC', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif/);
-  assert.match(styles, /--product-brand-name-size: calc\(17\.5 \* var\(--brand-unit\)\)/);
-  assert.match(styles, /\.product-brand-name \{[^}]*color: #1e293b; font: 700 var\(--product-brand-name-size\)\/1\.2 var\(--product-brand-font\); letter-spacing: -\.02em/);
-  assert.match(styles, /\.product-brand-chinese \{[^}]*color: #475569; font: 500 calc\(12\.5 \* var\(--brand-unit\)\)\/1\.4 var\(--product-brand-font\); letter-spacing: \.04em/);
-  assert.match(styles, /\.product-brand-english \{ margin: var\(--product-brand-copy-gap\) 0 0; color: #64748b; font: 400 calc\(11 \* var\(--brand-unit\)\)\/1\.4 var\(--product-brand-font\); letter-spacing: \.01em/);
-  for (const [line, color] of [["name", "#e2e8f0"], ["chinese", "#b4c0d0"], ["english", "#94a3b8"]]) {
-    const priority = line === "name" ? " !important" : "";
-    assert(styles.includes(`html[data-mode="dark"] .next-sidebar .product-brand-${line} { color: ${color}${priority}; }`));
-  }
-});
-
-test("sidebar keeps the full logo canvas and left-aligns the brand without changing collapsed icons", () => {
-  assert.match(styles, /\.next-sidebar \.sidebar-brand \{[^}]*align-items: center;[^}]*text-align: left/);
-  assert.match(styles, /\.product-brand-logo > \.dayweave-logo \{ width: 100%; height: 100%; \}/);
-  assert.match(styles, /\.sidebar-collapsed \.next-sidebar \.sidebar-brand \{ width: 100%; max-width: none; align-items: center/);
-  assert.match(styles, /\.sidebar-collapsed \.next-sidebar \.product-brand-logo > \.dayweave-logo \{ position: static; width: 100%; height: 100%/);
-  assert.match(styles, /\.sidebar-collapsed \.next-sidebar \.product-brand-logo img \{ position: static; width: 100%; height: 100%; \}/);
+test("integrated brand uses one subdued bilingual subtitle and the original logo", () => {
+  const chrome = asset("./app-titlebar.css");
+  assert.match(chrome, /\.app-titlebar \.product-brand-name \{[^}]*font: 650 15px\/18px var\(--jx-font-sans\)/);
+  assert.match(chrome, /\.app-titlebar \.product-brand-copy \{[^}]*color: var\(--color-muted\); font: 400 12px\/16px/);
+  assert.match(chrome, /\.app-titlebar \.product-brand-logo \{[^}]*width: 44px; height: 44px/);
+  assert.match(brand, /from "\.\/assets\/logo-light\.svg"/);
 });
 
 test("create and navigation actions share an intermediate width without changing the collapsed icon rail", () => {

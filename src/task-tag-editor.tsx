@@ -271,8 +271,8 @@ export function TaskTagEditor({ tags, suggestions = [], disabled, id, onChange }
   </div>;
 }
 
-export function TaskTagList({ tags }: { tags: string[] }) {
+export function TaskTagList({ tags, expanded = false }: { tags: string[]; expanded?: boolean }) {
   const { definitions } = useTagCatalog();
   if (!tags.length) return null;
-  return <span className="task-list-tags" aria-label="标签">{tags.slice(0, 3).map((tag) => <span key={tag} data-tag-color={colorFor(definitions, tag)} title={tag}>{tag}</span>)}{tags.length > 3 && <span title={tags.slice(3).join("、")}>+{tags.length - 3}</span>}</span>;
+  return <span className="task-list-tags" aria-label="标签">{(expanded ? tags : tags.slice(0, 3)).map((tag) => <span key={tag} data-tag-color={colorFor(definitions, tag)} title={tag}>{tag}</span>)}{!expanded && tags.length > 3 && <span title={tags.slice(3).join("、")}>+{tags.length - 3}</span>}</span>;
 }

@@ -5,6 +5,7 @@ import vm from "node:vm";
 import ts from "typescript";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { SeparatedCopy } from "./copy-separator.test-helper.mjs";
 
 const appText = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", appText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -23,7 +24,7 @@ function collect(node) {
 collect(source);
 
 function loadCard(hooks = React, extra = {}) {
-  const state = { React, exports: {}, require: name => { assert.equal(name, "react"); return hooks; }, ...extra };
+  const state = { React, exports: {}, require: name => { if (name === "./copy-separator") return { SeparatedCopy }; assert.equal(name, "react"); return hooks; }, ...extra };
   vm.runInNewContext(compile(cardText), state);
   return state.exports;
 }
@@ -378,7 +379,7 @@ test("compact card CSS truncates notes to three lines and keeps copy feedback su
   assert.match(css, /\.timeline-hover-url \{[^}]*overflow: hidden;[^}]*-webkit-line-clamp: 2;/);
   assert.match(css, /\.interactive-hover-card \.timeline-hover-note \{ -webkit-line-clamp: 3;/);
   assert.doesNotMatch(css, /\.interactive-hover-card :is\(\.timeline-hover-url, \.timeline-hover-note\)[^}]*unset/);
-  assert.match(css, /\.interactive-hover-card \.timeline-hover-copy \{[^}]*width: 28px;[^}]*min-width: 28px;[^}]*cursor: pointer/);
+  assert.match(css, /\.timeline-copy-control > \.timeline-hover-copy \{[^}]*width: 28px;[^}]*min-width: 28px;[^}]*cursor: pointer/);
   assert.match(css, /\.timeline-copy-icon\.is-success \{ animation: timeline-copy-pop/);
   assert.match(css, /prefers-reduced-motion: reduce[^}]*\.timeline-copy-icon\.is-success \{ animation: none/);
 });

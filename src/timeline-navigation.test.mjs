@@ -3,14 +3,20 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const functions = new Map();
-let centerEffect;
+let centerEffect, monthWheelEffect;
 function collect(node) {
-  if (ts.isFunctionDeclaration(node) && ["selectCalendarDate", "openTimelineDate", "pauseTimelineFollowing", "shanghaiClockParts"].includes(node.name?.text)) functions.set(node.name.text, node.getText(source));
-  if (ts.isCallExpression(node) && node.expression.getText(source) === "useEffect" && node.arguments[0]?.getText(source).includes("const enteringDate = timelineEntryDateRef.current === selectedDate")) centerEffect = node.arguments[0].getText(source);
+  if (ts.isFunctionDeclaration(node) && ["calendarCells", "returnToday", "selectCalendarDate", "openTimelineDate", "moveMonth", "handleMonthWheel", "pauseTimelineFollowing", "shanghaiClockParts", "shanghaiDateValue", "shiftDateValue", "weekDateValues", "requestDateSelection", "refreshSchedule"].includes(node.name?.text)) functions.set(node.name.text, node.getText(source));
+  if (ts.isCallExpression(node) && node.expression.getText(source) === "useEffect") {
+    const effect = node.arguments[0]?.getText(source);
+    if (effect?.includes("const enteringDate = timelineEntryDateRef.current === selectedDate")) centerEffect = effect;
+    if (effect?.includes('sheet.addEventListener("wheel", handleMonthWheel')) monthWheelEffect = effect;
+  }
   ts.forEachChild(node, collect);
 }
 collect(source);
@@ -29,11 +35,15 @@ function harness(overrides = {}) {
     scrollTo(options) { calls.push({ ...options }); scroller.scrollTop = options.top; }
   };
   const state = {
-    today: "2026-10-21", selectedDate: "2026-10-21", monthKey: "2026-10", todayView: "month",
+    today: "2026-10-21", todayMonthKey: "2026-10", selectedDate: "2026-10-21", monthKey: "2026-10", todayView: "month",
     visible: true, loading: false, error: null, followingNow: false, timelineReturnContext: null,
+    planPreview: null,
     axisStart: 0, pixelsPerHour: 72, nowMinute: 15 * 60,
     timelineEntryDateRef: { current: null }, timelineCenteredDateRef: { current: "2026-10-21" },
     timelineScrollRef: { current: scroller },
+    monthSheetRef: { current: { scrollTop: 0, clientHeight: 500, scrollHeight: 500 } },
+    monthWheelGestureRef: { current: { delta: 0, lastAt: 0, flipped: false } },
+    setCalendarDateHint(value) { state.calendarDateHint = value; },
     Date: class extends Date { constructor(...args) { super(...(args.length ? args : ["2026-10-21T15:00:00+08:00"])); } },
     window: {
       requestAnimationFrame(fn) { frames.set(++frameId, fn); return frameId; },
@@ -43,7 +53,7 @@ function harness(overrides = {}) {
     onSelectDate(date) { state.selectedDate = date; return true; },
     ...overrides
   };
-  for (const key of ["todayView", "monthKey", "monthSelectionPending", "followingNow"]) state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = value; };
+  for (const key of ["todayView", "monthKey", "monthSelectionPending", "followingNow", "selectedDate", "scheduleLoading", "pendingPlanLeave"]) state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = value; };
   state.setClock = value => {
     state.clock = value;
     const { hour, minute } = state.shanghaiClockParts(value);
@@ -52,7 +62,8 @@ function harness(overrides = {}) {
   const context = vm.createContext(state);
   for (const code of functions.values()) vm.runInContext(compile(code), context);
   const effect = vm.runInContext(compile(`(${centerEffect})`), context);
-  return { state, calls, scroller, effect, flush() { const ready = [...frames.values()]; frames.clear(); ready.forEach(fn => fn()); } };
+  const wheelEffect = vm.runInContext(compile(`(${monthWheelEffect})`), context);
+  return { state, calls, scroller, effect, wheelEffect, flush() { const ready = [...frames.values()]; frames.clear(); ready.forEach(fn => fn()); } };
 }
 
 test("month double-click and keyboard entry share the current-time positioning handler", () => {
@@ -69,6 +80,66 @@ test("month double-click and keyboard entry share the current-time positioning h
     current.effect(); current.flush();
     assert.deepEqual(current.calls, [{ top: 854, behavior: "auto" }]);
     assert.equal(current.state.timelineEntryDateRef.current, null);
+  }
+});
+
+test("month date pointer selection preserves focus without scrolling the document", () => {
+  assert.match(text, /onPointerDown=\{\(event\) => \{ event\.preventDefault\(\); event\.currentTarget\.focus\(\{ preventScroll: true \}\); \}\}/);
+  assert.match(text, /onClick=\{\(\) => \{ setCalendarDateHint\(null\); selectCalendarDate\(cell\.key, true\); \}\}/);
+  assert.match(text, /onDoubleClick=\{\(\) => openTimelineDate\(cell\.key\)\}/);
+});
+
+test("adjacent-month clicks keep date cells stationary until the requested timeline opens", () => {
+  for (const [monthKey, date] of [["2026-11", "2026-10-29"], ["2026-11", "2026-12-01"], ["2027-01", "2026-12-31"]]) {
+    const { state } = harness({ monthKey, monthSelectionPending: true });
+    const cells = state.calendarCells(monthKey);
+    const index = cells.findIndex(cell => cell.key === date);
+    assert.ok(index >= 0);
+    for (let click = 0; click < 2; click++) {
+      assert.equal(state.selectCalendarDate(date, true), true);
+      assert.equal(state.selectedDate, date);
+      assert.equal(state.monthKey, monthKey);
+      assert.equal(state.monthSelectionPending, false);
+      assert.equal(state.todayView, "month");
+      assert.equal(state.calendarCells(state.monthKey)[index].key, date);
+    }
+    state.openTimelineDate(date);
+    assert.equal(state.selectedDate, date);
+    assert.equal(state.monthKey, date.slice(0, 7));
+    assert.equal(state.todayView, "timeline");
+    assert.equal(state.timelineEntryDateRef.current, date);
+  }
+});
+
+test("return today and timeline navigation still synchronize months; rejected clicks change nothing", () => {
+  const { state } = harness({ monthKey: "2026-11", selectedDate: "2026-10-29" });
+  state.returnToday();
+  assert.equal(state.selectedDate, state.today);
+  assert.equal(state.monthKey, state.todayMonthKey);
+  state.todayView = "timeline";
+  state.selectCalendarDate("2026-12-01");
+  assert.equal(state.monthKey, "2026-12");
+  const denied = harness({ monthKey: "2026-11", monthSelectionPending: true, onSelectDate() { return false; } });
+  assert.equal(denied.state.selectCalendarDate("2026-10-29", true), false);
+  assert.equal(denied.state.monthKey, "2026-11");
+  assert.equal(denied.state.monthSelectionPending, true);
+  assert.equal(denied.state.selectedDate, "2026-10-21");
+});
+
+test("only adjacent-month date numbers include an explicit month prefix", () => {
+  let dateNumber;
+  function find(node) {
+    if (ts.isJsxElement(node) && node.openingElement.attributes.properties.some(attr => ts.isJsxAttribute(attr) && attr.name.getText(source) === "className" && attr.initializer?.getText(source) === '"solar-day-number"')) dateNumber = node;
+    ts.forEachChild(node, find);
+  }
+  find(source);
+  assert.ok(dateNumber);
+  const context = vm.createContext({ React });
+  vm.runInContext(ts.transpileModule(`function renderDate(cell) { return (${dateNumber.getText(source)}); }`, { compilerOptions: { jsx: ts.JsxEmit.React } }).outputText, context);
+  for (const [key, inMonth, expected] of [["2026-10-29", false, "10月29"], ["2026-12-01", false, "12月1"], ["2026-11-01", true, "1"]]) {
+    const html = renderToStaticMarkup(context.renderDate({ key, day: Number(key.slice(8)), inMonth }));
+    assert.equal(html.replace(/<[^>]+>/g, ""), expected);
+    assert.equal(html.includes('class="calendar-month-prefix"'), !inMonth);
   }
 });
 
@@ -158,4 +229,164 @@ test("midnight and late-night positions clamp to scroll bounds; rejected navigat
   assert.equal(denied.state.timelineEntryDateRef.current, null);
   denied.effect(); denied.flush();
   assert.deepEqual(denied.calls, []);
+});
+
+function wheel(state, timeStamp, deltaY, extra = {}) {
+  const event = { timeStamp, deltaY, deltaX: 0, deltaMode: 0, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...extra };
+  state.handleMonthWheel(event);
+  return event;
+}
+
+test("month wheel navigation crosses year boundaries without selecting a date", () => {
+  const { state } = harness({ monthKey: "2026-12", calendarDateHint: { date: "2026-12-01" } });
+  assert.equal(wheel(state, 1000, 100).defaultPrevented, true);
+  assert.equal(state.monthKey, "2027-01");
+  assert.equal(state.selectedDate, "2026-10-21");
+  assert.equal(state.monthSelectionPending, true);
+  assert.equal(state.calendarDateHint, null);
+  wheel(state, 2000, -100);
+  assert.equal(state.monthKey, "2026-12");
+  state.monthKey = "2027-01";
+  wheel(state, 3000, -100);
+  assert.equal(state.monthKey, "2026-12");
+  state.monthKey = "2026-11";
+  wheel(state, 4000, -100);
+  assert.equal(state.monthKey, "2026-10");
+  assert.equal(state.monthSelectionPending, false);
+});
+
+test("trackpad deltas accumulate but a continuous gesture including inertia flips only once", () => {
+  const { state } = harness();
+  wheel(state, 1000, 10);
+  wheel(state, 1050, 15);
+  assert.equal(state.monthKey, "2026-10");
+  wheel(state, 1100, 15);
+  assert.equal(state.monthKey, "2026-11");
+  for (let time = 1150; time < 3000; time += 50) assert.equal(wheel(state, time, 25).defaultPrevented, true);
+  assert.equal(state.monthKey, "2026-11");
+  wheel(state, 3300, 40);
+  assert.equal(state.monthKey, "2026-12");
+});
+
+test("wheel noise, stale deltas and direction changes do not trigger an accidental flip", () => {
+  const { state } = harness();
+  wheel(state, 1000, 30);
+  wheel(state, 1400, 20);
+  assert.equal(state.monthKey, "2026-10");
+  wheel(state, 1450, -30);
+  assert.equal(state.monthKey, "2026-10");
+  wheel(state, 1500, -10);
+  assert.equal(state.monthKey, "2026-09");
+});
+
+test("overflowing month content scrolls normally until the directional edge", () => {
+  const { state } = harness();
+  const sheet = state.monthSheetRef.current;
+  Object.assign(sheet, { scrollTop: 200, scrollHeight: 1000, clientHeight: 500 });
+  for (const delta of [-120, 120]) {
+    assert.equal(wheel(state, 1000, delta).defaultPrevented, false);
+    assert.equal(state.monthKey, "2026-10");
+  }
+  sheet.scrollTop = 500;
+  assert.equal(wheel(state, 2000, 120).defaultPrevented, true);
+  assert.equal(state.monthKey, "2026-11");
+  sheet.scrollTop = 0;
+  wheel(state, 3000, -120);
+  assert.equal(state.monthKey, "2026-10");
+});
+
+test("month wheel ignores zoom, modifier keys, horizontal scrolling and handled events", () => {
+  for (const extra of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { deltaX: 200 }, { deltaY: 0 }, { defaultPrevented: true }]) {
+    const { state } = harness();
+    wheel(state, 1000, 100, extra);
+    assert.equal(state.monthKey, "2026-10");
+    assert.equal(state.monthWheelGestureRef.current.lastAt, 0);
+  }
+});
+
+test("month wheel normalizes line and page delta units", () => {
+  for (const [deltaMode, deltaY] of [[1, 3], [2, 1]]) {
+    const { state } = harness();
+    wheel(state, 1000, deltaY, { deltaMode });
+    assert.equal(state.monthKey, "2026-11");
+  }
+});
+
+test("month wheel listener is non-passive, month-only and removed on cleanup", () => {
+  const listeners = new Map();
+  const sheet = {
+    addEventListener(type, handler, options) { assert.equal(type, "wheel"); assert.equal(options.passive, false); listeners.set(type, handler); },
+    removeEventListener(type, handler) { assert.equal(listeners.get(type), handler); listeners.delete(type); }
+  };
+  const { wheelEffect } = harness({ monthSheetRef: { current: sheet } });
+  const cleanup = wheelEffect();
+  assert.equal(listeners.size, 1);
+  cleanup();
+  assert.equal(listeners.size, 0);
+  for (const flags of [{ visible: false }, { todayView: "timeline" }, { monthSheetRef: { current: null } }]) {
+    const current = harness({ monthSheetRef: { current: sheet }, ...flags });
+    assert.equal(current.wheelEffect(), undefined);
+    assert.equal(listeners.size, 0);
+  }
+  assert.match(text, /<section ref=\{monthSheetRef\} className="month-sheet today-month-sheet"/);
+});
+
+test("day arrows cross weeks, months and years through the guarded selection entry without changing today", () => {
+  for (const [start, offset, expected] of [["2026-10-31", 1, "2026-11-01"], ["2026-11-01", 1, "2026-11-02"], ["2026-12-31", 1, "2027-01-01"], ["2027-01-01", -1, "2026-12-31"]]) {
+    const { state } = harness({ selectedDate: start, monthKey: start.slice(0, 7), todayView: "timeline" });
+    state.onSelectDate = state.requestDateSelection;
+    assert.equal(state.selectCalendarDate(state.shiftDateValue(state.selectedDate, offset)), true);
+    assert.equal(state.selectedDate, expected);
+    assert.equal(state.monthKey, expected.slice(0, 7));
+    assert.equal(state.scheduleLoading, true);
+    assert.ok(state.weekDateValues(state.selectedDate).includes(expected));
+    assert.equal(state.today, "2026-10-21");
+    state.returnToday();
+    assert.equal(state.selectedDate, state.today);
+    assert.equal(state.monthKey, state.todayMonthKey);
+    assert.equal(state.todayView, "timeline");
+  }
+});
+
+test("draft protection rejects both day arrows and return-today without changing date or month", () => {
+  for (const action of [state => state.selectCalendarDate(state.shiftDateValue(state.selectedDate, 1)), state => state.returnToday()]) {
+    const { state } = harness({ selectedDate: "2026-10-31", monthKey: "2026-10", monthSelectionPending: true, scheduleLoading: false, planPreview: { plan_date: "2026-10-31" } });
+    state.onSelectDate = state.requestDateSelection;
+    action(state);
+    assert.equal(state.selectedDate, "2026-10-31");
+    assert.equal(state.monthKey, "2026-10");
+    assert.equal(state.monthSelectionPending, true);
+    assert.equal(state.scheduleLoading, false);
+    assert.equal(state.pendingPlanLeave.kind, "date");
+    assert.ok(["2026-11-01", state.today].includes(state.pendingPlanLeave.date));
+  }
+});
+
+test("late schedules and stale failures cannot overwrite the newly selected day's content", async () => {
+  const pending = new Map(), calls = [];
+  const state = {
+    selectedDate: "2026-10-31", selectedDateRef: { current: "2026-10-31" },
+    getDaySchedule(date) { calls.push(date); return new Promise((resolve, reject) => pending.set(date, { resolve, reject })); },
+    getRulePlanDraft(date) { return { plan_date: date }; },
+    listRecurringOccurrences(date) { return [date]; },
+    uiErrorMessage(reason) { return reason.message; }
+  };
+  for (const key of ["scheduleLoading", "scheduleError", "daySchedule", "planPreview", "recurringOccurrences"]) state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = value; };
+  const context = vm.createContext(state);
+  vm.runInContext(compile(functions.get("refreshSchedule")), context);
+  const oldRequest = state.refreshSchedule("2026-10-31");
+  const staleFailure = state.refreshSchedule("2026-10-30");
+  state.selectedDateRef.current = "2026-11-01";
+  const newRequest = state.refreshSchedule("2026-11-01");
+  pending.get("2026-11-01").resolve({ date: "2026-11-01" });
+  await newRequest;
+  pending.get("2026-10-31").resolve({ date: "2026-10-31" });
+  pending.get("2026-10-30").reject(new Error("stale failure"));
+  await Promise.all([oldRequest, staleFailure]);
+  assert.deepEqual(calls, ["2026-10-31", "2026-10-30", "2026-11-01"]);
+  assert.equal(state.daySchedule.date, "2026-11-01");
+  assert.equal(state.planPreview.plan_date, "2026-11-01");
+  assert.deepEqual(state.recurringOccurrences, ["2026-11-01"]);
+  assert.equal(state.scheduleError, null);
+  assert.equal(state.scheduleLoading, false);
 });

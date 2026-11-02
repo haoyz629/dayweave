@@ -20,11 +20,11 @@ function declarations(selector) {
 test("compact cards use list-scoped spacing, rounded borders and distinct selection", () => {
   const row = declarations(`${list} .ledger-row.task-capsule-row`);
   assert.equal(row.width, "calc(100% - 24px)");
-  assert.equal(row.margin, "10px 12px 0");
+  assert.equal(row.margin, "6px 12px 0");
   assert.equal(row.border, "1px solid var(--task-card-border)");
   assert.equal(row["border-radius"], "14px");
   assert.equal(row.background, "var(--task-card-bg)");
-  assert.equal(declarations(`${list} .task-capsule-content`).padding, "14px 14px 12px");
+  assert.equal(declarations(`${list} .task-capsule-content`).padding, "10px 10px 8px");
   const selected = declarations(`${list} .ledger-row.task-capsule-row.selected`);
   assert.equal(selected["border-color"], "var(--task-card-selected-border)");
   assert.equal(selected.background, "var(--task-card-selected-bg)");
@@ -47,16 +47,17 @@ test("every card palette token is local to the list and has a dark value", () =>
   });
 });
 
-test("title metadata stays visible and reserves room for one or two hover actions", () => {
+test("single-line titles reserve room for metadata, not quick actions", () => {
   const heading = declarations(`${list} .task-capsule-heading`);
-  assert.equal(heading["padding-right"], "var(--task-card-actions-space, 0px)");
-  assert.equal(heading["flex-wrap"], "wrap");
-  assert.equal(declarations(`${list} .task-capsule-heading-meta`).opacity, "1");
-  const single = declarations(`${list} .task-capsule-row:has(.ledger-row-actions > button)`);
-  const double = declarations(`${list} .task-capsule-row:has(.ledger-row-actions > button:nth-child(2))`);
-  assert.ok(parseInt(single["--task-card-actions-space"]) >= 60);
-  assert.ok(parseInt(double["--task-card-actions-space"]) > parseInt(single["--task-card-actions-space"]));
-  assert.equal(declarations(`${list} .task-capsule-heading > strong`)["font-size"], "16px");
+  assert.equal(heading["flex-wrap"], "nowrap");
+  assert.equal(heading["padding-right"], undefined);
+  const title = declarations(".task-capsule-heading > strong");
+  assert.equal(title["text-overflow"], "ellipsis");
+  assert.equal(title["white-space"], "nowrap");
+  assert.equal(declarations(`${list} .task-capsule-heading-meta`)["max-width"], "62%");
+  assert.equal(declarations(`${list} .task-capsule-heading > strong`)["font-size"], "15px");
+  assert.match(app, /sourceType === "ai_assistant" && <span/);
+  assert.doesNotMatch(app, /aria-label=\{sourceType === "ai_assistant" \? "AI 创建" : "手动创建"/);
 });
 
 test("long dates and workload can wrap instead of colliding with the status", () => {
@@ -66,19 +67,24 @@ test("long dates and workload can wrap instead of colliding with the status", ()
   assert.equal(declarations(`${list} .task-capsule-status`)["min-height"], "24px");
 });
 
-test("hover actions keep pointer and keyboard activation without sticking after clicks", () => {
-  const hidden = declarations(".ledger-row-actions");
-  assert.equal(hidden.opacity, "0");
-  assert.equal(hidden["pointer-events"], "none");
+test("quick actions appear directly at the upper right on hover or keyboard focus", () => {
+  const actions = declarations(`${list} .task-capsule-row .ledger-row-actions`);
+  assert.equal(actions.top, "8px");
+  assert.equal(actions.right, "8px");
+  assert.equal(actions.bottom, undefined);
+  assert.equal(declarations(".ledger-row-actions").opacity, "0");
+  assert.equal(declarations(".ledger-row-actions")["pointer-events"], "none");
   assert.match(css, /\.task-ledger-row:hover \.ledger-row-actions, \.task-ledger-row:has\(:focus-visible\) \.ledger-row-actions/);
-  assert.doesNotMatch(css, /\.task-ledger-row:focus-within \.ledger-row-actions/);
-  assert.match(css, /@media \(hover: none\) \{\s*\.next-workspace \.task-ledger-list \.task-capsule-row \.ledger-row-actions \{ opacity: 1; pointer-events: auto; transform: none;/);
+  assert.equal(declarations(`${list} .task-capsule-footer`)["padding-right"], undefined);
+  assert.doesNotMatch(app, /TaskCardActions|task-card-action-menu/);
+  assert.doesNotMatch(css, /task-card-action-menu/);
+  assert.equal((app.match(/<div className="ledger-row-actions"/g) || []).length, 4);
 });
 
 test("deadline icon, filter control and persisted list width keep their existing behavior", () => {
   assert.match(app, /<Icon name=\{deadline \? "clock" : icon\} size=\{13\}/);
   assert.match(app, /className=\{`queue-filter-button/);
-  assert.match(app, /const TASK_LEDGER_LIST_DEFAULT_WIDTH = 320;/);
+  assert.match(app, /const TASK_LEDGER_LIST_DEFAULT_WIDTH = 340;/);
   assert.match(app, /const TASK_LEDGER_WIDTH_SETTING = "ui.task_ledger_list_width";/);
   for (const tone of ["open", "scheduled", "not_completed"]) {
     assert.ok(declarations(`${list} .task-capsule-status.status-${tone}`).color);

@@ -5,6 +5,7 @@ import vm from "node:vm";
 import ts from "typescript";
 import React from "react";
 import { recurringTimeBlockIssue, recurringOccurrenceInput, recurringChangeIssue, recurringTimeRange, recurringClockRange, recurringRangeInput } from "./recurring-schedule.ts";
+import { CopySeparator } from "./copy-separator.test-helper.mjs";
 
 const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -158,7 +159,7 @@ test("scope confirmation shows target only at save, offers both scopes and no co
   const dialogSource = ts.createSourceFile("dialog.tsx", dialogText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const fn = dialogSource.statements.find(node => ts.isFunctionDeclaration(node));
   const scopes = [];
-  const state = { React, createPortal: node => node, ConfirmationDialog: () => null, recurringTimeRange, document: { body: {} }, change: change(), scopes };
+  const state = { React, CopySeparator, createPortal: node => node, ConfirmationDialog: () => null, recurringTimeRange, document: { body: {} }, change: change(), scopes };
   vm.runInNewContext(compile(fn.getText(dialogSource).replace(/^export /, "")), state);
   const tree = state.RecurringScopeConfirmation({ change: change(), busy: false, error: "", onCancel() {}, onConfirm: scope => scopes.push(scope) });
   const dialog = tree.props.children;

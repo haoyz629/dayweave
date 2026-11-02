@@ -2,6 +2,7 @@ import { createPortal } from "react-dom";
 import { ConfirmationDialog } from "./feedback";
 import { recurringTimeRange } from "./recurring-schedule";
 import type { RecurringEditScope, RecurringScheduleChange } from "./recurring-schedule";
+import { CopySeparator } from "./copy-separator";
 
 export function RecurringScopeConfirmation({ change, busy, error, onCancel, onConfirm }: {
   change: RecurringScheduleChange;
@@ -16,7 +17,7 @@ export function RecurringScopeConfirmation({ change, busy, error, onCancel, onCo
     <h2 id="recurring-change-title">修改哪些重复任务块？</h2>
     <div id="recurring-change-description">
       <p>本次安排：{change.occurrence.occurrence_date} {recurringTimeRange(change.occurrence)}</p>
-      <p>修改为：{change.targetDate} {recurringTimeRange(change.input)} · {change.input.title}</p>
+      <p>修改为：{change.targetDate} {recurringTimeRange(change.input)}<CopySeparator />{change.input.title}</p>
       <p>历史任务块保持不变。仅修改这一次不会改变重复规则；选择本次及未来，将从这一次起应用新的安排。</p>
     </div>
     {error && <p className="plan-draft-edit-error" role="alert">{error}</p>}

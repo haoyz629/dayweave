@@ -127,7 +127,7 @@ function createHost(initial = [], overrides = {}) {
       editor = mount(exports.TaskTagEditor, { tags: [], disabled: false, id: "tags", onChange(tags) { editor.changes.push(tags); editor.props.tags = tags; }, ...props });
       return editor;
     },
-    list(tags) { return mount(exports.TaskTagList, { tags }); },
+    list(tags, expanded = false) { return mount(exports.TaskTagList, { tags, expanded }); },
     fire(name, event) { for (const listener of listeners.get(name) ?? []) listener(event); }
   };
 }
@@ -148,6 +148,25 @@ async function open(editor) {
   await settle();
   editor.render();
 }
+
+test("detail can show every tag while list defaults retain three tags and an overflow count", async () => {
+  const tags = ["开发", "界面优化", "本周重点", "待讨论", "长标签".repeat(10)];
+  const before = [...tags];
+  const host = createHost(tags.map((name, color) => ({ name, color })));
+  const list = host.list(tags), detail = host.list(tags, true);
+  await settle();
+  list.render(); detail.render();
+  const chips = (instance) => nodes(instance.tree, node => node.type === "span" && "data-tag-color" in node.props);
+  assert.deepEqual(chips(list).map(node => node.props.children), tags.slice(0, 3));
+  const overflow = nodes(list.tree, node => node.type === "span" && node.props.title === tags.slice(3).join("、"));
+  assert.equal(overflow.length, 1);
+  assert.deepEqual(overflow[0].props.children, ["+", 2]);
+  assert.deepEqual(chips(detail).map(node => node.props.children), tags);
+  assert.deepEqual(chips(detail).map(node => node.props["data-tag-color"]), [0, 1, 2, 3, 4]);
+  assert.equal(nodes(detail.tree, node => node.type === "span" && node.props.title === tags.slice(3).join("、")).length, 0);
+  assert.equal(host.list([], true).tree, null);
+  assert.deepEqual(tags, before);
+});
 
 test("all editors use a dropdown, rows share one initial request and persisted colors", async () => {
   const host = createHost([{ name: "Work", color: 3 }]);
@@ -383,9 +402,12 @@ test("only the eight preset color indices are rendered; light and dark palettes 
   assert.equal(nodes(row.tree, (node) => node.props.title === "unsafe")[0].props["data-tag-color"], undefined);
   assert.equal(nodes(row.tree, (node) => node.props.title === "safe")[0].props["data-tag-color"], 0);
   const css = readFileSync(new URL("./task-tags.css", import.meta.url), "utf8");
+  const palette = readFileSync(new URL("./color-system.css", import.meta.url), "utf8");
+  const families = ["blue", "purple", "pink", "orange", "yellow", "green", "cyan", "gray"];
   for (let color = 0; color < 8; color++) {
     assert.ok(css.includes(`[data-tag-color="${color}"] { --task-tag-ink:`));
-    assert.ok(css.includes(`html[data-mode="dark"] [data-tag-color="${color}"] { --task-tag-ink:`));
+    assert.ok(css.includes(`--task-tag-ink: var(--color-${families[color]}-ink)`));
+    assert.equal((palette.match(new RegExp(`--color-${families[color]}-ink:`, "g")) ?? []).length, 2);
   }
   assert.match(css, /\.task-tag-search-header \{[^}]*flex: none/);
   assert.match(css, /\.task-tag-scroll-area \{[^}]*overflow-y: auto/);

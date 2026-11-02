@@ -1,0 +1,73 @@
+/* Approved integrated chrome; semantic colors stay owned by color-system.css. */
+.desktop-app { --app-titlebar-height: 56px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+.desktop-app > .next-shell { flex: 1; height: calc(100vh - var(--app-titlebar-height)); min-height: 0; }
+.desktop-app .next-sidebar, .desktop-app .shell-divider, .desktop-app .next-workspace { height: 100%; min-height: 0; }
+.desktop-app .today-workspace { height: 100%; }
+.desktop-app .next-workspace > .settings-page, .desktop-app .next-workspace > .review-page { min-height: 100%; }
+.app-titlebar { position: relative; z-index: 15; display: flex; height: var(--app-titlebar-height); flex: 0 0 var(--app-titlebar-height); align-items: center; justify-content: space-between; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--color-edge); color: var(--color-ink); background: var(--color-group); user-select: none; }
+.app-titlebar .product-brand { min-width: 0; }
+.app-titlebar .product-brand-heading { display: flex; align-items: center; gap: 12px; }
+.app-titlebar .product-brand-logo { flex: none; width: 44px; height: 44px; }
+.app-titlebar .product-brand-logo img { width: 100%; height: 100%; }
+.app-titlebar .product-brand-text { min-width: 0; }
+.app-titlebar .product-brand-name-row { display: flex; align-items: center; gap: 10px; }
+.app-titlebar .product-brand-week { display: inline-flex; flex: none; align-items: center; min-height: 20px; padding: 0 7px; border: 1px solid var(--color-blue-edge); border-radius: 99px; color: var(--color-blue-ink); background: var(--color-blue-bg); font: 500 10px/16px var(--jx-font-sans); white-space: nowrap; }
+.app-titlebar .product-brand-name { margin: 0; color: var(--color-ink); font: 650 15px/18px var(--jx-font-sans); white-space: nowrap; }
+.app-titlebar .product-brand-copy { margin: 2px 0 0; color: var(--color-muted); font: 400 12px/16px var(--jx-font-sans); white-space: nowrap; }
+.app-view-slot { position: absolute; left: calc(50% + 62px); top: 11px; transform: translateX(-50%); }
+.app-titlebar .timeline-view-switch { width: 204px; height: 34px; padding: 3px; border: 1px solid var(--color-edge); border-radius: 8px; background: var(--color-panel); }
+.app-titlebar .timeline-view-switch button { width: 64px; min-height: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; color: var(--color-muted); background: transparent; font: 500 12px/26px var(--jx-font-sans); }
+.app-titlebar .timeline-view-switch button:hover { color: var(--color-ink); background: var(--color-hover); }
+.app-titlebar .timeline-view-switch button.is-active { color: var(--color-selected-ink); background: var(--color-selected-bg); box-shadow: none; font-weight: 600; }
+.app-titlebar-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.app-window-divider { width: 1px; height: 22px; background: var(--color-edge); }
+.app-window-controls { display: flex; gap: 2px; }
+.app-window-controls button { display: grid; width: 30px; height: 30px; place-items: center; padding: 0; border: 0; border-radius: 5px; color: var(--color-muted); background: transparent; }
+.app-window-controls button:hover { color: var(--color-ink); background: var(--color-hover); }
+.app-window-controls .app-window-close:hover { color: #fff; background: #c42b35; }
+.app-window-controls svg { fill: none; stroke: currentColor; stroke-width: 1; }
+.desktop-app .today-page .is-timeline-view .timeline-design-topbar { min-height: 80px; margin: 0; padding: 12px 26px 12px 25px; gap: 16px; align-items: center; flex-direction: row; border-bottom: 0; }
+.desktop-app .timeline-date-copy { display: flex; flex-direction: column; gap: 4px; }
+.timeline-date-primary { display: flex; align-items: center; flex-wrap: nowrap; gap: 12px; }
+.desktop-app .today-page .timeline-day-title { margin: 0; font: 650 22px/28px "Segoe UI", "Microsoft YaHei", sans-serif; letter-spacing: .1px; white-space: nowrap; }
+.desktop-app .today-page .timeline-date-meta.timeline-day-subline { margin: 0; gap: 6px; align-items: baseline; color: var(--color-muted); font: 400 12px/18px "Segoe UI", "Microsoft YaHei", sans-serif; }
+.desktop-app .today-page .timeline-day-subline > span { color: inherit; }
+.desktop-app .today-page .timeline-day-subline > .timeline-term-chip { padding: 0; border: 0; border-radius: 0; color: inherit; background: transparent; font: inherit; }
+.timeline-date-navigation { display: inline-flex; height: 30px; flex: none; align-items: center; padding: 2px; border: 1px solid var(--color-edge); border-radius: 7px; background: var(--color-panel); }
+.timeline-date-navigation button { display: grid; min-width: 26px; height: 24px; place-items: center; padding: 0 7px; border: 0; border-radius: 4px; color: var(--color-muted); background: transparent; font: 500 11px/24px var(--jx-font-sans); }
+.timeline-date-navigation .timeline-return-today { width: 60px; flex: 0 0 60px; white-space: nowrap; }
+.timeline-date-navigation button:hover { color: var(--color-ink); background: var(--color-hover); }
+.desktop-app .timeline-heading { flex: 1 1 304px; flex-wrap: nowrap; }
+.desktop-app .timeline-top-actions { flex: none; margin-left: auto; }
+.timeline-heading-plan-status { display: flex; flex: 0 0 96px; min-height: 24px; align-items: center; }
+html:root .desktop-app .today-page .timeline-heading-plan-status .confirmed-plan-status { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 24px; margin: 0; padding: 0 7px; border: 1px solid var(--color-plan-edge); border-radius: 6px; color: var(--color-plan-ink); background: var(--color-plan-bg); font-size: 11px; font-weight: 400; line-height: 16px; }
+.timeline-heading-plan-status .confirmed-plan-status > svg { display: block; flex: none; }
+@media (max-width: 1100px) {
+  .desktop-app .today-page .is-timeline-view .timeline-design-topbar { padding-block: 12px; }
+  .desktop-app .timeline-top-actions { margin-left: auto; }
+}
+@media (max-width: 860px) {
+  .desktop-app .next-workspace { overflow-y: auto; }
+  .desktop-app .next-sidebar { top: var(--app-titlebar-height); height: calc(100vh - var(--app-titlebar-height)); }
+  .desktop-app .nav-backdrop { top: var(--app-titlebar-height); }
+  .desktop-app .today-schedule-pane > .today-page { min-height: 100%; }
+  .app-titlebar .product-brand-copy { display: none; }
+  .app-titlebar .product-brand-logo { width: 30px; height: 30px; }
+  .app-titlebar .product-brand-heading { gap: 7px; }
+  .app-titlebar .product-brand-name { font-size: 13px; }
+  .app-view-slot { left: 50%; }
+}
+@media (max-width: 660px) {
+  .app-titlebar .product-brand-week { display: none; }
+}
+@media (max-width: 600px) {
+  .app-titlebar { gap: 6px; padding-inline: 8px; }
+  .app-titlebar .product-brand-text { display: none; }
+  .app-view-slot { left: 45%; }
+  .app-titlebar .timeline-view-switch button { width: 54px; }
+  .app-titlebar-actions { gap: 5px; }
+  .app-window-controls { gap: 0; }
+  .app-window-controls button { width: 26px; }
+  .app-window-divider { margin-inline: 2px; }
+  .desktop-app .today-page .is-timeline-view .timeline-design-topbar { padding: 12px 16px; }
+}

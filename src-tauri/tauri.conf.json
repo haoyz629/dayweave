@@ -10,7 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "create": false, "title": "今序 · Dayweave", "width": 1280, "height": 800, "minWidth": 960, "minHeight": 640 }],
+    "windows": [{ "create": false, "title": "今序 · Dayweave", "decorations": false, "width": 1280, "height": 800, "minWidth": 960, "minHeight": 640 }],
     "security": { "csp": "default-src 'self'; connect-src 'self' https: http:; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'" }
   },
   "bundle": {

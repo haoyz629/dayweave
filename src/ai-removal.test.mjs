@@ -5,6 +5,7 @@ import vm from "node:vm";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
+import { CopySeparator } from "./copy-separator.test-helper.mjs";
 
 const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", app, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -17,7 +18,7 @@ function renderSettings(availability, availabilityError = null) {
     compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React }
   }).outputText;
   const context = vm.createContext({
-    React,
+    React, CopySeparator,
     useState: React.useState,
     useEffect: React.useEffect,
     useRef: React.useRef,
@@ -78,5 +79,5 @@ test("manual creation, drafts, scheduling and historical task provenance remain 
   }
   assert.match(app, /<TaskWorkspace\b/);
   assert.match(app, /<TodayPage\b/);
-  assert.match(app, /source_type === "ai_assistant" \? "AI 创建" : "手动创建"/);
+  assert.match(app, /sourceType === "ai_assistant" && <span[^>]*aria-label="AI 创建"/);
 });

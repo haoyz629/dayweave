@@ -73,12 +73,27 @@ test("busy cancel cannot discard an in-flight edit", () => {
   assert.equal(state.draft.title, "未保存标题");
 });
 
-test("ordinary detail grid allows shrinking without changing recurring-item layouts", () => {
+test("ordinary detail grid preserves both pane minimums without changing recurring-item layouts", () => {
   const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
-  assert.match(css, /@media \(min-width: 861px\) \{\s*\.task-ledger:has\(\.ordinary-task-detail\) \{ grid-template-columns: [^;]*minmax\(0, 1fr\);/);
+  assert.match(css, /@media \(min-width: 861px\) \{\s*\.task-ledger:has\(\.ordinary-task-detail\) \{ grid-template-columns: minmax\(320px, min\(var\(--task-list-width\), calc\(100% - 394px\)\)\) 14px minmax\(380px, 1fr\);/);
 });
 
-test("default details retain the return-to-timeline entry outside edit mode", () => {
-  assert.match(text, /timelineReturnContext && selectedTask && \(!taskDetailEditing \|\| !editingTaskForm/);
-  assert.match(text, /onClick=\{\(\) => onReturnToTimeline\(timelineReturnContext\)\}/);
+test("default details keep the contextual return action in the shared page header", () => {
+  assert.match(text, /<CompletedTaskDetails[^\n]*onBack=\{timelineReturnContext \? \(\) => onReturnToTimeline\(timelineReturnContext\) : undefined\}/);
+  assert.match(text, /<DeletedTaskDetails[^\n]*onBack=\{timelineReturnContext \? \(\) => onReturnToTimeline\(timelineReturnContext\) : undefined\}/);
+});
+
+test("detail and edit headers share a fixed centered bar outside the form column inset", () => {
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.task-compact-header\.task-page-header \{[^}]*height: 56px;[^}]*min-height: 56px;[^}]*flex: 0 0 56px;[^}]*align-items: center;[^}]*padding: 0 24px;/);
+  assert.match(css, /:is\(\.task-compact-header:not\(\.task-page-header\), \.task-compact-actions\)/);
+  assert.match(css, /\.task-page-header \.task-detail-breadcrumb \{[^}]*align-items: center;[^}]*line-height: 20px;/);
+});
+
+test("ordinary creation and editing share expandable notes instead of a fixed-height empty tail", () => {
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  const shared = css.match(/:is\(#new-task-form, #task-editor-form\) \.task-notes-region \{([^}]+)\}/);
+  assert.ok(shared, "new and edited ordinary tasks must use the same notes growth rule");
+  assert.match(shared[1], /flex: 1 0 150px;/);
+  assert.match(shared[1], /height: auto;/);
 });

@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { CopySeparator } from './copy-separator.test-helper.mjs';
 
 const task={id:'old-task',title:'开发任务',priority:'high',tags:['工作'],notes:'不复制的旧备注',status:'scheduled'};
 
@@ -47,8 +48,8 @@ test('execution record component keeps facts and offers new task without relatio
 
 test('unfinished record new-task button remains available after its result window expires',()=>{
   const text=readFileSync(new URL('./task-lineage.tsx',import.meta.url),'utf8');
-  const code=ts.transpileModule(text.replace(/^import type[^\n]*\n/,'').replace('export function','function'),{compilerOptions:{jsx:ts.JsxEmit.React,target:ts.ScriptTarget.ES2022}}).outputText;
-  const context=vm.createContext({React});
+  const code=ts.transpileModule(text.replace(/^import[^\n]*\n/gm,'').replace('export function','function'),{compilerOptions:{jsx:ts.JsxEmit.React,target:ts.ScriptTarget.ES2022}}).outputText;
+  const context=vm.createContext({React, CopySeparator});
   vm.runInContext(code,context);
   let calls=0;
   const oldFact={plan_date:'2020-01-01',outcome:'not_started',note:'旧执行备注'};

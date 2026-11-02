@@ -1,4 +1,5 @@
 import { RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { SeparatedCopy } from "./copy-separator";
 
 export type TimelineTooltipContent = {
   kind: "普通任务" | "单日任务" | "多日任务" | "任务安排" | "计划草案" | "固定日程" | "重复事项" | "待安排任务" | "非工作时间";
@@ -157,6 +158,6 @@ export function TaskTimelineHoverCard({ content, cardRef, onPointerEnter, onPoin
         <TimelineHoverCopyButton field="note" text={content.note} targetRef={noteRef} />
       </section>}
     </div>}
-    {content.detail && <p>{content.detail}</p>}
+    {content.detail && <p><SeparatedCopy text={content.detail} /></p>}
   </aside>;
 }

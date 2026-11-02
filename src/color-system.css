@@ -1,0 +1,426 @@
+/* Approved direction A. Business colors stay stable across pages and appearance themes. */
+html:root {
+  color-scheme: light;
+  --color-canvas: #eef2f6;
+  --color-group: #f6f8fb;
+  --color-panel: #ffffff;
+  --color-raised: #ffffff;
+  --color-ink: #172b4d;
+  --color-muted: #4a5c75;
+  --color-edge: #bdc9d8;
+  --color-hover: #e3ebf5;
+  --color-selected-bg: #dce9ff;
+  --color-selected-ink: #1544a5;
+  --color-selected-edge: #6c92da;
+  --color-primary: #3168dc;
+  --color-primary-hover: #285bc4;
+  --color-mask: rgb(20 38 61 / 60%);
+  --color-blue-bg: #dceaff;
+  --color-blue-ink: #1544a5;
+  --color-blue-edge: #9fc2ff;
+  --color-blue-solid: #3168dc;
+  --color-plan-bg: #d6f2fa;
+  --color-plan-ink: #07556f;
+  --color-plan-edge: #8acddd;
+  --color-plan-solid: #176681;
+  --color-green-bg: #d6f2e3;
+  --color-green-ink: #14603d;
+  --color-green-edge: #95d5b2;
+  --color-green-solid: #247349;
+  --color-amber-bg: #ffedbf;
+  --color-amber-ink: #79500a;
+  --color-amber-edge: #e8c66b;
+  --color-amber-solid: #805d17;
+  --color-orange-bg: #ffe0ca;
+  --color-orange-ink: #943909;
+  --color-orange-edge: #efa874;
+  --color-orange-solid: #ad4e16;
+  --color-red-bg: #ffdde2;
+  --color-red-ink: #9e233c;
+  --color-red-edge: #efa2b0;
+  --color-red-solid: #b33753;
+  --color-teal-bg: #d3efec;
+  --color-teal-ink: #135e59;
+  --color-teal-edge: #8fcec6;
+  --color-teal-solid: #1a756c;
+  --color-gray-bg: #e4e9f0;
+  --color-gray-ink: #465568;
+  --color-gray-edge: #bac5d3;
+  --color-gray-solid: #52647a;
+  --color-purple-bg: #e9e1ff;
+  --color-purple-ink: #5730a5;
+  --color-purple-edge: #c7aff7;
+  --color-pink-bg: #f8dfef;
+  --color-pink-ink: #813d69;
+  --color-pink-edge: #ba84a6;
+  --color-yellow-bg: #fff0b8;
+  --color-yellow-ink: #664c04;
+  --color-yellow-edge: #b1a05b;
+  --color-cyan-bg: #d7f1f7;
+  --color-cyan-ink: #09536b;
+  --color-cyan-edge: #729eac;
+
+  --app-workspace-bg: var(--color-canvas);
+  --app-sidebar-bg: var(--color-group);
+  --jx-paper: var(--color-canvas);
+  --jx-surface: var(--color-group);
+  --jx-raised: var(--color-raised);
+  --jx-edge: var(--color-edge);
+  --jx-edge-soft: var(--color-gray-edge);
+  --jx-ink: var(--color-ink);
+  --jx-ink-soft: var(--color-muted);
+  --jx-muted: var(--color-muted);
+  --jx-focus: var(--color-primary);
+  --jx-focus-soft: var(--color-selected-bg);
+  --surface: var(--color-panel);
+  --surface-dim: var(--color-gray-bg);
+  --surface-bright: var(--color-raised);
+  --surface-container-lowest: var(--color-panel);
+  --surface-container-low: var(--color-group);
+  --surface-container: var(--color-canvas);
+  --surface-container-high: var(--color-gray-bg);
+  --surface-container-highest: var(--color-hover);
+  --on-surface: var(--color-ink);
+  --on-surface-variant: var(--color-muted);
+  --outline: var(--color-muted);
+  --outline-variant: var(--color-edge);
+
+  --state-plan: var(--color-plan-ink);
+  --state-plan-border: var(--color-plan-edge);
+  --state-plan-surface: var(--color-plan-bg);
+  --state-completed: var(--color-green-ink);
+  --state-completed-border: var(--color-green-edge);
+  --state-completed-surface: var(--color-green-bg);
+  --state-partial: var(--color-cyan-ink);
+  --state-partial-border: var(--color-cyan-edge);
+  --state-partial-surface: var(--color-cyan-bg);
+  --state-blocked: var(--color-amber-ink);
+  --state-blocked-border: var(--color-amber-edge);
+  --state-blocked-surface: var(--color-amber-bg);
+  --state-cancelled: var(--color-gray-ink);
+  --state-cancelled-border: var(--color-gray-edge);
+  --state-cancelled-surface: var(--color-gray-bg);
+  --state-not-started: var(--color-amber-ink);
+  --state-not-started-border: var(--color-amber-edge);
+  --state-not-started-surface: var(--color-amber-bg);
+  --state-fixed: var(--color-gray-ink);
+  --state-fixed-border: var(--color-gray-edge);
+  --state-fixed-surface: var(--color-gray-bg);
+  --state-break: var(--color-gray-ink);
+  --state-break-border: var(--color-gray-edge);
+  --state-break-surface: var(--color-gray-bg);
+  --state-recurring: var(--color-teal-ink);
+  --state-recurring-border: var(--color-teal-edge);
+  --state-recurring-surface: var(--color-teal-bg);
+  --task-state-draft: var(--color-gray-ink);
+  --task-state-draft-border: var(--color-gray-edge);
+  --task-state-draft-surface: var(--color-gray-bg);
+  --task-state-open: var(--color-blue-ink);
+  --task-state-open-border: var(--color-blue-edge);
+  --task-state-open-surface: var(--color-blue-bg);
+  --task-state-scheduled: var(--color-plan-ink);
+  --task-state-scheduled-border: var(--color-plan-edge);
+  --task-state-scheduled-surface: var(--color-plan-bg);
+  --task-state-incomplete: var(--color-amber-ink);
+  --task-state-incomplete-border: var(--color-amber-edge);
+  --task-state-incomplete-surface: var(--color-amber-bg);
+  --task-state-done: var(--color-green-ink);
+  --task-state-done-border: var(--color-green-edge);
+  --task-state-done-surface: var(--color-green-bg);
+  --task-state-deleted: var(--color-red-ink);
+  --task-state-deleted-border: var(--color-red-edge);
+  --task-state-deleted-surface: var(--color-red-bg);
+  --priority-low: var(--color-blue-ink);
+  --priority-low-accent: var(--color-blue-solid);
+  --priority-low-border: var(--color-blue-edge);
+  --priority-low-surface: var(--color-blue-bg);
+  --priority-medium: var(--color-amber-ink);
+  --priority-medium-accent: var(--color-amber-solid);
+  --priority-medium-border: var(--color-amber-edge);
+  --priority-medium-surface: var(--color-amber-bg);
+  --priority-high: var(--color-orange-ink);
+  --priority-high-accent: var(--color-orange-solid);
+  --priority-high-border: var(--color-orange-edge);
+  --priority-high-surface: var(--color-orange-bg);
+  /* Vivid red is reserved for the live clock and today's markers, not date selection. */
+  --today-red: #ff3b30;
+  --today-red-label: #3a1612;
+  color: var(--color-ink);
+  background: var(--color-canvas);
+}
+html:root[data-mode="dark"] {
+  color-scheme: dark;
+  --color-canvas: #101822;
+  --color-group: #213145;
+  --color-panel: #192636;
+  --color-raised: #2c4059;
+  --color-ink: #eff5ff;
+  --color-muted: #bbc8da;
+  --color-edge: #455b76;
+  --color-hover: #2b405a;
+  --color-selected-bg: #263f67;
+  --color-selected-ink: #d9e9ff;
+  --color-selected-edge: #81aeff;
+  --color-mask: rgb(3 9 17 / 72%);
+  --color-blue-bg: #203b5f;
+  --color-blue-ink: #b9d7ff;
+  --color-blue-edge: #6296d2;
+  --color-plan-bg: #193e50;
+  --color-plan-ink: #ace6f7;
+  --color-plan-edge: #639fb6;
+  --color-green-bg: #193f32;
+  --color-green-ink: #ace9c6;
+  --color-green-edge: #61a687;
+  --color-amber-bg: #493a20;
+  --color-amber-ink: #f7d791;
+  --color-amber-edge: #b59955;
+  --color-orange-bg: #4d3022;
+  --color-orange-ink: #ffc8a3;
+  --color-orange-edge: #ce956d;
+  --color-red-bg: #4b2835;
+  --color-red-ink: #ffc4d0;
+  --color-red-edge: #ce8399;
+  --color-teal-bg: #1c3e3c;
+  --color-teal-ink: #a4e2d9;
+  --color-teal-edge: #5eaaa1;
+  --color-gray-bg: #303b4c;
+  --color-gray-ink: #d1dce9;
+  --color-gray-edge: #879bb4;
+  --color-purple-bg: #3a2d60;
+  --color-purple-ink: #dacaff;
+  --color-purple-edge: #a18bd0;
+  --color-pink-bg: #472d43;
+  --color-pink-ink: #f2c2df;
+  --color-pink-edge: #b887a8;
+  --color-yellow-bg: #463e19;
+  --color-yellow-ink: #f2e2a2;
+  --color-yellow-edge: #b7a25c;
+  --color-cyan-bg: #1d3c4b;
+  --color-cyan-ink: #afe4f5;
+  --color-cyan-edge: #69a9bd;
+}
+html:root[data-theme="github"][data-mode="light"] { --color-canvas: #eef2f6; --color-group: #f6f8fa; --color-panel: #ffffff; --color-raised: #ffffff; }
+html:root[data-theme="codex"][data-mode="light"] { --color-canvas: #edf1f5; --color-group: #f5f7fa; --color-panel: #ffffff; --color-raised: #ffffff; }
+
+html:root body { color: var(--color-ink); background: var(--color-canvas); }
+html:root ::selection { color: var(--color-selected-ink); background: var(--color-selected-bg); }
+html:root ::-webkit-scrollbar-thumb { background: var(--color-gray-edge); border-color: var(--color-canvas); }
+html:root :is(.next-shell, .next-workspace, .tasks-workspace, .today-workspace, .today-schedule-pane, .today-page, .timeline-page-shell, .next-workspace > .review-page, .next-workspace > .settings-page, .next-workspace > .gantt-page) { background: var(--color-canvas); }
+html:root .next-sidebar { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-group); }
+html:root .next-sidebar nav button { color: var(--color-muted); }
+html:root .next-sidebar nav button:hover { color: var(--color-ink); background: var(--color-hover); }
+html:root .next-sidebar nav button.active { color: var(--color-selected-ink); background: var(--color-selected-bg); }
+html:root .next-sidebar nav button.active::before { background: var(--color-primary); }
+html:root .next-sidebar :is(.product-brand-chinese, .product-brand-english) { color: var(--color-muted); }
+html:root :is(.timeline-main, .timeline-week, .timeline-lanes, .month-sheet, .today-month-sheet, .timeline-design-topbar) { border-color: var(--color-edge); background: var(--color-panel); }
+html:root .next-workspace .today-page :is(.timeline-main, .timeline-lanes, .month-sheet, .today-month-sheet) { background: var(--color-panel); }
+html:root :is(.review-summary, .settings-layout > nav, .settings-preference-footer) { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-group); }
+html:root :is(.review-ledger > article, .review-empty, .settings-sections > section, .recurring-editor-surface, .task-compact-form, .recurring-card) { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-panel); }
+html:root :is(.timeline-floating-panel, .schedule-picker-dialog, .recurring-event-modal, .task-filter-menu, .priority-dropdown-menu) { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-raised); }
+html:root :is(.dialog-backdrop, .schedule-picker-backdrop, .recurring-modal-backdrop, .task-completion-backdrop) { background: var(--color-mask); }
+html:root .selection-create-dialog::backdrop { background: var(--color-mask); }
+html:root .next-workspace :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select) { color: var(--color-ink); border-color: var(--color-edge); background-color: var(--color-panel); }
+html:root .next-workspace .task-queue-header .task-queue-search > input[type="search"] { background: transparent; }
+html:root :is(input, textarea)::placeholder { color: var(--color-muted); opacity: 1; }
+html:root :is(input[type="checkbox"], input[type="radio"]) { accent-color: var(--color-primary); }
+
+html:root .next-workspace .task-ledger { --task-workspace-bg: var(--color-canvas); --task-workspace-divider: var(--color-edge); }
+html:root .next-workspace .task-ledger-list {
+  --task-card-border: var(--color-edge);
+  --task-card-hover-border: var(--color-selected-edge);
+  --task-card-selected-border: var(--color-selected-edge);
+  --task-card-bg: var(--color-panel);
+  --task-card-hover-bg: var(--color-hover);
+  --task-card-selected-bg: var(--color-selected-bg);
+  --task-card-title: var(--color-ink);
+  --task-card-selected-title: var(--color-selected-ink);
+  --task-card-note: var(--color-muted);
+  --task-card-muted: var(--color-muted);
+  --task-card-divider: var(--color-edge);
+  --task-card-deadline: var(--color-muted);
+  --task-card-icon: var(--color-primary);
+}
+html:root :is(.task-inspector:has(.ordinary-task-detail), .task-completion-backdrop) {
+  --task-detail-bg: var(--color-canvas);
+  --task-detail-paper: var(--color-panel);
+  --task-detail-ink: var(--color-ink);
+  --task-detail-title: var(--color-ink);
+  --task-detail-muted: var(--color-muted);
+  --task-detail-label: var(--color-muted);
+  --task-detail-secondary: var(--color-muted);
+  --task-detail-strong: var(--color-ink);
+  --task-detail-line: var(--color-edge);
+  --task-detail-soft-line: var(--color-edge);
+  --task-detail-note-bg: var(--color-group);
+  --task-detail-note-border: var(--color-edge);
+  --task-detail-note-ink: var(--color-muted);
+  --task-detail-time: var(--color-muted);
+  --task-detail-footer: var(--color-group);
+  --task-detail-button-ink: var(--color-muted);
+  --task-detail-button-border: var(--color-edge);
+  --task-detail-button-hover: var(--color-hover);
+  --task-detail-button-hover-border: var(--color-selected-edge);
+  --task-detail-danger: var(--color-red-ink);
+  --task-detail-danger-hover: var(--color-red-bg);
+}
+
+/* Explicit triples replace currentColor mixing, so list and detail badges match. */
+html:root :is(.task-type-badge, .timeline-fact-type, .priority-badge, .timeline-fact-priority, .task-capsule-status, .task-compact-status, .terminal-task-status, .execution-status-badge, .confirmed-plan-status, .setting-state) { border-width: 1px; border-style: solid; box-sizing: border-box; }
+html:root :is(.task-capsule-status, .task-compact-status, .terminal-task-status, .execution-status-badge) { --status-ink: var(--color-gray-ink); --status-edge: var(--color-gray-edge); --status-bg: var(--color-gray-bg); }
+html:root :is(.task-capsule-status, .task-compact-status, .terminal-task-status, .execution-status-badge).status-open { --status-ink: var(--color-blue-ink); --status-edge: var(--color-blue-edge); --status-bg: var(--color-blue-bg); }
+html:root :is(.task-capsule-status, .task-compact-status, .terminal-task-status, .execution-status-badge):is(.status-scheduled, .status-planned) { --status-ink: var(--color-plan-ink); --status-edge: var(--color-plan-edge); --status-bg: var(--color-plan-bg); }
+html:root :is(.task-capsule-status, .task-compact-status, .terminal-task-status, .execution-status-badge):is(.status-done, .status-active, .completed) { --status-ink: var(--color-green-ink); --status-edge: var(--color-green-edge); --status-bg: var(--color-green-bg); }
+html:root :is(.task-capsule-status, .task-compact-status, .terminal-task-status, .execution-status-badge):is(.status-not_completed, .status-paused) { --status-ink: var(--color-amber-ink); --status-edge: var(--color-amber-edge); --status-bg: var(--color-amber-bg); }
+html:root :is(.task-capsule-status, .task-compact-status, .terminal-task-status, .execution-status-badge):is(.status-deleted, .deleted) { --status-ink: var(--color-red-ink); --status-edge: var(--color-red-edge); --status-bg: var(--color-red-bg); }
+html:root :is(.next-workspace .task-ledger-list .task-capsule-status, .task-compact-status, .ordinary-task-detail .terminal-task-status, .terminal-task-status, .execution-status-badge) { color: var(--status-ink); border-color: var(--status-edge); background: var(--status-bg); }
+html:root :is(.priority-badge, .timeline-fact-priority).priority-high { color: var(--priority-high); border-color: var(--priority-high-border); background: var(--priority-high-surface); }
+html:root :is(.priority-badge, .timeline-fact-priority).priority-medium { color: var(--priority-medium); border-color: var(--priority-medium-border); background: var(--priority-medium-surface); }
+html:root :is(.priority-badge, .timeline-fact-priority).priority-low { color: var(--priority-low); border-color: var(--priority-low-border); background: var(--priority-low-surface); }
+html:root .waiting-pool-dot.priority-medium { background: var(--priority-medium-accent); }
+html:root .priority-dropdown-option.is-selected { color: var(--priority-tone, var(--color-selected-ink)); background: var(--priority-surface, var(--color-selected-bg)); }
+html:root .priority-dropdown-option.priority-tone-high { --priority-tone: var(--priority-high); --priority-surface: var(--priority-high-surface); }
+html:root .priority-dropdown-option.priority-tone-medium { --priority-tone: var(--priority-medium); --priority-surface: var(--priority-medium-surface); }
+html:root .priority-dropdown-option.priority-tone-low { --priority-tone: var(--priority-low); --priority-surface: var(--priority-low-surface); }
+html:root .priority-dot-high { background: var(--priority-high-accent); }
+html:root .priority-dot-medium { background: var(--priority-medium-accent); }
+html:root .priority-dot-low { background: var(--priority-low-accent); }
+html:root .priority-check-icon { color: var(--priority-tone); }
+html:root :is(.task-type-badge:not(.recurring), .timeline-fact-type:not(.type-recurring)) { color: var(--color-gray-ink); border-color: var(--color-gray-edge); background: var(--color-gray-bg); }
+html:root .task-indicator:not(.recurring) { color: var(--color-blue-ink); background: var(--color-blue-bg); }
+html:root :is(.task-type-badge.recurring, .timeline-fact-type.type-recurring, .task-indicator.recurring) { color: var(--color-teal-ink); background: var(--color-teal-bg); }
+html:root :is(.task-type-badge.recurring, .timeline-fact-type.type-recurring) { border-color: var(--color-teal-edge); }
+
+/* A timeline block is a plan until a result is recorded. Recurring is an identity. */
+html:root .timeline-event:is(.plan-draft-block, .execution-block) { --state-plan: var(--color-plan-ink); --state-plan-border: var(--color-plan-edge); --state-plan-surface: var(--color-plan-bg); }
+html:root .timeline-event.recurring-event { --state-recurring: var(--color-teal-ink); --state-recurring-border: var(--color-teal-edge); --state-recurring-surface: var(--color-teal-bg); }
+html:root .timeline-event.fixed-event { color: var(--color-gray-ink); border-color: var(--color-gray-edge); background: var(--color-gray-bg); }
+html:root .timeline-event.execution-block:is(.captured, .reviewed) { color: var(--execution-color); border-color: var(--execution-border); background: var(--execution-surface); }
+html:root .timeline-event.execution-block:is(.captured, .reviewed):hover { border-color: var(--execution-color); background: var(--execution-surface); }
+html:root .timeline-event-check.done::before { border-color: var(--color-green-solid); background: var(--color-green-solid); }
+html:root :is(.timeline-nonworking, .time-rail-break) { color: var(--color-gray-ink); border-color: var(--color-gray-edge); background-color: var(--color-gray-bg); }
+html:root .timeline-nonworking { background-image: repeating-linear-gradient(135deg, transparent 0 7px, var(--color-gray-edge) 7px 8px); }
+html:root .timeline-lanes .lane-item.task { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-panel); }
+html:root .timeline-lanes .lane-item.task:hover { border-color: var(--color-selected-edge); background: var(--color-hover); }
+html:root :is(.confirmed-plan-status, .today-page .is-timeline-view .confirmed-plan-status) { color: var(--color-plan-ink); border-color: var(--color-plan-edge); background: var(--color-plan-bg); }
+html:root .gantt-status-not_completed { --gantt-status-ink: var(--task-state-incomplete); --gantt-status-edge: var(--task-state-incomplete-border); --gantt-status-surface: var(--task-state-incomplete-surface); }
+html:root .gantt-page .gantt-mode button[aria-pressed="true"] { color: var(--color-selected-ink); border-color: var(--color-selected-edge); background: var(--color-selected-bg); }
+
+/* Date interactions use blue; only the live clock and today markers use vivid red. */
+html:root .next-workspace .today-page .timeline-week > button.today.selected .timeline-week-date { color: var(--today-red-label); background: var(--today-red); }
+html:root .next-workspace .today-page .timeline-week > button.selected { color: var(--color-selected-ink); background: var(--color-selected-bg); }
+html:root .timeline-week > button.today:not(.selected) :is(.timeline-week-date, .timeline-week-heading > small) { color: var(--today-red); }
+html:root .timeline-week-date > :is(strong, span) { color: inherit; }
+html:root .month-grid > button.in-month { color: var(--color-ink); background: var(--color-panel); }
+html:root .today-page .today-month-sheet .month-grid > button.outside { color: var(--color-muted); background: var(--color-gray-bg); }
+html:root .today-page .today-month-sheet .month-grid > button.outside:not(.selected):hover { background: var(--color-hover); }
+html:root .today-page .today-month-sheet .month-grid > button.outside .solar-day-number { display: inline-flex; justify-content: center; width: auto; min-width: 24px; gap: 2px; border-radius: 4px; font-size: 14px; white-space: nowrap; }
+html:root .calendar-month-prefix { font-size: 10px; font-weight: 500; }
+html:root .today-page .today-month-sheet .month-grid > button.outside.selected .solar-day-number { color: var(--color-selected-ink); }
+html:root .today-page .today-month-sheet .month-grid > button.outside.today .solar-day-number { color: var(--today-red-label); }
+html:root .today-page .today-month-sheet .weekday-row span:nth-child(n+6) { border-radius: 4px; color: var(--color-orange-ink); background: var(--color-orange-bg); font-weight: 700; }
+html:root .today-page .today-month-sheet .month-grid > button:is(:nth-child(7n+6), :nth-child(7n)):not(.selected) { background: color-mix(in srgb, var(--color-orange-bg) 60%, var(--color-panel)); }
+html:root .today-page .today-month-sheet .month-grid > button.outside:is(:nth-child(7n+6), :nth-child(7n)):not(.selected) { background: color-mix(in srgb, var(--color-orange-bg) 30%, var(--color-gray-bg)); }
+html:root .today-page .today-month-sheet .month-grid > button:is(:nth-child(7n+6), :nth-child(7n)):not(.selected):hover { background: color-mix(in srgb, var(--color-orange-bg) 80%, var(--color-panel)); }
+html:root .today-page .today-month-sheet .month-grid > button:is(:nth-child(7n+6), :nth-child(7n)):not(.today) .solar-day-number { color: var(--color-red-ink); font-weight: 700; }
+html:root .today-page .today-month-sheet .month-grid > button.selected,
+html:root .month-grid > button.selected { color: var(--color-selected-ink); background: var(--color-selected-bg); box-shadow: inset 0 0 0 1px var(--color-selected-edge); }
+html:root :is(.settings-layout > nav button.active, .theme-options > button[aria-pressed="true"], .create-type-switch > button[aria-checked="true"], .create-type-switch > button:last-child[aria-checked="true"]) { color: var(--color-selected-ink); border-color: var(--color-selected-edge); background: var(--color-selected-bg); }
+html:root .create-type-switch > button[aria-checked="true"] > svg,
+html:root .create-type-switch > button:last-child[aria-checked="true"] > svg { color: var(--color-selected-ink); background: transparent; }
+html:root :is(.primary-action, .selection-create-dialog footer .primary-action, .timeline-floating-panel.task-block-editor > .execution-capture-footer .primary-action) { color: #ffffff; border-color: var(--color-primary); background: var(--color-primary); }
+html:root :is(.primary-action, .selection-create-dialog footer .primary-action):hover:not(:disabled) { color: #ffffff; background: var(--color-primary-hover); }
+html:root .next-sidebar .sidebar-plan-track { background: var(--color-gray-bg); }
+html:root .next-sidebar .sidebar-plan-track > span { background: var(--color-green-solid); }
+html:root .time-range-rail.block-editor :is(.time-rail-track, .time-rail-track-piece),
+html:root .time-range-rail.block-editor .time-rail-continuous-selection::before { background: var(--color-gray-bg); }
+html:root .time-range-rail.block-editor :is(.time-rail-selected-fill, .time-rail-selection, .time-rail-handle.end) { background: var(--color-primary); }
+html:root .time-range-rail.block-editor .time-rail-handle { border-color: var(--color-primary); }
+html:root .time-range-rail.block-editor .time-rail-handle.start { border-color: var(--color-selected-edge); background: var(--color-panel); }
+html:root .time-rail-scale.continuous > span:is(.range, .range-start, .range-end),
+html:root .time-rail-scale.collapsed strong { color: var(--color-selected-ink); }
+html:root .time-rail-scale.continuous > span,
+html:root .time-rail-scale.collapsed :is(i, em) { color: var(--color-muted); }
+html:root .time-rail-endpoint-card { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-panel); }
+html:root .time-rail-track-wrap:is(.active-start, .active-end) .time-rail-endpoint-card { color: var(--color-selected-ink); border-color: var(--color-selected-edge); background: var(--color-selected-bg); }
+html:root :is(.selection-create-track, .selection-range) { color: var(--color-selected-ink); border-color: var(--color-selected-edge); background: var(--color-selected-bg); }
+
+/* Feedback uses the same role triples; caution is not an irreversible danger. */
+html:root .feedback-toast { --toast-surface: var(--color-blue-bg); --toast-edge: var(--color-blue-edge); --toast-ink: var(--color-blue-ink); --toast-secondary: var(--color-blue-ink); --notice-dot: var(--color-blue-ink); }
+html:root .feedback-toast.success { --toast-surface: var(--color-green-bg); --toast-edge: var(--color-green-edge); --toast-ink: var(--color-green-ink); --toast-secondary: var(--color-green-ink); --notice-dot: var(--color-green-ink); }
+html:root .feedback-toast.error { --toast-surface: var(--color-red-bg); --toast-edge: var(--color-red-edge); --toast-ink: var(--color-red-ink); --toast-secondary: var(--color-red-ink); --notice-dot: var(--color-red-ink); }
+html:root .feedback-confirm { --confirm-tone: var(--color-blue-ink); --confirm-border: var(--color-blue-edge); --confirm-surface: var(--color-blue-bg); }
+html:root .feedback-confirm.caution { --confirm-tone: var(--color-amber-ink); --confirm-border: var(--color-amber-edge); --confirm-surface: var(--color-amber-bg); }
+html:root .feedback-confirm.danger { --confirm-tone: var(--color-red-ink); --confirm-border: var(--color-red-edge); --confirm-surface: var(--color-red-bg); }
+html:root .feedback-confirm.success { --confirm-tone: var(--color-green-ink); --confirm-border: var(--color-green-edge); --confirm-surface: var(--color-green-bg); }
+html:root .feedback-confirm > p,
+html:root .feedback-confirm .dialog-actions button:not(.dialog-save):not(.dialog-discard) { color: var(--color-muted); }
+html:root .recycle-bin-banner { color: var(--color-red-ink); background: var(--color-red-bg); }
+html:root .recycle-bin-banner button { color: var(--color-red-ink); border-color: var(--color-red-edge); background: var(--color-panel); }
+html:root .recycle-bin-banner button:hover:not(:disabled) { color: var(--color-red-ink); background: var(--color-red-bg); }
+html:root .recycle-bin-banner button:focus-visible { outline-color: var(--color-primary); }
+html:root :is(.terminal-task-trash, .execution-remove-today, .execution-capture-note.error, .task-tag-editor .task-tag-error) { color: var(--color-red-ink); }
+html:root :is(.terminal-task-trash, .execution-remove-today):hover:not(:disabled) { background: var(--color-red-bg); }
+html:root .ordinary-task-detail .task-detail-actions button.task-compact-complete,
+html:root .timeline-floating-panel.task-block-editor .execution-capture-fields .floating-outcomes button[data-outcome="completed"][aria-pressed="true"] { color: var(--color-green-ink); border-color: var(--color-green-edge); background: var(--color-green-bg); }
+html:root .timeline-floating-panel.task-block-editor .execution-capture-fields .floating-outcomes button[data-outcome="not_completed"][aria-pressed="true"] { color: var(--color-amber-ink); border-color: var(--color-amber-edge); background: var(--color-amber-bg); }
+html:root .timeline-floating-panel.task-block-editor :is(.execution-result-label, .floating-execution-note) { color: var(--color-muted); }
+html:root .timeline-floating-panel.task-block-editor .execution-capture-fields .floating-outcomes button:not([aria-pressed="true"]),
+html:root .timeline-floating-panel.task-block-editor .execution-capture-fields textarea { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-panel); }
+html:root .timeline-floating-panel.task-block-editor > .execution-capture-footer { border-color: var(--color-edge); background: var(--color-group); }
+
+html:root .theme-swatch { border-color: var(--color-edge); }
+html:root .theme-swatch.default { background: linear-gradient(90deg, var(--color-canvas) 0 40%, var(--color-panel) 40% 75%, var(--color-primary) 75%); }
+html:root .theme-swatch.github { background: linear-gradient(90deg, #eef2f6 0 40%, #ffffff 40% 75%, var(--color-primary) 75%); }
+html:root .theme-swatch.codex { background: linear-gradient(90deg, #edf1f5 0 40%, #ffffff 40% 75%, var(--color-primary) 75%); }
+html:root[data-mode="dark"] .theme-swatch { background: linear-gradient(90deg, var(--color-canvas) 0 40%, var(--color-panel) 40% 75%, var(--color-primary) 75%); }
+
+/* Form surfaces and controls follow the same hierarchy as the task workspace. */
+html:root :is(.task-form-region, .task-compact-body > .task-form-region) { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-panel); }
+html:root :is(.task-compact-header, .task-form-region > header, .task-compact-body > .task-form-region > header, .schedule-picker-boundaries, .schedule-picker-footer) { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-group); }
+html:root .next-workspace .task-inspector:has(.task-page-header),
+html:root .next-workspace .task-inspector:has(.task-page-header) > .inspector-scroll,
+html:root .next-workspace .task-inspector:has(.task-page-header) .task-compact-form,
+html:root .next-workspace .task-inspector:has(.task-page-header) .task-compact-header,
+html:root .next-workspace .task-inspector:has(.task-page-header) .task-compact-body,
+html:root .next-workspace .task-inspector:has(.task-page-header) .task-compact-actions { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-canvas); }
+html:root .next-workspace .task-inspector:has(.task-page-header) .recurring-editor-surface { background: transparent; }
+html:root .next-workspace .task-inspector:has(.task-page-header) .task-detail-resources { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-panel); }
+html:root .next-workspace .task-inspector:has(.task-page-header) .task-detail-resource-label { color: var(--color-muted); }
+html:root .task-form-region > header strong { color: var(--color-ink); }
+html:root :is(.task-form-region > header span, .settings-preference-footer span, .task-draft-save-state) { color: var(--color-muted); }
+html:root :is(.priority-dropdown-trigger.is-open, .priority-dropdown-trigger:focus-visible) { border-color: var(--color-primary); box-shadow: 0 0 0 2.5px var(--color-selected-bg); }
+html:root :is(.setting-weekdays button[aria-pressed="true"], .task-filter-menu .filter-menu-group > button[aria-checked="true"]) { color: var(--color-selected-ink); border-color: var(--color-selected-edge); background: var(--color-selected-bg); }
+html:root .switch-control.enabled { background: var(--color-primary); }
+html:root .switch-control:not(.enabled) { background: var(--color-gray-edge); }
+html:root .switch-control:focus-visible { outline-color: var(--color-primary); }
+html:root .setting-state { color: var(--color-amber-ink); border-color: var(--color-amber-edge); background: var(--color-amber-bg); }
+html:root .setting-state.connected { color: var(--color-green-ink); border-color: var(--color-green-edge); background: var(--color-green-bg); }
+html:root :is(.settings-preference-footer button, .schedule-picker-confirm, .draft-save) { color: #ffffff; border-color: var(--color-primary); background: var(--color-primary); }
+html:root :is(.settings-preference-footer button, .schedule-picker-confirm, .draft-save):hover:not(:disabled) { background: var(--color-primary-hover); }
+html:root .schedule-picker-confirm:disabled { color: var(--color-gray-ink); background: var(--color-gray-bg); }
+html:root .next-sidebar { --sidebar-create-bg: var(--color-primary); --sidebar-create-ink: #ffffff; --sidebar-create-hover: var(--color-primary-hover); }
+html:root .sidebar-summary-card { --state-plan: var(--color-plan-ink); }
+html:root .schedule-picker-calendar { --schedule-range-fill: var(--color-selected-bg); --schedule-range-node: var(--color-primary); }
+html:root .next-workspace .today-page .timeline-week > button.selected:not(.today) .timeline-week-date { color: var(--color-selected-ink); background: var(--color-selected-bg); box-shadow: inset 0 0 0 1px var(--color-selected-edge); }
+html:root .next-workspace .today-page .timeline-week > button.weekend:not(.today) .timeline-week-date { color: var(--color-red-ink); }
+html:root .schedule-picker-range-panel .time-range-rail.block-editor .time-rail-surface { border-color: var(--color-edge); background: var(--color-group); }
+html:root .schedule-picker-range-panel > header span { color: var(--color-selected-ink); border-color: var(--color-selected-edge); background: var(--color-selected-bg); }
+html:root :is(.schedule-picker-range-error, .inline-error) { color: var(--color-red-ink); border-color: var(--color-red-edge); background: var(--color-red-bg); }
+html:root .schedule-picker-footer-error { color: var(--color-red-ink); }
+html:root .schedule-picker-footer-error::before { background: var(--color-red-solid); }
+html:root .next-workspace > .settings-page .settings-sections > section { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-panel); }
+html:root :is(.task-compact-body, .schedule-picker-rows) .apple-schedule-values button.is-active,
+html:root .schedule-picker-boundaries .schedule-boundary-row.is-active,
+html:root :is(.apple-schedule-values button.is-active, .schedule-boundary-card.is-active) { color: var(--color-selected-ink); border-color: var(--color-selected-edge); background: var(--color-selected-bg); box-shadow: 0 0 0 2px var(--color-selected-bg); }
+html:root .next-workspace .task-inspector .task-compact-body .task-notes-inputs > :is(input, textarea) { background: transparent; }
+html:root :is(.apple-date-grid button:hover, .schedule-picker-calendar > header button:hover) { color: var(--color-selected-ink); background: var(--color-selected-bg); }
+html:root .schedule-picker-calendar .apple-date-grid button.selected { color: #ffffff; background: var(--color-primary); }
+html:root .gantt-page { --gantt-today: var(--color-primary); }
+html:root .gantt-table .gantt-date-heading.is-today,
+html:root .gantt-day-cell.is-today { background: var(--color-selected-bg); }
+html:root .current-time-line > span { color: var(--today-red-label); box-shadow: 0 2px 8px color-mix(in srgb, var(--today-red) 32%, transparent); }
+html:root .month-grid > button.today .day-number,
+html:root .today-page .today-month-sheet .month-grid > button.today .solar-day-number { color: var(--today-red-label); }
+html:root .apple-date-grid button.selected { color: #ffffff; background: var(--color-primary); }
+html:root .schedule-picker-calendar .apple-date-grid button.today::after,
+html:root .apple-date-grid button.today::after { background: var(--today-red); }

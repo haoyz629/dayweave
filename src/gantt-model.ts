@@ -1,7 +1,9 @@
 import type { Task } from "./tauri";
+import { taskListStatus } from "./task-result.ts";
+import type { TaskListStatus } from "./task-result";
 
 export type GanttMode = "week" | "month";
-export type GanttStatusFilter = "all" | Exclude<Task["status"], "deleted">;
+export type GanttStatusFilter = "all" | Exclude<TaskListStatus, "deleted">;
 export type GanttDateRange = { start: string; end: string };
 export type GanttWindow = GanttDateRange & { days: string[] };
 export type GanttDateIssue = "missing_start" | "missing_end" | "invalid_start" | "invalid_end" | "reversed";
@@ -132,7 +134,7 @@ export function buildGanttRows(tasks: readonly Task[], window: GanttDateRange, f
   const issues: { task: Task; reason: GanttDateIssue }[] = [];
   let matchingCount = 0;
   for (const task of tasks) {
-    if (task.status === "deleted" || (filters.status && filters.status !== "all" && task.status !== filters.status)) continue;
+    if (task.status === "deleted" || (filters.status && filters.status !== "all" && taskListStatus(task) !== filters.status)) continue;
     if (filters.tag && !task.tags.includes(filters.tag)) continue;
     matchingCount++;
     const result = ganttTaskRange(task);

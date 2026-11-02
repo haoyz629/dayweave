@@ -53,11 +53,11 @@ test("dark canvas remains dark and is shared instead of hardcoding the light col
   assert.equal(declarations('html[data-mode="dark"] .next-workspace .task-ledger-list').background, "var(--task-workspace-bg, var(--jx-paper))");
 });
 
-test("resting line and active stroke use the same centered non-interactive axis", () => {
+test("resting line and active stroke end at the inspector edge inside the resize hit area", () => {
   for (const pseudo of ["before", "after"]) {
     const style = declarations(`${ledger} > .ledger-resize-handle::${pseudo}`);
-    assert.equal(style.left, "50%");
-    assert.equal(style.transform, "translateX(-50%)");
+    assert.equal(style.left, "100%");
+    assert.equal(style.transform, "translateX(-100%)");
     assert.equal(style["pointer-events"], "none");
   }
   const resting = declarations(`${ledger} > .ledger-resize-handle::before`);
@@ -78,15 +78,18 @@ collect(source);
 function harness() {
   const calls = [];
   const state = {
-    ledgerListWidth: 320, ledgerRef: { current: { clientWidth: 1100 } }, ledgerResizeSession: { current: null },
-    TASK_LEDGER_LIST_MIN_WIDTH: 260, TASK_LEDGER_INSPECTOR_MIN_WIDTH: 380, TASK_LEDGER_HANDLE_WIDTH: 10,
-    TASK_LEDGER_LIST_DEFAULT_WIDTH: 320, TASK_LEDGER_WIDTH_SETTING: "ui.task_ledger_list_width",
+    ledgerListWidth: 340, ledgerRef: { current: { clientWidth: 1100 } }, ledgerResizeSession: { current: null },
+    TASK_LEDGER_LIST_MIN_WIDTH: 320, TASK_LEDGER_INSPECTOR_MIN_WIDTH: 380, TASK_LEDGER_HANDLE_WIDTH: 14,
+    TASK_LEDGER_LIST_DEFAULT_WIDTH: 340, TASK_LEDGER_WIDTH_SETTING: "ui.task_ledger_list_width",
     setLedgerListWidth: width => { state.ledgerListWidth = width; }, setLedgerMaximumWidth: () => {},
     setResizingLedger: active => calls.push(["resizing", active]),
     setUiSetting: (key, width) => { calls.push([key, width]); return Promise.resolve(); },
     setFeedback: () => {}, uiErrorMessage: String,
-    window: { getComputedStyle: () => ({ gridTemplateColumns: "320px 10px 770px" }) }
+    window: { getComputedStyle: () => ({ gridTemplateColumns: "340px 14px 746px" }) }
   };
+  for (const name of ["TASK_LEDGER_LIST_MIN_WIDTH", "TASK_LEDGER_INSPECTOR_MIN_WIDTH", "TASK_LEDGER_HANDLE_WIDTH", "TASK_LEDGER_LIST_DEFAULT_WIDTH"]) {
+    state[name] = Number(app.match(new RegExp(`const ${name} = (\\d+);`))[1]);
+  }
   const context = vm.createContext(state);
   for (const name of names) {
     assert.ok(functions.has(name), name);
@@ -95,31 +98,69 @@ function harness() {
   return { state, calls };
 }
 
-test("grabbing any point in the ten-pixel handle moves by delta without a jump", () => {
-  for (const offset of [0.5, 5, 9.5]) {
+test("grabbing any point in the fourteen-pixel handle moves by delta without a jump", () => {
+  for (const offset of [0.5, 7, 13.5]) {
     const { state, calls } = harness();
-    const target = { setPointerCapture: () => {}, hasPointerCapture: () => true, releasePointerCapture: () => {} };
-    const event = { clientX: 320 + offset, pointerId: 1, currentTarget: target, preventDefault() {} };
+    const target = { focus() {}, setPointerCapture: () => {}, hasPointerCapture: () => true, releasePointerCapture: () => {} };
+    const event = { button: 0, clientX: 340 + offset, pointerId: 1, currentTarget: target, preventDefault() {} };
     state.startLedgerResize(event);
     state.moveLedgerResize(event);
-    assert.equal(state.ledgerListWidth, 320);
+    assert.equal(state.ledgerListWidth, 340);
     state.moveLedgerResize({ ...event, clientX: event.clientX + 100 });
-    assert.equal(state.ledgerListWidth, 420);
+    assert.equal(state.ledgerListWidth, 440);
     state.endLedgerResize(event);
     assert.equal(state.ledgerResizeSession.current, null);
-    assert.deepEqual(calls.at(-1), ["ui.task_ledger_list_width", "420"]);
+    assert.deepEqual(calls.at(-1), ["ui.task_ledger_list_width", "440"]);
   }
 });
 
 test("keyboard resizing, bounds and reset retain the existing saved-width contract", () => {
   const { state, calls } = harness();
   state.resizeLedgerWithKeyboard({ key: "ArrowRight", shiftKey: false, preventDefault() {} });
-  assert.equal(state.ledgerListWidth, 336);
+  assert.equal(state.ledgerListWidth, 356);
   state.resizeLedgerWithKeyboard({ key: "ArrowLeft", shiftKey: true, preventDefault() {} });
-  assert.equal(state.ledgerListWidth, 296);
-  assert.equal(state.setConstrainedLedgerWidth(-100), 260);
-  assert.equal(state.setConstrainedLedgerWidth(2000), 710);
-  state.resetLedgerWidth();
   assert.equal(state.ledgerListWidth, 320);
-  assert.deepEqual(calls.at(-1), ["ui.task_ledger_list_width", "320"]);
+  assert.equal(state.setConstrainedLedgerWidth(-100), 320);
+  assert.equal(state.setConstrainedLedgerWidth(2000), 706);
+  state.resetLedgerWidth();
+  assert.equal(state.ledgerListWidth, 340);
+  assert.deepEqual(calls.at(-1), ["ui.task_ledger_list_width", "340"]);
+});
+
+
+test("saved narrow widths are clamped and resizing preserves both panes", () => {
+  const { state } = harness();
+  assert.equal(state.setConstrainedLedgerWidth(260), 320);
+  for (let available = 714; available <= 1600; available += 1) {
+    state.ledgerRef.current.clientWidth = available;
+    for (const requested of [0, 320, 340, 380, 900, 2000]) {
+      const width = state.setConstrainedLedgerWidth(requested);
+      assert.ok(width >= 320);
+      assert.ok(available - width - 14 >= 380);
+    }
+  }
+});
+
+test("right click does not start a resize", () => {
+  const { state, calls } = harness();
+  state.startLedgerResize({ button: 2 });
+  assert.equal(state.ledgerResizeSession.current, null);
+  assert.deepEqual(calls, []);
+});
+
+test("CSS and runtime agree on minimum sizes and the container stacking threshold", () => {
+  const { state } = harness();
+  assert.equal(state.TASK_LEDGER_LIST_MIN_WIDTH, 320);
+  assert.equal(state.TASK_LEDGER_HANDLE_WIDTH, 14);
+  assert.equal(state.TASK_LEDGER_LIST_DEFAULT_WIDTH, 340);
+  const rules = [];
+  css.walkRules(rule => {
+    if (rule.selector === ".task-ledger" || rule.selector === ".task-ledger:has(.ordinary-task-detail)") rule.walkDecls("grid-template-columns", d => rules.push(d.value));
+  });
+  assert.ok(rules.includes("minmax(320px, min(var(--task-list-width), calc(100% - 394px))) 14px minmax(380px, 1fr)"));
+  const stacked = [];
+  css.walkAtRules("container", rule => { if (rule.params === "(max-width: 713px)") stacked.push(rule.toString()); });
+  assert.equal(stacked.length, 1);
+  assert.match(stacked[0], /grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(stacked[0], /ledger-resize-handle \{ display: none;/);
 });

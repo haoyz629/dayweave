@@ -6,6 +6,7 @@ import ts from "typescript";
 import React from "react";
 import * as controls from "./time-range-control.ts";
 import { recurringClockRange, recurringRangeInput, recurringTimeBlockIssue } from "./recurring-schedule.ts";
+import { CopySeparator } from "./copy-separator.test-helper.mjs";
 
 const app = ts.createSourceFile("App.tsx", readFileSync(new URL("./App.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const names = ["ScheduleDateGrid", "RecurringValidityPicker", "BlockEditorTimeRangeRail", "calendarCells", "shiftDateValue", "shiftMonthKey", "clockMinutes", "minutesClock", "validDraftClock", "shanghaiDateValue"];
@@ -18,7 +19,7 @@ function mount(name, props) {
   const slots = [], pending = [], cleanup = [];
   let cursor = 0, tree;
   const globals = {
-    React, Fragment: React.Fragment, ...controls, recurringClockRange, recurringRangeInput, recurringTimeBlockIssue,
+    React, CopySeparator, Fragment: React.Fragment, ...controls, recurringClockRange, recurringRangeInput, recurringTimeBlockIssue,
     MIN_TASK_BLOCK_MINUTES: 15, Icon: () => null, createPortal: node => node,
     pickerDateLabel: value => value, formatWorkloadMinutes: value => `${value} 分钟`,
     recurringItemPreviewDates: form => [form.starts_on, ...(form.ends_on ? [form.ends_on] : [])],

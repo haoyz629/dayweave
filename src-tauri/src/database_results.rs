@@ -89,7 +89,16 @@ fn recorded_window(recorded_at: &str) -> bool {
 pub(super) fn can_backfill_completion(connection: &Connection, task: &TaskDto) -> AppResult<bool> {
     let Some(date) = historical_single_day(task) else { return Ok(false); };
     if !matches!(task.status.as_str(), "open" | "scheduled") || task.deleted_at.is_some() { return Ok(false); }
-    if task.result_date.is_some() && historical_completion_recorded_at(connection, &task.id)?.is_none() { return Ok(false); }
+    if task.result_date.is_some() && historical_completion_recorded_at(connection, &task.id)?.is_none() {
+        // Reopening keeps the original context, but its unfinished block can still be completed later.
+        let unfinished_original: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM tasks task
+            JOIN plan_blocks pb ON pb.id = task.result_block_id AND pb.task_id = task.id
+            JOIN daily_plans dp ON dp.id = pb.daily_plan_id LEFT JOIN review_entries review ON review.plan_block_id = pb.id
+            WHERE task.id = ?1 AND task.result_date = ?2 AND dp.plan_date = ?2 AND dp.status = 'confirmed'
+                AND COALESCE(pb.result_date, dp.plan_date) = ?2 AND COALESCE(review.outcome, pb.execution_status) <> 'completed')",
+            params![task.id, date], |row| row.get(0))?;
+        if !unfinished_original { return Ok(false); }
+    }
     let other_dates: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM plan_blocks pb
         JOIN daily_plans dp ON dp.id = pb.daily_plan_id WHERE pb.task_id = ?1 AND dp.status = 'confirmed' AND dp.plan_date <> ?2)",
         params![task.id, date], |row| row.get(0))?;

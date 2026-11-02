@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="288" height="288" viewBox="-16 -16 288 288">
+  <title>DW Logo — rounded frame and shadow</title>
+  <defs>
+    <filter id="frame-shadow" x="-24" y="-24" width="304" height="304" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#262825" flood-opacity="0.24"/>
+    </filter>
+  </defs>
+  <rect x="4" y="4" width="248" height="248" rx="56" fill="#ffffff" stroke="#262825" stroke-opacity="0.16" stroke-width="1.5" filter="url(#frame-shadow)"/>
+  <path transform="matrix(0.84 0 0 0.84 23.18253 20.48)" fill="#262825" fill-rule="evenodd" d="M55 36h73c62 0 96 36 96 92s-34 92-96 92H39c-10 0-15-7-13-17l23-152c2-10 5-15 6-15ZM82 78h25l13 59 17-39h14l14 39 11-59h15l-20 96h-16l-13-35-14 35h-25L82 78Z"/>
+</svg>

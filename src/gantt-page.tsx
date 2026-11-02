@@ -1,8 +1,11 @@
 import { useId, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import type { Task } from "./tauri";
+import { taskListStatus } from "./task-result";
+import type { TaskListStatus } from "./task-result";
 import { buildGanttRows, calendarWeekday, ganttTags, ganttWindow, shiftGanttAnchor } from "./gantt-model";
 import type { GanttDateIssue, GanttMode, GanttStatusFilter } from "./gantt-model";
+import { CopySeparator } from "./copy-separator";
 import "./gantt-page.css";
 
 export type GanttPageProps = {
@@ -14,7 +17,7 @@ export type GanttPageProps = {
   onOpenTask: (task: Task) => void;
 };
 
-const STATUS_LABEL: Record<Task["status"], string> = { open: "待处理", scheduled: "已安排", done: "已完成", deleted: "已删除" };
+const STATUS_LABEL: Record<TaskListStatus, string> = { open: "待处理", scheduled: "已安排", not_completed: "未完成", done: "已完成", deleted: "已删除" };
 const ISSUE_LABEL: Record<GanttDateIssue, string> = {
   missing_start: "缺少最早开始日期",
   missing_end: "缺少截止日期",
@@ -49,7 +52,7 @@ export function GanttPage({ tasks, today, loading, error, onReload, onOpenTask }
   return <section className="gantt-page" aria-labelledby={`${id}-title`}>
     <header className="gantt-heading">
       <div>
-        <p className="gantt-eyebrow">计划视野 · 任务日期</p>
+        <p className="gantt-eyebrow">计划视野<CopySeparator />任务日期</p>
         <h1 id={`${id}-title`}>甘特图</h1>
         <p className="gantt-subtitle">看清任务的起止跨度，不替代每日执行安排。</p>
       </div>
@@ -83,6 +86,7 @@ export function GanttPage({ tasks, today, loading, error, onReload, onOpenTask }
             <option value="all">全部（不含已删除）</option>
             <option value="open">待处理</option>
             <option value="scheduled">已安排</option>
+            <option value="not_completed">未完成</option>
             <option value="done">已完成</option>
           </select>
         </label>
@@ -91,7 +95,7 @@ export function GanttPage({ tasks, today, loading, error, onReload, onOpenTask }
 
     <div className="gantt-range-heading">
       <h2 id={`${id}-range`}>{rangeLabel}</h2>
-      <span aria-live="polite" aria-atomic="true">当前{period}视图 · {rows.length} 个任务</span>
+      <span aria-live="polite" aria-atomic="true">当前{period}视图<CopySeparator />{rows.length} 个任务</span>
     </div>
 
     {error && <div className="gantt-error" role="alert"><strong>任务加载失败</strong><span>{error}</span><span>可点击“刷新任务”重试；已有任务仍保留显示。</span></div>}
@@ -102,7 +106,7 @@ export function GanttPage({ tasks, today, loading, error, onReload, onOpenTask }
         <caption className="gantt-sr-only">任务起止日期甘特图，{rangeLabel}。每行一个任务，起止日均计入。点击任务名称或日期条查看详情。</caption>
         <colgroup><col className="gantt-task-col" />{days.map(({ date }) => <col className="gantt-date-col" key={date} />)}</colgroup>
         <thead><tr>
-          <th scope="col" className="gantt-task-heading"><span>任务</span><small>起止日期 · 状态与标签</small></th>
+          <th scope="col" className="gantt-task-heading"><span>任务</span><small>起止日期<CopySeparator />状态与标签</small></th>
           {days.map(({ date, weekday, isToday }) => <th scope="col" key={date}
             className={`gantt-date-heading${weekday === 0 || weekday === 6 ? " is-weekend" : ""}${isToday ? " is-today" : ""}`}>
             <time dateTime={date} aria-label={`${dateLabel(date)}，星期${WEEKDAYS[weekday]}${isToday ? "，今天" : ""}`} aria-current={isToday ? "date" : undefined}>
@@ -114,13 +118,14 @@ export function GanttPage({ tasks, today, loading, error, onReload, onOpenTask }
         <tbody>
           {rows.map(({ task, range, placement }) => {
             const title = taskTitle(task);
+            const displayStatus = taskListStatus(task);
             const rangeCopy = `${dateLabel(range.start)}至${dateLabel(range.end)}`;
             const clippedCopy = `${placement.clippedStart ? "，开始早于当前视图" : ""}${placement.clippedEnd ? "，结束晚于当前视图" : ""}`;
-            return <tr key={task.id} className={`gantt-row gantt-status-${task.status}`}>
+            return <tr key={task.id} className={`gantt-row gantt-status-${displayStatus}`}>
               <th scope="row" className="gantt-task-cell">
-                <button type="button" className="gantt-task-link" onClick={() => onOpenTask(task)} title={`${title} · ${rangeCopy}`} aria-label={`查看任务：${title}，${STATUS_LABEL[task.status]}，${rangeCopy}`}>
+                <button type="button" className="gantt-task-link" onClick={() => onOpenTask(task)} title={`${title} · ${rangeCopy}`} aria-label={`查看任务：${title}，${STATUS_LABEL[displayStatus]}，${rangeCopy}`}>
                   <span className="gantt-task-title">{title}</span>
-                  <span className="gantt-task-meta"><span className="gantt-status-badge">{STATUS_LABEL[task.status]}</span>
+                  <span className="gantt-task-meta"><span className="gantt-status-badge">{STATUS_LABEL[displayStatus]}</span>
                     {task.tags.filter((item) => item.trim()).slice(0, 2).map((item, index) => <span className="gantt-tag" key={`${item}-${index}`}>#{item}</span>)}
                     {task.tags.length > 2 && <span className="gantt-more-tags" title={task.tags.join("、")}>+{task.tags.length - 2}</span>}
                   </span>
@@ -133,8 +138,8 @@ export function GanttPage({ tasks, today, loading, error, onReload, onOpenTask }
                     style={{ gridColumn: index + 1 }} />)}
                   <button type="button" className={`gantt-bar${placement.clippedStart ? " is-clipped-start" : ""}${placement.clippedEnd ? " is-clipped-end" : ""}`}
                     style={{ gridColumn: `${placement.startIndex + 1} / span ${placement.span}` }} onClick={() => onOpenTask(task)}
-                    title={`${title} · ${STATUS_LABEL[task.status]} · ${rangeCopy}${clippedCopy}`}
-                    aria-label={`查看任务：${title}，${STATUS_LABEL[task.status]}，${rangeCopy}${clippedCopy}`}>
+                    title={`${title} · ${STATUS_LABEL[displayStatus]} · ${rangeCopy}${clippedCopy}`}
+                    aria-label={`查看任务：${title}，${STATUS_LABEL[displayStatus]}，${rangeCopy}${clippedCopy}`}>
                     {placement.clippedStart && <span aria-hidden="true" className="gantt-continuation">‹</span>}
                     <span className="gantt-bar-title">{title}</span>
                     {placement.clippedEnd && <span aria-hidden="true" className="gantt-continuation">›</span>}
@@ -155,7 +160,7 @@ export function GanttPage({ tasks, today, loading, error, onReload, onOpenTask }
 
     <footer className="gantt-footer">
       <div className="gantt-legend" aria-label="图例">
-        {(["open", "scheduled", "done"] as const).map((item) => <span key={item} className={`gantt-legend-item gantt-status-${item}`}><i aria-hidden="true" />{STATUS_LABEL[item]}</span>)}
+        {(["open", "scheduled", "not_completed", "done"] as const).map((item) => <span key={item} className={`gantt-legend-item gantt-status-${item}`}><i aria-hidden="true" />{STATUS_LABEL[item]}</span>)}
         <span className="gantt-legend-today"><i aria-hidden="true" />今天</span>
         <span>‹ / › 跨越视图边界</span>
       </div>
@@ -166,7 +171,7 @@ export function GanttPage({ tasks, today, loading, error, onReload, onOpenTask }
       <summary>{issues.length} 个任务日期待完善，未显示日期条<span>展开后点击任务修正</span></summary>
       <p>以下任务符合当前筛选，但缺少有效的起止日期；不会使用每日执行排期代替。</p>
       <ul>{issues.map(({ task, reason }) => <li key={task.id}>
-        <button type="button" onClick={() => onOpenTask(task)}><span>{taskTitle(task)}</span><small>{ISSUE_LABEL[reason]} · 点击查看</small></button>
+        <button type="button" onClick={() => onOpenTask(task)}><span>{taskTitle(task)}</span><small>{ISSUE_LABEL[reason]}<CopySeparator />点击查看</small></button>
       </li>)}</ul>
     </details>}
   </section>;

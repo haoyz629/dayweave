@@ -65,7 +65,7 @@ test("plan draft time editor stays compact and supports focused manual adjustmen
   assert.match(appSource, /focusedTimeRangePresentation\(/);
   assert.match(appSource, /type="text" inputMode="numeric"/);
   assert.match(appSource, /className="time-rail-endpoint-cards"/);
-  assert.match(appSource, /timeline-floating-layer\$\{planDraftTimeEdit \|\| selectedRecurringOccurrence \? " is-time-editor"/);
+  assert.match(appSource, /timeline-floating-layer\$\{planDraftTimeEdit \? " is-time-editor"/);
   assert.match(stylesSource, /\.timeline-floating-layer\.is-time-editor, \.timeline-floating-layer\.is-block-editor \{ position: fixed;/);
   assert.match(stylesSource, /\.time-rail-endpoint-cards \{[^}]*grid-template-columns: 31fr 38fr 31fr/);
   assert.match(appSource, /highlightedEdge === "start" \? "is-active"/);
@@ -348,7 +348,7 @@ test("timeline task blocks use the centered editor and completing checkbox ends 
   assert.match(appSource, /event\.stopPropagation\(\); void quickCompleteTimelineBlock\(block\)/);
   assert.match(appSource, /openTimelineTask\(selectedBlock\.task_id, selectedBlock\.id\)/);
   assert.match(appSource, /panel\.dataset\.placement = placement/);
-  assert.match(appSource, /selectedBlock \? " is-block-editor"/);
+  assert.match(appSource, /selectedBlock \|\| selectedRecurringOccurrence \? " is-block-editor"/);
   assert.match(appSource, /selectedBlock \? " task-block-editor"/);
   assert.match(stylesSource, /\.timeline-floating-layer\.is-block-editor \.timeline-floating-panel\.task-block-editor/);
   assert.match(stylesSource, /\.timeline-floating-panel \{ position: fixed;/);

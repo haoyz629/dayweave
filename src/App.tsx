@@ -739,13 +739,14 @@ function WorkloadTimeDigits({ minutes }: { minutes: number | null | undefined })
   return <span className="workload-time-digits"><b className="workload-digit">{hours}</b><span className="workload-unit"> h </span><b className="workload-digit">{remainder}</b><span className="workload-unit"> m</span></span>;
 }
 
-function ScheduleDateGrid({ cells, today, start, end, range, historySingleDay = false, onSelect, onHover }: {
+function ScheduleDateGrid({ cells, today, start, end, range, historySingleDay = false, minDate, onSelect, onHover }: {
   cells: ReturnType<typeof calendarCells>;
   today: string;
   start: string;
   end: string;
   range: { start: string; end: string; preview: boolean };
   historySingleDay?: boolean;
+  minDate?: string;
   onSelect: (date: string) => void;
   onHover: (date: string | null) => void;
 }) {
@@ -753,8 +754,75 @@ function ScheduleDateGrid({ cells, today, start, end, range, historySingleDay = 
     const inRange = cell.key >= range.start && cell.key <= range.end;
     const historical = historySingleDay && cell.key < today;
     const classes = [cell.inMonth ? "" : "outside", cell.key === today ? "today" : "", inRange ? "in-range" : "", cell.key === range.start ? "range-start" : "", cell.key === range.end ? "range-end" : "", inRange && range.preview ? "is-preview" : "", cell.key === range.start || cell.key === range.end ? "selected" : ""].filter(Boolean).join(" ");
-    return <button key={cell.key} type="button" className={classes} title={historical ? "历史日期仅支持单日，点击后将改为当天的单日任务" : undefined} aria-label={`${cell.key}${cell.key === today ? "，今天" : ""}${historical ? "，历史日期，仅支持单日" : ""}`} aria-current={cell.key === today ? "date" : undefined} aria-pressed={cell.key === start || cell.key === end} onPointerEnter={(event) => { if (event.pointerType !== "touch") onHover(cell.key); }} onFocus={() => onHover(cell.key)} onBlur={() => onHover(null)} onClick={() => onSelect(cell.key)}>{cell.day}</button>;
+    return <button key={cell.key} type="button" className={classes} disabled={minDate ? cell.key < minDate : undefined} title={historical ? "历史日期仅支持单日，点击后将改为当天的单日任务" : undefined} aria-label={`${cell.key}${cell.key === today ? "，今天" : ""}${historical ? "，历史日期，仅支持单日" : ""}`} aria-current={cell.key === today ? "date" : undefined} aria-pressed={cell.key === start || cell.key === end} onPointerEnter={(event) => { if (event.pointerType !== "touch") onHover(cell.key); }} onFocus={() => onHover(cell.key)} onBlur={() => onHover(null)} onClick={() => onSelect(cell.key)}>{cell.day}</button>;
   })}</div>;
+}
+
+type RecurringBlockTimeEdit = { date: string; time: string; duration: number | null; error: string };
+
+function RecurringBlockTimeEditor({ value, today, onChange }: {
+  value: RecurringBlockTimeEdit; today: string; onChange: (value: RecurringBlockTimeEdit) => void;
+}) {
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [monthKey, setMonthKey] = useState(value.date.slice(0, 7));
+  const dateButtonRef = useRef<HTMLButtonElement>(null);
+  const calendarRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const calendar = calendarRef.current, trigger = dateButtonRef.current;
+    if (!calendarOpen || !calendar || !trigger) return;
+    calendar.setAttribute("popover", "manual");
+    calendar.showPopover();
+    function positionCalendar() {
+      const anchor = trigger!.getBoundingClientRect();
+      calendar!.style.width = `${Math.min(anchor.width, window.innerWidth - 24)}px`;
+      const height = calendar!.getBoundingClientRect().height;
+      const below = anchor.bottom + 6;
+      const top = below + height <= window.innerHeight - 12 ? below : Math.max(12, anchor.top - height - 6);
+      calendar!.style.left = `${Math.max(12, Math.min(anchor.left, window.innerWidth - calendar!.offsetWidth - 12))}px`;
+      calendar!.style.top = `${top}px`;
+    }
+    function dismissCalendar(event: PointerEvent) {
+      if (event.target instanceof Node && !calendar!.contains(event.target) && !trigger!.contains(event.target)) setCalendarOpen(false);
+    }
+    positionCalendar();
+    const observer = new ResizeObserver(positionCalendar);
+    observer.observe(calendar);
+    window.addEventListener("resize", positionCalendar);
+    window.addEventListener("scroll", positionCalendar, true);
+    document.addEventListener("pointerdown", dismissCalendar);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", positionCalendar);
+      window.removeEventListener("scroll", positionCalendar, true);
+      document.removeEventListener("pointerdown", dismissCalendar);
+    };
+  }, [calendarOpen]);
+  const cells = useMemo(() => calendarCells(monthKey), [monthKey]);
+  const [year, month] = monthKey.split("-").map(Number);
+  const range = recurringClockRange({ display_time: value.time, display_duration_minutes: value.duration });
+  function selectDate(date: string) {
+    if (date < today) return;
+    onChange({ ...value, date, error: "" });
+    setCalendarOpen(false);
+    dateButtonRef.current?.focus();
+  }
+  return <div className="recurring-block-time-editor" onKeyDown={(event) => {
+    if (event.key === "Escape" && calendarOpen) { event.preventDefault(); event.stopPropagation(); setCalendarOpen(false); dateButtonRef.current?.focus(); }
+  }}>
+    <section className="recurring-block-date-section" aria-label="安排日期">
+      <span className="recurring-block-field-label">日期</span>
+      <button ref={dateButtonRef} type="button" className="recurring-block-date-trigger" aria-expanded={calendarOpen} aria-controls="recurring-block-date-calendar" onClick={() => { if (!calendarOpen) setMonthKey(value.date.slice(0, 7)); setCalendarOpen(!calendarOpen); }}><Icon name="calendar" size={16} /><strong>{pickerDateLabel(value.date)}</strong><Icon name="chevron-down" size={15} /></button>
+      {calendarOpen && <section ref={calendarRef} id="recurring-block-date-calendar" className="schedule-picker-calendar recurring-block-calendar" aria-label="选择安排日期">
+        <header><strong>{year}年{month}月</strong><div><button type="button" aria-label="上个月" onClick={() => setMonthKey(shiftMonthKey(monthKey, -1))}><Icon name="chevron-left" size={17} /></button><button type="button" aria-label="下个月" onClick={() => setMonthKey(shiftMonthKey(monthKey, 1))}><Icon name="chevron-right" size={17} /></button></div></header>
+        <div className="apple-date-weekdays" aria-hidden="true">{["一", "二", "三", "四", "五", "六", "日"].map((day) => <span key={day}>{day}</span>)}</div>
+        <ScheduleDateGrid cells={cells} today={today} start={value.date} end={value.date} range={{ start: value.date, end: value.date, preview: false }} minDate={today} onSelect={selectDate} onHover={() => {}} />
+      </section>}
+    </section>
+    <section className="recurring-block-range-section" aria-label="安排时间">
+      <header><span className="recurring-block-field-label">时间范围</span><output>{formatWorkloadMinutes(value.duration ?? 0)}</output></header>
+      <BlockEditorTimeRangeRail start={range.start} end={range.end} minimumDuration={1} maxMinute={24 * 60} allowMidnightEnd inputsOnly onChange={(next) => { const input = recurringRangeInput(next); onChange({ ...value, time: input.display_time, duration: input.display_duration_minutes, error: "" }); }} />
+    </section>
+  </div>;
 }
 
 function TaskScheduleEditor({ form, disabled, compact = false, estimateId, allowExistingHistoricalRange = false, onChange, onScheduleChange }: {
@@ -4276,6 +4344,7 @@ function BlockEditorTimeRangeRail({
   disabled = false,
   describedBy,
   showPresets = true,
+  inputsOnly = false,
   allowMidnightEnd = false
 }: {
   start: string;
@@ -4290,6 +4359,7 @@ function BlockEditorTimeRangeRail({
   disabled?: boolean;
   describedBy?: string;
   showPresets?: boolean;
+  inputsOnly?: boolean;
   allowMidnightEnd?: boolean;
 }) {
   const railStep = 5;
@@ -4580,14 +4650,14 @@ function BlockEditorTimeRangeRail({
 
   return <div className="time-range-rail block-editor">
     <div className="time-range-values block-editor-values" aria-label="选择开始和结束时间">
-      <label className={highlightedEdge === "start" ? "is-active" : ""}><span><i className="time-range-marker start" aria-hidden="true" />开始</span><input type="text" inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={5} disabled={disabled} value={inputValues.start} aria-label="输入开始时间" aria-describedby={describedBy} onFocus={(event) => { editingInputRef.current = "start"; setActiveEdge("start"); event.currentTarget.select(); }} onChange={(event) => setInputValues((current) => ({ ...current, start: sanitizeTimeInput(event.target.value) }))} onKeyDown={(event) => handleInputKeyDown(event, "start")} onBlur={() => { commitInput("start"); editingInputRef.current = null; setActiveEdge(null); }} /></label>
+      <label className={highlightedEdge === "start" ? "is-active" : ""}>{!inputsOnly && <span><i className="time-range-marker start" aria-hidden="true" />开始</span>}<input type="text" inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={5} disabled={disabled} value={inputValues.start} aria-label="输入开始时间" aria-describedby={describedBy} onFocus={(event) => { editingInputRef.current = "start"; setActiveEdge("start"); event.currentTarget.select(); }} onChange={(event) => setInputValues((current) => ({ ...current, start: sanitizeTimeInput(event.target.value) }))} onKeyDown={(event) => handleInputKeyDown(event, "start")} onBlur={() => { commitInput("start"); editingInputRef.current = null; setActiveEdge(null); }} /></label>
       <span className="time-range-connector" aria-hidden="true"><Icon name="chevron-right" size={14} /></span>
-      <label className={highlightedEdge === "end" ? "is-active" : ""}><span><i className="time-range-marker end" aria-hidden="true" />结束</span><input type="text" inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={5} disabled={disabled} value={inputValues.end} aria-label="输入结束时间" aria-describedby={describedBy} onFocus={(event) => { editingInputRef.current = "end"; setActiveEdge("end"); event.currentTarget.select(); }} onChange={(event) => setInputValues((current) => ({ ...current, end: sanitizeTimeInput(event.target.value) }))} onKeyDown={(event) => handleInputKeyDown(event, "end")} onBlur={() => { commitInput("end"); editingInputRef.current = null; setActiveEdge(null); }} /></label>
+      <label className={highlightedEdge === "end" ? "is-active" : ""}>{!inputsOnly && <span><i className="time-range-marker end" aria-hidden="true" />结束</span>}<input type="text" inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={5} disabled={disabled} value={inputValues.end} aria-label="输入结束时间" aria-describedby={describedBy} onFocus={(event) => { editingInputRef.current = "end"; setActiveEdge("end"); event.currentTarget.select(); }} onChange={(event) => setInputValues((current) => ({ ...current, end: sanitizeTimeInput(event.target.value) }))} onKeyDown={(event) => handleInputKeyDown(event, "end")} onBlur={() => { commitInput("end"); editingInputRef.current = null; setActiveEdge(null); }} /></label>
     </div>
-    {describedBy && <small id={describedBy} className="sr-only">{collapsedPresentation
+    {!inputsOnly && describedBy && <small id={describedBy} className="sr-only">{collapsedPresentation
       ? <>拖动两侧端点<CopySeparator />中间不可拖动</>
       : <>手写 1 分钟<CopySeparator />时间轴与方向键 5 分钟<CopySeparator />最短 {minimumDuration} 分钟</>}</small>}
-    <div className="time-rail-surface">
+    {!inputsOnly && <div className="time-rail-surface">
       {collapsedPresentation ? <div className="time-rail-scale collapsed" aria-hidden="true">
         <span className="time-rail-scale-zone start"><i>{displayClock(collapsedPresentation.startWindow.start)}</i><strong>{displayClock(safeStartMinute)}</strong><i>{displayClock(collapsedPresentation.startWindow.end)}</i></span>
         <em>···</em>
@@ -4626,8 +4696,8 @@ function BlockEditorTimeRangeRail({
       </div>
       <output className="sr-only">当前时间间隔为 {durationLabel}</output>
       {visibleSegments.length > 0 && <span className="sr-only">浅色区间表示非工作时间，仍可安排。</span>}
-    </div>
-    {showPresets && <div className="time-duration-presets" aria-label="快速设置时长"><span>时长</span>{[
+    </div>}
+    {!inputsOnly && showPresets && <div className="time-duration-presets" aria-label="快速设置时长"><span>时长</span>{[
       { minutes: 15, label: "15 分钟" },
       { minutes: 30, label: "30 分钟" },
       { minutes: 60, label: "1 小时" },
@@ -4784,7 +4854,7 @@ function TodayPage({
   const monthWheelGestureRef = useRef({ delta: 0, lastAt: 0, flipped: false });
   const [selection, setSelection] = useState<TimelineSelection | null>(null);
   const [planDraftTimeEdit, setPlanDraftTimeEdit] = useState<PlanDraftTimeEdit | null>(null);
-  const [recurringTimeEdit, setRecurringTimeEdit] = useState<{ date: string; time: string; duration: number | null; error: string } | null>(null);
+  const [recurringTimeEdit, setRecurringTimeEdit] = useState<RecurringBlockTimeEdit | null>(null);
   const [pendingRecurringChange, setPendingRecurringChange] = useState<RecurringScheduleChange | null>(null);
   const [savingRecurringChange, setSavingRecurringChange] = useState(false);
   const [recurringChangeError, setRecurringChangeError] = useState("");
@@ -6224,16 +6294,14 @@ function TodayPage({
             </div>
             <div ref={timelineScrollRef} className="timeline-scroll" tabIndex={0} aria-label="24 小时时间线" onScroll={handleTimelineScroll} onWheel={pauseTimelineFollowing} onTouchMove={pauseTimelineFollowing} onPointerDown={(event) => { if (event.currentTarget === event.target) pauseTimelineFollowing(); }} onKeyDown={handleTimelineScrollKey}>
               {selectedDate === today && showReturnToNow && <div className="return-to-now-layer"><button type="button" onClick={resumeTimelineFollowing}><Icon name="clock" size={14} />回到现在</button></div>}
-              {selection && <div className={`timeline-floating-layer${planDraftTimeEdit || selectedRecurringOccurrence ? " is-time-editor" : selectedBlock ? " is-block-editor" : ""}`}><section id="timeline-context-panel" ref={timelineFloatingPanelRef} className={`timeline-floating-panel${planDraftTimeEdit || selectedRecurringOccurrence ? " plan-draft-editor" : selectedBlock ? " task-block-editor" : ""}`} role="dialog" aria-modal={planDraftTimeEdit || selectedBlock || selectedRecurringOccurrence ? true : undefined} aria-label={selectedRecurringOccurrence ? `${selectedRecurringOccurrence.title}时间调整` : planDraftTimeEdit && (selectedDraftBlock || selectedBlock) ? `${selectedDraftBlock?.task_title ?? selectedBlock?.task_title}时间调整` : selectedBlock ? `${selectedBlock.task_title}任务结果` : selectedEvent ? `${selectedEvent.title}日程详情` : "时间线详情"} aria-live="polite" tabIndex={-1} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeTimelinePanel(); } }}>
+              {selection && <div className={`timeline-floating-layer${planDraftTimeEdit ? " is-time-editor" : selectedBlock || selectedRecurringOccurrence ? " is-block-editor" : ""}`}><section id="timeline-context-panel" ref={timelineFloatingPanelRef} className={`timeline-floating-panel${selectedRecurringOccurrence ? " task-block-editor" : planDraftTimeEdit ? " plan-draft-editor" : selectedBlock ? " task-block-editor" : ""}`} role="dialog" aria-modal={planDraftTimeEdit || selectedBlock || selectedRecurringOccurrence ? true : undefined} aria-label={selectedRecurringOccurrence ? `${selectedRecurringOccurrence.title}时间调整` : planDraftTimeEdit && (selectedDraftBlock || selectedBlock) ? `${selectedDraftBlock?.task_title ?? selectedBlock?.task_title}时间调整` : selectedBlock ? `${selectedBlock.task_title}任务结果` : selectedEvent ? `${selectedEvent.title}日程详情` : "时间线详情"} aria-live="polite" tabIndex={-1} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeTimelinePanel(); } }}>
                 {selectedRecurringOccurrence && recurringTimeEdit ? <>
                   <header><div><strong>{selectedRecurringOccurrence.title}</strong><small>重复任务块<CopySeparator />{isPastDate ? "历史只读" : "调整时间"}</small></div><button type="button" aria-label="关闭重复任务块" onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></header>
                   <div className="execution-plan-time"><div className="execution-plan-fact"><span>计划时间</span><div className="execution-time-value"><Icon name="clock" size={14} /><strong>{recurringTimeRange(selectedRecurringOccurrence)}</strong></div></div><div className="execution-plan-actions"><button type="button" className="execution-open-task" disabled={savingRecurringChange || Boolean(pendingRecurringChange)} onClick={() => openTimelineRecurringItem(selectedRecurringOccurrence)}>查看任务<Icon name="external-link" size={12} /></button></div></div>
-                  {canEditRecurringOccurrence(selectedRecurringOccurrence) ? <form className="plan-draft-time-form recurring-time-form" noValidate onSubmit={saveRecurringTimeEdit}>
-                    <label>日期<input type="date" min={today} value={recurringTimeEdit.date} onChange={(event) => setRecurringTimeEdit({ ...recurringTimeEdit, date: event.target.value, error: "" })} /></label>
-                    <div className="recurring-time-fields"><label>开始时间<input type="time" value={recurringTimeEdit.time} onChange={(event) => setRecurringTimeEdit({ ...recurringTimeEdit, time: event.target.value, error: "" })} /></label><label>时长（分钟）<input type="number" min={1} max={1440} value={recurringTimeEdit.duration ?? ""} onChange={(event) => setRecurringTimeEdit({ ...recurringTimeEdit, duration: event.target.value ? Number(event.target.value) : null, error: "" })} /></label></div>
+                  {canEditRecurringOccurrence(selectedRecurringOccurrence) ? <><form id="recurring-block-time-form" className="plan-draft-time-form recurring-time-form" noValidate onSubmit={saveRecurringTimeEdit}>
+                    <RecurringBlockTimeEditor value={recurringTimeEdit} today={today} onChange={setRecurringTimeEdit} />
                     {recurringTimeEdit.error && <p className="plan-draft-edit-error" role="alert">{recurringTimeEdit.error}</p>}
-                    <footer><div><button type="button" className="quiet-button" onClick={closeTimelinePanel}>取消</button><button type="submit" className="primary-action">保存调整</button></div></footer>
-                  </form> : <div className="floating-readonly"><strong>{recurringTimeRange(selectedRecurringOccurrence)}</strong><span>历史任务块保持只读，已结束或暂停的安排也不能从日程修改。</span></div>}
+                  </form><footer className="execution-capture-footer"><div><button type="button" className="quiet-button" onClick={closeTimelinePanel}>取消</button><button type="submit" form="recurring-block-time-form" className="primary-action">保存调整</button></div></footer></> : <div className="floating-readonly"><strong>{recurringTimeRange(selectedRecurringOccurrence)}</strong><span>历史任务块保持只读，已结束或暂停的安排也不能从日程修改。</span></div>}
                 </> : planDraftTimeEdit && (selectedDraftBlock || selectedBlock) ? <>
                   <header><div className="timeline-panel-heading">{planDraftTimeEdit.sourceBlockId && <button type="button" className="timeline-panel-back" aria-label="返回任务块详情" title="返回任务块详情" disabled={busy} onClick={returnToSelectedBlockDetails}><Icon name="chevron-left" size={16} /></button>}<div className="timeline-panel-heading-copy"><strong>调整时间</strong><small>{selectedDraftBlock?.task_title ?? selectedBlock?.task_title}</small></div></div>{(planDraftTimeEdit.starts_at !== planDraftTimeEdit.original_starts_at || planDraftTimeEdit.ends_at !== planDraftTimeEdit.original_ends_at) && <button type="button" className="timeline-time-reset" aria-label="重置为调整前的时间" title="重置为调整前的时间" disabled={busy} onClick={resetPlanDraftTime}><Icon name="restore" size={14} />重置时间</button>}<button type="button" aria-label="关闭时间调整面板" onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></header>
                   <form className="plan-draft-time-form" noValidate onSubmit={(event) => void savePlanDraftTime(event)}>
@@ -6403,9 +6471,9 @@ function TodayPage({
                       kind: type ? taskBlockTypeLabels[type].full : "普通任务",
                       title: block.task_title,
                       time,
-                      detail: `${task?.priority ? `${priorityCopy[task.priority]} · ` : ""}${block.review
+                      detail: [task?.priority ? priorityCopy[task.priority] : "", block.review
                         ? `${reviewOutcomeCopy[block.review.outcome]} · ${block.review.followup_action ? taskNextActionLabels[block.review.followup_action] : "已记录"}`
-                        : effectiveOutcome ? `本次${reviewOutcomeCopy[effectiveOutcome]} · 已记录` : canDragTimelineBlock(block) ? "上下拖动调整时间·点击精确编辑" : ""}`,
+                        : effectiveOutcome ? `本次${reviewOutcomeCopy[effectiveOutcome]} · 已记录` : canDragTimelineBlock(block) ? "上下拖动调整时间·点击精确编辑" : ""].filter(Boolean).join(" · "),
                       tone: "task",
                       url,
                       note: body

@@ -5,13 +5,20 @@ import vm from "node:vm";
 import ts from "typescript";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { recurringClockRange, recurringRangeInput } from "./recurring-schedule.ts";
 
 const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const functions = new Map();
-let requestedEffect, returnEffect;
+let requestedEffect, returnEffect, panelClass, layerClass, recurringPanel;
 function collect(node) {
   if (ts.isFunctionDeclaration(node) && node.name) functions.set(node.name.text, node.getText(source));
+  if (ts.isJsxAttribute(node) && node.name.text === "className" && node.initializer && ts.isJsxExpression(node.initializer)) {
+    const code = node.initializer.expression?.getText(source);
+    if (code?.startsWith("`timeline-floating-panel$")) panelClass = code;
+    if (code?.startsWith("`timeline-floating-layer$")) layerClass = code;
+  }
+  if (ts.isConditionalExpression(node) && node.condition.getText(source) === "selectedRecurringOccurrence && recurringTimeEdit") recurringPanel = node.whenTrue.getText(source);
   if (ts.isCallExpression(node) && node.expression.getText(source) === "useEffect") {
     const code = node.arguments[0]?.getText(source);
     if (code?.includes("handledRequestedView.current === requestedView")) requestedEffect = code;
@@ -107,4 +114,89 @@ test("all timeline task types receive tags and empty tags produce no reserved ro
   assert.equal((text.match(/<TimelineTaskContent[^>]+tags=\{/g) ?? []).length, 3);
   assert.equal((text.match(/上下拖动调整时间·点击精确编辑/g) ?? []).length, 3);
   assert.match(text, /onClick=\{\(\) => openTimelineRecurringItem\(selectedRecurringOccurrence\)\}/);
+});
+
+test("recurring click dialog shares the ordinary task shell and footer without changing form submission", () => {
+  const state = { selectedRecurringOccurrence: item, selectedBlock: null, planDraftTimeEdit: null };
+  assert.equal(vm.runInNewContext(compile(`(${panelClass});`), state), "timeline-floating-panel task-block-editor");
+  assert.equal(vm.runInNewContext(compile(`(${layerClass});`), state), "timeline-floating-layer is-block-editor");
+  for (const editable of [true, false]) {
+    const context = { React, selectedRecurringOccurrence: { ...item, title: "重复任务" }, recurringTimeEdit: { date: "2026-11-03", time: "09:00", duration: 120, error: "" }, today: "2026-11-03", isPastDate: !editable, savingRecurringChange: false, pendingRecurringChange: null, Icon: () => null, CopySeparator: () => null, closeTimelinePanel() {}, openTimelineRecurringItem() {}, saveRecurringTimeEdit() {}, canEditRecurringOccurrence: () => editable, recurringTimeRange: () => "09:00–11:00" };
+    context.RecurringBlockTimeEditor = () => null;
+    context.setRecurringTimeEdit = () => {};
+    const html = renderToStaticMarkup(vm.runInNewContext(compile(`(${recurringPanel});`), context));
+    assert.match(html, /class="execution-plan-time"/);
+    assert.match(html, /class="execution-time-value"/);
+    assert.match(html, /class="execution-open-task"/);
+    assert.doesNotMatch(html, /floating-outcomes|execution-remove-today/);
+    if (editable) {
+      assert.match(html, /<form id="recurring-block-time-form"/);
+      assert.match(html, /<\/form><footer class="execution-capture-footer">/);
+      assert.match(html, /type="submit" form="recurring-block-time-form" class="primary-action"/);
+    } else {
+      assert.doesNotMatch(html, /<form|type="submit"/);
+      assert.match(html, /历史任务块保持只读/);
+    }
+  }
+});
+
+test("recurring date grid optionally blocks past dates without changing existing callers", () => {
+  const state = load(["ScheduleDateGrid"], { React });
+  const props = { cells: [{ key: "2026-11-02", day: 2, inMonth: true }, { key: "2026-11-03", day: 3, inMonth: true }], today: "2026-11-03", start: "2026-11-03", end: "2026-11-03", range: { start: "2026-11-03", end: "2026-11-03", preview: false }, onSelect() {}, onHover() {} };
+  assert.deepEqual(state.ScheduleDateGrid(props).props.children.map(button => button.props.disabled), [undefined, undefined]);
+  assert.deepEqual(state.ScheduleDateGrid({ ...props, minDate: props.today }).props.children.map(button => button.props.disabled), [true, false]);
+});
+
+test("recurring block editor reuses an overlay calendar and compact midnight-aware inputs", () => {
+  const slots = []; let cursor = 0, focused = false, value = { date: "2026-11-03", time: "23:30", duration: 30, error: "旧错误" };
+  const state = load(["RecurringBlockTimeEditor"], {
+    React, Icon: () => null, ScheduleDateGrid: () => null, BlockEditorTimeRangeRail: () => null,
+    useState(initial) { const index = cursor++; if (!(index in slots)) slots[index] = initial; return [slots[index], next => { slots[index] = next; }]; },
+    useRef: () => ({ current: { focus() { focused = true; } } }), useMemo: fn => fn(), useLayoutEffect() {}, calendarCells: () => [],
+    pickerDateLabel: date => date, recurringClockRange, recurringRangeInput, formatWorkloadMinutes: minutes => `${minutes} 分钟`
+  });
+  const render = () => { cursor = 0; return state.RecurringBlockTimeEditor({ value, today: "2026-11-03", onChange: next => { value = next; } }); };
+  let tree = render();
+  const dateButton = () => tree.props.children[0].props.children[1];
+  assert.equal(dateButton().props["aria-expanded"], false);
+  dateButton().props.onClick(); tree = render();
+  assert.equal(dateButton().props["aria-expanded"], true);
+  const grid = tree.props.children[0].props.children[2].props.children[2];
+  assert.equal(grid.props.minDate, "2026-11-03");
+  grid.props.onSelect("2026-11-02"); assert.equal(value.date, "2026-11-03");
+  grid.props.onSelect("2026-11-05"); tree = render();
+  assert.equal(value.date, "2026-11-05"); assert.equal(value.error, ""); assert.equal(focused, true);
+  assert.equal(dateButton().props["aria-expanded"], false);
+  dateButton().props.onClick(); tree = render();
+  let prevented = false, stopped = false;
+  tree.props.onKeyDown({ key: "Escape", preventDefault() { prevented = true; }, stopPropagation() { stopped = true; } }); tree = render();
+  assert.equal(prevented && stopped, true); assert.equal(dateButton().props["aria-expanded"], false);
+  const rail = tree.props.children[1].props.children[1];
+  assert.equal(rail.props.start, "23:30"); assert.equal(rail.props.end, "24:00");
+  assert.equal(rail.props.minimumDuration, 1); assert.equal(rail.props.maxMinute, 1440); assert.equal(rail.props.allowMidnightEnd, true);
+  assert.equal(rail.props.inputsOnly, true); assert.equal(rail.props.describedBy, undefined);
+  rail.props.onChange({ start: "23:59", end: "24:00" });
+  assert.equal(value.time, "23:59"); assert.equal(value.duration, 1); assert.equal(value.date, "2026-11-05");
+});
+
+test("inputs-only range omits the rail, hints, presets and visible edge labels while defaults stay intact", () => {
+  const state = load(["BlockEditorTimeRangeRail"], {
+    React, Fragment: React.Fragment, Icon: () => null, useRef: React.useRef, useState: React.useState, useEffect: React.useEffect,
+    MIN_TASK_BLOCK_MINUTES: 15,
+    clockMinutes: value => { const [h, m] = value.split(":").map(Number); return h * 60 + m; },
+    minutesClock: minute => `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`,
+    focusedTimeRangePresentation: () => ({ kind: "continuous", window: { start: 480, end: 720 } }),
+    continuousTimeRangeGeometry: () => ({ startPosition: 0, endPosition: 100, midpointPosition: 50 }),
+    continuousTimeScaleMarks: () => [], formatWorkloadMinutes: value => `${value} m`
+  });
+  for (const inputsOnly of [false, true]) {
+    const html = renderToStaticMarkup(React.createElement(state.BlockEditorTimeRangeRail, { start: "09:00", end: "11:00", onChange() {}, inputsOnly }));
+    assert.equal((html.match(/type="text"/g) ?? []).length, 2);
+    if (inputsOnly) {
+      assert.doesNotMatch(html, /time-rail-surface|time-duration-presets|time-range-marker|>开始<|>结束</);
+      assert.match(html, /aria-label="输入开始时间"/); assert.match(html, /aria-label="输入结束时间"/);
+    } else {
+      assert.match(html, /time-rail-surface/); assert.match(html, /time-duration-presets/); assert.match(html, /time-range-marker/);
+    }
+  }
 });

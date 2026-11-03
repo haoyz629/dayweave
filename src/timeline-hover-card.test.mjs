@@ -14,14 +14,41 @@ const compile = code => ts.transpileModule(code, { compilerOptions: { target: ts
 const today = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "TodayPage");
 const names = ["showTimelineTooltipForTarget", "cancelTimelineTooltipHide", "hideTimelineTooltip", "scheduleTimelineTooltipHide", "timelineTooltipProps"];
 const handlers = today.body.statements.filter(node => ts.isFunctionDeclaration(node) && names.includes(node.name?.text)).map(node => node.getText(source));
-let dismissEffect, cardExpression, saveHandler;
+let dismissEffect, cardExpression, saveHandler, blockTooltipDetail;
 function collect(node) {
   if (ts.isCallExpression(node) && node.expression.getText(source) === "useEffect" && node.getText(source).includes("if (!timelineTooltip) return;")) dismissEffect = node.arguments[0].getText(source);
   if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(source) === "TaskTimelineHoverCard") cardExpression = node.getText(source);
   if (ts.isFunctionDeclaration(node) && node.name?.text === "saveRecurringItem") saveHandler = node.getText(source);
+  if (ts.isPropertyAssignment(node) && node.name.getText(source) === "detail" && node.initializer.getText(source).includes("block.review")) blockTooltipDetail = node.initializer.getText(source);
   ts.forEachChild(node, collect);
 }
 collect(source);
+
+test("task tooltip separates only nonempty priority and status details", () => {
+  assert.ok(blockTooltipDetail);
+  const priorityCopy = { high: "高优先级", medium: "中优先级", low: "低优先级" };
+  const reviewOutcomeCopy = { completed: "完成", incomplete: "未完成" };
+  const hint = "上下拖动调整时间·点击精确编辑";
+  const cases = [
+    { task: { priority: "medium" }, expected: "中优先级" },
+    { task: { priority: "high" }, expected: "高优先级" },
+    { task: { priority: "low" }, expected: "低优先级" },
+    { task: { priority: null }, expected: "" },
+    { task: undefined, expected: "" },
+    { task: { priority: "medium" }, draggable: true, expected: `中优先级 · ${hint}` },
+    { task: undefined, draggable: true, expected: hint },
+    { task: { priority: "medium" }, effectiveOutcome: "incomplete", expected: "中优先级 · 本次未完成 · 已记录" },
+    { task: undefined, effectiveOutcome: "completed", expected: "本次完成 · 已记录" },
+    { task: { priority: "medium" }, block: { review: { outcome: "incomplete", followup_action: "continue" } }, expected: "中优先级 · 未完成 · 继续" },
+    { task: undefined, block: { review: { outcome: "completed", followup_action: null } }, expected: "完成 · 已记录" }
+  ];
+  for (const { task, draggable = false, block = {}, effectiveOutcome = null, expected } of cases) {
+    const state = { task, block, effectiveOutcome, priorityCopy, reviewOutcomeCopy, taskNextActionLabels: { continue: "继续" }, canDragTimelineBlock: () => draggable };
+    const detail = vm.runInNewContext(compile(`(${blockTooltipDetail});`), state);
+    assert.equal(detail, expected);
+    assert.doesNotMatch(detail, /^\s*·|·\s*$/);
+  }
+});
 
 function loadCard(hooks = React, extra = {}) {
   const state = { React, exports: {}, require: name => { if (name === "./copy-separator") return { SeparatedCopy }; assert.equal(name, "react"); return hooks; }, ...extra };

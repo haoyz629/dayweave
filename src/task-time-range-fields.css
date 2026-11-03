@@ -1,0 +1,13 @@
+.task-time-range-fields { display: grid; min-width: 0; gap: 16px; }
+.task-time-range-fields > .task-time-range-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--jx-muted); font-size: 12px; font-weight: 500; line-height: 18px; }
+.task-time-range-heading > output { padding: 3px 9px; border-radius: 6px; color: var(--jx-ink-soft); background: var(--jx-paper); font-size: 11px; }
+.task-time-range-fields > .task-time-range-inputs { display: grid; grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr); align-items: center; gap: 10px; }
+.task-time-range-fields .task-time-range-inputs > input { box-sizing: border-box; width: 100%; min-width: 0; height: 42px; margin: 0; padding: 0 9px; border: 1px solid var(--jx-edge); border-radius: 10px; color: var(--jx-ink); background: var(--color-panel); font: 600 14px/1 var(--jx-font-sans); font-variant-numeric: tabular-nums; text-align: center; }
+.task-time-range-fields .task-time-range-inputs > input:hover:not(:disabled) { border-color: var(--jx-focus); }
+.task-time-range-fields :is(input, button):focus-visible { outline: 2px solid var(--jx-focus); outline-offset: 2px; }
+.task-time-range-arrow { display: grid; align-self: center; place-items: center; padding: 0; color: var(--jx-muted); }
+.task-time-range-fields > .task-time-range-presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.task-time-range-presets > span { grid-column: 1 / -1; color: var(--jx-muted); font-size: 11px; line-height: 18px; }
+.task-time-range-fields .task-time-range-presets > button { width: auto; min-width: 0; min-height: 32px; padding: 0 4px; border: 1px solid var(--jx-edge); border-radius: 6px; color: var(--jx-ink-soft); background: var(--jx-paper); font: 500 11px/1.4 var(--jx-font-sans); white-space: nowrap; }
+.task-time-range-fields .task-time-range-presets > button:is(:hover, [aria-pressed="true"]):not(:disabled) { border-color: var(--jx-focus); color: var(--jx-focus); background: var(--jx-focus-soft); }
+.task-time-range-fields :is(input, button):disabled { opacity: .55; cursor: not-allowed; }

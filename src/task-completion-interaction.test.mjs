@@ -481,3 +481,60 @@ test("completed checkbox and result form rendered before Shanghai midnight canno
   assert.equal(current.state.executionMessage, rules.HISTORY_COMPLETION_LOCKED_MESSAGE);
   assert.equal(current.state.feedback, rules.HISTORY_COMPLETION_LOCKED_MESSAGE);
 });
+
+test("saving an already completed cross-day result never repeats whole-task completion without an explicit choice", async () => {
+  const end = `${today}T10:00:00+08:00`;
+  const task = { ...baseTask, earliest_start_date: previous, due_date: today, result_date: today, result_ends_at: end };
+  const block = { ...baseBlock, result_date: today, result_ends_at: end, ends_at: end };
+  for (const wholeTask of [undefined, false]) {
+    const current = harness({ task, block, selectedDate: today, now: `${today}T12:00:00+08:00` });
+    current.state.executionDraft = { result: "completed", outcome: "completed", note: "  仅修改备注  ", wholeTask };
+    await current.state.saveSelectedBlockExecution();
+    assert.equal(current.calls[0][0], "result");
+    assert.equal(current.calls[0][2].outcome, "completed");
+    assert.equal(current.calls[0][2].note, "仅修改备注");
+    assert.equal(current.calls.some(([type]) => ["complete-task", "reopen", "clear"].includes(type)), false);
+    assert.equal(current.state.savingExecution, false);
+  }
+});
+
+test("note-only dialog saves never offer undo regardless of daily or whole-task completion", async () => {
+  const end = `${today}T10:00:00+08:00`;
+  const savedResults = [
+    ["completed", null], ["planned", { outcome: "completed" }], ["not_started", { outcome: "completed" }],
+    ["not_started", null], ["planned", { outcome: "not_started" }], ["completed", { outcome: "not_started" }]
+  ];
+  for (const crossDay of [false, true]) for (const status of ["scheduled", "done"]) for (const [execution_status, review] of savedResults) {
+    const task = { ...baseTask, status, earliest_start_date: crossDay ? previous : today, due_date: today, result_date: today, result_ends_at: end };
+    const block = { ...baseBlock, task_status: status, execution_status, review, result_date: today, result_ends_at: end, ends_at: end };
+    const current = harness({ task, block, selectedDate: today, now: `${today}T12:00:00+08:00` });
+    const outcome = review?.outcome ?? execution_status;
+    current.state.executionDraft = { outcome, result: rules.executionResultForOutcome(outcome), note: "  只改备注  " };
+    let reads = 0;
+    current.state.latestUndo = async () => ({ id: `undo-${++reads}`, target_type: "execution_capture", target_id: task.id });
+    await current.state.saveSelectedBlockExecution();
+    assert.equal(current.calls[0][0], "result");
+    assert.equal(current.calls[0][2].outcome, outcome);
+    assert.equal(current.calls[0][2].note, "只改备注");
+    const toast = current.calls.find(([type]) => type === "toast");
+    assert.ok(toast, "note-only saves retain the ordinary success confirmation");
+    assert.equal(toast[4], undefined, `${crossDay}/${status}/${execution_status}/${review?.outcome}`);
+    assert.equal(reads, 0, "unchanged outcomes need not look up an undo to display");
+  }
+});
+
+test("dialog transitions to completed still offer undo using the effective reviewed result", async () => {
+  const end = `${today}T10:00:00+08:00`;
+  for (const [execution_status, review] of [["planned", null], ["not_started", null], ["completed", { outcome: "not_started" }]]) {
+    const task = { ...baseTask, status: "scheduled", result_date: today, result_ends_at: end };
+    const block = { ...baseBlock, task_status: "scheduled", execution_status, review, result_date: today, result_ends_at: end, ends_at: end };
+    const current = harness({ task, block, selectedDate: today, now: `${today}T12:00:00+08:00` });
+    current.state.executionDraft = { outcome: "completed", result: "completed", note: "完成并更新备注" };
+    let reads = 0;
+    current.state.latestUndo = async () => ({ id: `undo-${++reads}`, target_type: "execution_capture", target_id: task.id });
+    await current.state.saveSelectedBlockExecution();
+    assert.equal(current.calls[0][2].outcome, "completed");
+    assert.equal(current.calls.find(([type]) => type === "toast")[4], "undo-2");
+    assert.equal(reads, 2);
+  }
+});

@@ -321,11 +321,13 @@ test("result notes stay visible and editable without reasons or followup schedul
 });
 
 
-test("calendar and daily plan behave as one two-level workspace", () => {
+test("calendar, weekly overview and daily plan share the schedule workspace", () => {
   assert.doesNotMatch(appSource, /aria-label="今日页视图"/);
   assert.match(appSource, /className="timeline-view-switch" role="group" aria-label="日程视图"/);
   assert.match(appSource, /aria-pressed=\{todayView === "timeline"\}[^\n]+onClick=\{\(\) => openTimelineDate\(selectedDate\)\}>日视图<\/button>/);
-  assert.match(appSource, /aria-pressed="false" onClick=\{\(\) => onNotify\("周视图", "周视图暂未开放。"\)\}>周视图<\/button>/);
+  assert.match(appSource, /aria-pressed=\{todayView === "week"\}[^\n]+setTodayView\("week"\)[^\n]+>周视图<\/button>/);
+  assert.match(appSource, /todayView === "week" \? <WeekTimeline selectedDate=\{selectedDate\}/);
+  assert.doesNotMatch(appSource, /周视图暂未开放/);
   assert.match(appSource, /aria-pressed=\{todayView === "month"\}[^\n]+onClick=\{returnToMonth\}>月视图<\/button>/);
   assert.match(stylesSource, /\.timeline-view-switch button\.is-active/);
   assert.match(appSource, /onDoubleClick=\{\(\) => openTimelineDate\(cell\.key\)\}/);

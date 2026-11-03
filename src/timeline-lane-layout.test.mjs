@@ -114,8 +114,9 @@ test("drag previews cover draft blocks, multiple overlaps and exact adjacency", 
 
 test("the timeline wires the active drag into shared lanes and freezes the source placeholder", () => {
   const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-  assert.match(app, /const timelineItemLanes = timelineLaneLayout\(timelineItems, selectedDate, timelineDrag\)/);
-  assert.match(app, /drag \? \{ layoutKey: drag.key, startMinute: drag.start, endMinute: drag.end \} : null/);
+  assert.match(app, /const timelineItemLanes = timelineLaneLayout\(timelineItems, selectedDate, timelineDrag \?\? \(timelineCreateRange\?\.dragging/);
+  assert.match(app, /drag \? \{ layoutKey: drag.key, startMinute: drag.start, endMinute: drag.end \} : null\)/);
+  assert.doesNotMatch(app, /timelineLaneOrderRef|rememberTimelineMove/);
   assert.match(app, /sourceLane: timelineItemLanes\[/);
   assert.match(app, /className="timeline-drag-source"[^\n]+timelineDragRef.current.sourceLane/);
 });
@@ -126,4 +127,57 @@ test("shared overlap transitions animate horizontally without delaying vertical 
   assert.match(rule, /transition: left \.18s ease, right \.18s ease,/);
   assert.doesNotMatch(rule, /(?:transition:|,)\s*(?:top|all)\s/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{ \.timeline-event \{ transition: none; \} \}/);
+});
+
+test("a dragged block stays after its neighbour while crossing its start time in either direction", () => {
+  const moving = item("block:moving", 300, 360), target = item("block:target", 600, 720);
+  for (const start of [570, 585, 600, 615, 660, 615, 600, 585, 570]) {
+    const lanes = timelineLaneLayout([moving, target], item(moving.layoutKey, start, start + 60));
+    assert.deepEqual(lanes[target.layoutKey], { column: 0, columnSpan: 1, total: 2 });
+    assert.deepEqual(lanes[moving.layoutKey], { column: 1, columnSpan: 1, total: 2 });
+  }
+});
+
+test("releasing a drag restores chronological columns regardless of refreshed input ordering", () => {
+  const items = [item("A", 570, 660), item("B", 600, 720), item("C", 585, 690)];
+  for (const input of [items, [...items].reverse()]) {
+    const dragging = timelineLaneLayout(input, items[0]);
+    assert.deepEqual([dragging.C.column, dragging.B.column, dragging.A.column], [0, 1, 2]);
+    const released = timelineLaneLayout(input);
+    assert.deepEqual([released.A.column, released.C.column, released.B.column], [0, 1, 2]);
+    const next = timelineLaneLayout(input, item("C", 555, 675));
+    assert.deepEqual([next.A.column, next.B.column, next.C.column], [0, 1, 2]);
+    assert.deepEqual(timelineLaneLayout(input), released);
+  }
+});
+
+test("moved blocks stay after directly overlapping neighbours even when a left column is free", () => {
+  const items = [item("A", 540, 600), item("B", 570, 630), item("C", 840, 900)];
+  const lanes = timelineLaneLayout(items, item("C", 600, 660));
+  assert.equal(lanes.A.column, 0);
+  assert.equal(lanes.B.column, 1);
+  assert.equal(lanes.C.column, 2);
+  assert.equal(lanes.C.total, 3);
+});
+
+test("drag priority does not join separate groups or make adjacent blocks overlap", () => {
+  const items = [item("A", 540, 600), item("B", 600, 660), item("C", 900, 960), item("D", 930, 990)];
+  const lanes = timelineLaneLayout(items, items[2]);
+  assert.deepEqual(lanes.A, { column: 0, columnSpan: 1, total: 1 });
+  assert.deepEqual(lanes.B, { column: 0, columnSpan: 1, total: 1 });
+  assert.equal(lanes.D.column, 0);
+  assert.equal(lanes.C.column, 1);
+  assert.equal(lanes.C.total, 2);
+});
+
+test("nonchronological placement never puts actual overlapping blocks in the same column", () => {
+  const items = [item("A", 540, 720), item("B", 570, 630), item("C", 600, 660), item("D", 630, 690)];
+  for (const preview of [null, ...items]) {
+    const lanes = timelineLaneLayout(items, preview);
+    for (const left of items) for (const right of items) {
+      if (left === right || left.startMinute >= right.endMinute || left.endMinute <= right.startMinute) continue;
+      const a = lanes[left.layoutKey], b = lanes[right.layoutKey];
+      assert.ok(a.column + a.columnSpan <= b.column || b.column + b.columnSpan <= a.column);
+    }
+  }
 });

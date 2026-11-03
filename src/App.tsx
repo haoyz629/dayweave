@@ -19,7 +19,9 @@ import { AppTitlebar } from "./app-titlebar";
 import { CopySeparator, SeparatedCopy } from "./copy-separator";
 import { compactBlockDuration, taskBlockType, taskBlockTypeLabels, TaskBlockType } from "./task-block-display";
 import { TimelineTaskCreate, TimelineCreateRange } from "./timeline-task-create";
+import { TaskTimeRangeFields } from "./task-time-range-fields";
 import { isTaskTimelineTooltip, TaskTimelineHoverCard, TimelineHoverCopyButton, TimelineTooltipContent, TimelineTooltipState } from "./timeline-hover-card";
+import { WeekTimeline } from "./week-timeline";
 import { recurringTimeBlockIssue, recurringOccurrenceInput, recurringChangeIssue, recurringTimeRange, recurringClockRange, recurringRangeInput, RecurringScheduleChange, RecurringEditScope } from "./recurring-schedule";
 import { RecurringScopeConfirmation } from "./recurring-scope-confirmation";
 import { setAppLogoMode, setAppWindowTitle } from "./tauri";
@@ -147,7 +149,7 @@ type IconName =
   | "today" | "tasks" | "calendar" | "review" | "settings"
   | "plus" | "sparkle" | "more" | "check" | "send" | "search"
   | "trash" | "restore" | "close" | "clock" | "filter" | "user" | "info" | "chevron-left" | "chevron-right" | "chevron-down"
-  | "pause" | "sliders" | "checkbox" | "file" | "external-link" | "deadline" | "locate";
+  | "pause" | "sliders" | "checkbox" | "file" | "external-link" | "deadline" | "locate" | "pencil";
 
 const navigation: { label: string; icon: IconName; asset: string; description: string }[] = [
   { label: "今日", icon: "today", asset: navTodayIcon, description: "月历与日计划" },
@@ -237,6 +239,7 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     restore: <><path d="M4 12a8 8 0 1 0 2.34-5.66L4 8.68" /><path d="M4 4v4.68h4.68" /></>,
     close: <path d="m6 6 12 12M18 6 6 18" />,
     clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+    pencil: <><path d="m16 3 5 5L8 21H3v-5L16 3Z" /><path d="m14 5 5 5" /></>,
     locate: <><circle cx="12" cy="12" r="7" /><circle cx="12" cy="12" r="2" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></>,
     filter: <path d="M3 5h18l-7 8v6l-4 2v-8L3 5Z" />,
     user: <><circle cx="12" cy="8" r="3.2" /><path d="M5.5 20a6.5 6.5 0 0 1 13 0" /></>,
@@ -547,7 +550,7 @@ function ExecutionOutcomePicker({ result, disabled, label, onChange, onCompleteT
   wholeTask?: boolean;
 }) {
   return <div className="execution-choice-stack compact"><div className="floating-outcomes" role="group" aria-label={label} style={onCompleteTask ? { gridTemplateColumns: "repeat(3, minmax(0, 1fr))" } : undefined}>
-    {executionResultOptions.map(([value, text]) => <button key={value} type="button" data-outcome={value} aria-pressed={!wholeTask && result === value} disabled={disabled} onClick={() => onChange(value, value === "completed" ? "completed" : "not_started")}>{!wholeTask && result === value && <Icon name="check" size={14} />}{onCompleteTask && value === "completed" ? "当天完成" : text}</button>)}
+    {executionResultOptions.map(([value, text]) => <button key={value} type="button" data-outcome={value} aria-pressed={result === value} disabled={disabled} onClick={() => onChange(value, value === "completed" ? "completed" : "not_started")}>{result === value && <Icon name="check" size={14} />}{onCompleteTask && value === "completed" ? "当天完成" : text}</button>)}
     {onCompleteTask && <button type="button" data-action="complete-task" aria-pressed={wholeTask} disabled={disabled || completeTaskDisabled} onClick={onCompleteTask}>{wholeTask && <Icon name="check" size={14} />}整体完成</button>}
   </div></div>;
 }
@@ -818,10 +821,7 @@ function RecurringBlockTimeEditor({ value, today, onChange }: {
         <ScheduleDateGrid cells={cells} today={today} start={value.date} end={value.date} range={{ start: value.date, end: value.date, preview: false }} minDate={today} onSelect={selectDate} onHover={() => {}} />
       </section>}
     </section>
-    <section className="recurring-block-range-section" aria-label="安排时间">
-      <header><span className="recurring-block-field-label">时间范围</span><output>{formatWorkloadMinutes(value.duration ?? 0)}</output></header>
-      <BlockEditorTimeRangeRail start={range.start} end={range.end} minimumDuration={1} maxMinute={24 * 60} allowMidnightEnd inputsOnly onChange={(next) => { const input = recurringRangeInput(next); onChange({ ...value, time: input.display_time, duration: input.display_duration_minutes, error: "" }); }} />
-    </section>
+    <BlockEditorTimeRangeRail start={range.start} end={range.end} minimumDuration={1} maxMinute={24 * 60} allowMidnightEnd inputsOnly onChange={(next) => { const input = recurringRangeInput(next); onChange({ ...value, time: input.display_time, duration: input.display_duration_minutes, error: "" }); }} />
   </div>;
 }
 
@@ -4003,12 +4003,13 @@ function waitingTaskTooltipDetail(task: Task | undefined, primary: string) {
 type TimelineSelection = { kind: "block" | "event" | "draft" | "recurring"; id: string };
 type ExecutionDraft = { result: ExecutionResult | null; outcome: ExecutionOutcome | null; note: string; wholeTask?: boolean };
 
-function ExecutionCaptureFields({ draft, disabled, onChange, onCompleteTask, completeTaskDisabled }: {
-  draft: ExecutionDraft; disabled: boolean; onChange: (update: Partial<ExecutionDraft>) => void; onCompleteTask?: () => void; completeTaskDisabled?: boolean;
+function ExecutionCaptureFields({ draft, disabled, onChange, onCompleteTask, completeTaskDisabled, taskCompleted = false }: {
+  draft: ExecutionDraft; disabled: boolean; onChange: (update: Partial<ExecutionDraft>) => void; onCompleteTask?: () => void; completeTaskDisabled?: boolean; taskCompleted?: boolean;
 }) {
+  const choseIncomplete = draft.wholeTask === false && draft.result === "not_completed";
   return <div className="execution-capture-fields">
     <div className="execution-result-label">任务结果</div>
-    <ExecutionOutcomePicker label="任务结果" result={draft.result} disabled={disabled} onChange={(result, outcome) => onChange({ result, outcome, wholeTask: false })} onCompleteTask={onCompleteTask} completeTaskDisabled={completeTaskDisabled} wholeTask={draft.wholeTask} />
+    <ExecutionOutcomePicker label="任务结果" result={draft.result} disabled={disabled} onChange={(result, outcome) => onChange({ result, outcome, wholeTask: false })} onCompleteTask={onCompleteTask} completeTaskDisabled={completeTaskDisabled} wholeTask={draft.wholeTask || (taskCompleted && !choseIncomplete)} />
     <label className="floating-execution-note"><span>备注<small>可选</small></span><textarea rows={3} maxLength={500} placeholder="记录进展或需要留意的事…" value={draft.note} disabled={disabled} onChange={(event) => onChange({ note: event.target.value })} /></label>
   </div>;
 }
@@ -4648,12 +4649,16 @@ function BlockEditorTimeRangeRail({
   const selectionFillRight = continuousGeometry ? `calc(${100 - continuousGeometry.endPosition}% - ${endpointWrapPadding}px)` : "0%";
   const intervalBadgeLeft = continuousGeometry ? `${continuousGeometry.midpointPosition}%` : "50%";
 
+  function renderTimeInput(edge: TimeRangeEdge) {
+    return <input type="text" inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={5} disabled={disabled} value={inputValues[edge]} aria-label={edge === "start" ? "输入开始时间" : "输入结束时间"} aria-describedby={inputsOnly ? undefined : describedBy} onFocus={(event) => { editingInputRef.current = edge; setActiveEdge(edge); event.currentTarget.select(); }} onChange={(event) => setInputValues((current) => ({ ...current, [edge]: sanitizeTimeInput(event.target.value) }))} onKeyDown={(event) => handleInputKeyDown(event, edge)} onBlur={() => { commitInput(edge); editingInputRef.current = null; setActiveEdge(null); }} />;
+  }
+
   return <div className="time-range-rail block-editor">
-    <div className="time-range-values block-editor-values" aria-label="选择开始和结束时间">
-      <label className={highlightedEdge === "start" ? "is-active" : ""}>{!inputsOnly && <span><i className="time-range-marker start" aria-hidden="true" />开始</span>}<input type="text" inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={5} disabled={disabled} value={inputValues.start} aria-label="输入开始时间" aria-describedby={describedBy} onFocus={(event) => { editingInputRef.current = "start"; setActiveEdge("start"); event.currentTarget.select(); }} onChange={(event) => setInputValues((current) => ({ ...current, start: sanitizeTimeInput(event.target.value) }))} onKeyDown={(event) => handleInputKeyDown(event, "start")} onBlur={() => { commitInput("start"); editingInputRef.current = null; setActiveEdge(null); }} /></label>
+    {inputsOnly ? <TaskTimeRangeFields startInput={renderTimeInput("start")} endInput={renderTimeInput("end")} duration={durationMinutes} maxDuration={endDomainMax - safeStartMinute} disabled={disabled} showPresets={showPresets} onDuration={setDuration} /> : <div className="time-range-values block-editor-values" aria-label="选择开始和结束时间">
+      <label className={highlightedEdge === "start" ? "is-active" : ""}><span><i className="time-range-marker start" aria-hidden="true" />开始</span>{renderTimeInput("start")}</label>
       <span className="time-range-connector" aria-hidden="true"><Icon name="chevron-right" size={14} /></span>
-      <label className={highlightedEdge === "end" ? "is-active" : ""}>{!inputsOnly && <span><i className="time-range-marker end" aria-hidden="true" />结束</span>}<input type="text" inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={5} disabled={disabled} value={inputValues.end} aria-label="输入结束时间" aria-describedby={describedBy} onFocus={(event) => { editingInputRef.current = "end"; setActiveEdge("end"); event.currentTarget.select(); }} onChange={(event) => setInputValues((current) => ({ ...current, end: sanitizeTimeInput(event.target.value) }))} onKeyDown={(event) => handleInputKeyDown(event, "end")} onBlur={() => { commitInput("end"); editingInputRef.current = null; setActiveEdge(null); }} /></label>
-    </div>
+      <label className={highlightedEdge === "end" ? "is-active" : ""}><span><i className="time-range-marker end" aria-hidden="true" />结束</span>{renderTimeInput("end")}</label>
+    </div>}
     {!inputsOnly && describedBy && <small id={describedBy} className="sr-only">{collapsedPresentation
       ? <>拖动两侧端点<CopySeparator />中间不可拖动</>
       : <>手写 1 分钟<CopySeparator />时间轴与方向键 5 分钟<CopySeparator />最短 {minimumDuration} 分钟</>}</small>}
@@ -4848,7 +4853,7 @@ function TodayPage({
 }) {
   const [monthKey, setMonthKey] = useState(selectedDate.slice(0, 7));
   const [monthSelectionPending, setMonthSelectionPending] = useState(false);
-  const [todayView, setTodayView] = useState<"month" | "timeline">("timeline");
+  const [todayView, setTodayView] = useState<"month" | "timeline" | "week">("timeline");
   const [calendarDateHint, setCalendarDateHint] = useState<{ date: string; left: number; top: number } | null>(null);
   const monthSheetRef = useRef<HTMLElement>(null);
   const monthWheelGestureRef = useRef({ delta: 0, lastAt: 0, flipped: false });
@@ -4938,7 +4943,8 @@ function TodayPage({
     ...recurringTimelineBlocks.map((block) => ({ ...block, layoutKey: block.layoutKey, timelineKind: "recurring" as const })),
     ...(timelineCreateRange ? [{ layoutKey: "create:selection", starts_at: planTimestamp(selectedDate, minutesClock(timelineCreateRange.start)), ends_at: planTimestamp(selectedDate, minutesClock(timelineCreateRange.end)), timelineKind: "create" as const }] : [])
   ];
-  const timelineItemLanes = timelineLaneLayout(timelineItems, selectedDate, timelineDrag);
+  const timelineItemLanes = timelineLaneLayout(timelineItems, selectedDate, timelineDrag ?? (timelineCreateRange?.dragging
+    ? { key: "create:selection", start: timelineCreateRange.start, end: timelineCreateRange.end } : null));
   const scheduledTaskIds = new Set(visibleTaskBlocks.map((block) => block.task_id));
   const draftTaskIds = new Set(draftBlocks.map((block) => block.task_id));
   const waitingTasks = tasks.filter((task) =>
@@ -4999,6 +5005,7 @@ function TodayPage({
   const selectedShortDateTitle = selectedDateTitle.replace(/^\d{4}年/, "");
   const selectedWeek = isoWeekParts(selectedDate);
   const headingContext = todayView === "month" ? `${monthTitle} · 月历总览`
+    : todayView === "week" ? `${selectedWeek.year} 第${selectedWeek.week}周 · 周日程`
     : `${selectedWeek.year} 第 ${selectedWeek.week} 专注周 · ${selectedWeekday.replace("星期", "周")}日计划`;
   const windowTitle = `今序 · Dayweave / ${headingContext}`;
 
@@ -6135,9 +6142,10 @@ function TodayPage({
         await completeTask(selectedTask.id, null, executionDraft.note.trim() || null);
       } else if (resultDate === resultToday(Date.now())) {
         const input = taskExecutionResolution(selectedBlock, selectedTask, executionDraft.outcome, executionDraft.note);
-        const previousUndo = input.outcome === "completed" ? await latestUndo().catch(() => null) : null;
+        const canOfferUndo = input.outcome === "completed" && (selectedBlock.review?.outcome ?? selectedBlock.execution_status) !== "completed";
+        const previousUndo = canOfferUndo ? await latestUndo().catch(() => null) : null;
         await resolveTaskExecution(resultDate, input);
-        if (input.outcome === "completed") {
+        if (canOfferUndo) {
           const undo = await latestUndo().catch(() => null);
           if (undo?.target_type === "execution_capture" && undo.target_id === selectedBlock.task_id && undo.id !== previousUndo?.id) undoId = undo.id;
         }
@@ -6188,10 +6196,10 @@ function TodayPage({
 
 
   return (
-    <section className="next-page today-page" aria-label="今日">
+    <section className={`next-page today-page${todayView === "week" ? " is-week-view" : ""}`} aria-label="今日">
       {headerViewSlot && createPortal(<div className="timeline-view-switch" role="group" aria-label="日程视图">
         <button type="button" aria-pressed={todayView === "timeline"} className={todayView === "timeline" ? "is-active" : ""} onClick={() => openTimelineDate(selectedDate)}>日视图</button>
-        <button type="button" aria-pressed="false" onClick={() => onNotify("周视图", "周视图暂未开放。")}>周视图</button>
+        <button type="button" aria-pressed={todayView === "week"} className={todayView === "week" ? "is-active" : ""} onClick={() => { setSelection(null); setPlanDraftTimeEdit(null); setTimelineTooltip(null); setTodayView("week"); }}>周视图</button>
         <button type="button" aria-pressed={todayView === "month"} className={todayView === "month" ? "is-active" : ""} onClick={returnToMonth}>月视图</button>
       </div>, headerViewSlot)}
       {message && <p className="page-status" role="status">{message}</p>}
@@ -6221,7 +6229,7 @@ function TodayPage({
           </div>
         </header>}
 
-        {todayView === "month" ? <main className="today-month-view" aria-label={monthTitle}>
+        {todayView === "week" ? <WeekTimeline selectedDate={selectedDate} today={today} tasks={tasks} recurringItems={recurringItems} onSelectDate={selectCalendarDate} /> : todayView === "month" ? <main className="today-month-view" aria-label={monthTitle}>
           <section ref={monthSheetRef} className="month-sheet today-month-sheet" aria-label="月历，可使用滚轮切换月份">
             <div className="month-controls">
               <div aria-hidden="true" />
@@ -6305,12 +6313,12 @@ function TodayPage({
                 </> : planDraftTimeEdit && (selectedDraftBlock || selectedBlock) ? <>
                   <header><div className="timeline-panel-heading">{planDraftTimeEdit.sourceBlockId && <button type="button" className="timeline-panel-back" aria-label="返回任务块详情" title="返回任务块详情" disabled={busy} onClick={returnToSelectedBlockDetails}><Icon name="chevron-left" size={16} /></button>}<div className="timeline-panel-heading-copy"><strong>调整时间</strong><small>{selectedDraftBlock?.task_title ?? selectedBlock?.task_title}</small></div></div>{(planDraftTimeEdit.starts_at !== planDraftTimeEdit.original_starts_at || planDraftTimeEdit.ends_at !== planDraftTimeEdit.original_ends_at) && <button type="button" className="timeline-time-reset" aria-label="重置为调整前的时间" title="重置为调整前的时间" disabled={busy} onClick={resetPlanDraftTime}><Icon name="restore" size={14} />重置时间</button>}<button type="button" aria-label="关闭时间调整面板" onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></header>
                   <form className="plan-draft-time-form" noValidate onSubmit={(event) => void savePlanDraftTime(event)}>
-                    <div className="plan-draft-time-fields"><BlockEditorTimeRangeRail start={planDraftTimeEdit.starts_at} end={planDraftTimeEdit.ends_at} segments={nonWorkingTimeSegments} disabled={busy} describedBy="plan-draft-sync-note" minimumDuration={MIN_TASK_BLOCK_MINUTES} onChange={(next) => setPlanDraftTimeEdit({ ...planDraftTimeEdit, starts_at: next.start, ends_at: next.end, error: "" })} /></div>
+                    <div className="plan-draft-time-fields"><BlockEditorTimeRangeRail start={planDraftTimeEdit.starts_at} end={planDraftTimeEdit.ends_at} inputsOnly disabled={busy} minimumDuration={MIN_TASK_BLOCK_MINUTES} onChange={(next) => setPlanDraftTimeEdit({ ...planDraftTimeEdit, starts_at: next.start, ends_at: next.end, error: "" })} /></div>
                     {planDraftTimeEdit.error && <span className="plan-draft-edit-error" role="alert">{planDraftTimeEdit.error}</span>}
                     <footer><button type="button" className="execution-remove-today" disabled={busy} onClick={() => void removePlanDraftBlock()}><Icon name="trash" size={14} />从今日计划移除</button><div><button type="button" className="quiet-button" disabled={busy} onClick={closeTimelinePanel}>取消</button><button type="submit" className="primary-action" disabled={busy}>{busy ? "正在保存…" : "保存调整"}</button></div></footer>
                   </form>
                 </> : selectedBlock ? <><header><div className="execution-dialog-heading"><strong>{selectedBlock.task_title}</strong><span className={`execution-status-badge status-${selectedBlockDialog!.status}`}>{selectedBlockDialog!.label}</span></div><button type="button" aria-label="关闭执行面板" disabled={savingExecution || Boolean(quickCompletingBlockId)} onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></header>
-                  <div className="execution-plan-time"><div className="execution-plan-fact"><span>计划时间</span>{canAdjustSelectedBlock ? <button type="button" className="execution-time-value" aria-label={`调整计划时间：${timeRangeLabel(selectedBlock.starts_at, selectedBlock.ends_at)}`} disabled={busy || loading || savingExecution || Boolean(quickCompletingBlockId)} onClick={adjustSelectedBlockTime}><Icon name="clock" size={14} /><strong>{timeRangeLabel(selectedBlock.starts_at, selectedBlock.ends_at)}</strong></button> : <div className="execution-time-value"><Icon name="clock" size={14} /><strong>{timeRangeLabel(selectedBlock.starts_at, selectedBlock.ends_at)}</strong></div>}</div><div className="execution-plan-actions"><button type="button" className="execution-open-task" disabled={savingExecution || Boolean(quickCompletingBlockId)} onClick={() => openTimelineTask(selectedBlock.task_id, selectedBlock.id)}>查看任务<Icon name="external-link" size={12} /></button></div></div>
+                  <div className="execution-plan-time"><div className="execution-plan-fact"><span>计划时间</span>{canAdjustSelectedBlock ? <button type="button" className="execution-time-value" aria-label={`调整计划时间：${timeRangeLabel(selectedBlock.starts_at, selectedBlock.ends_at)}`} disabled={busy || loading || savingExecution || Boolean(quickCompletingBlockId)} onClick={adjustSelectedBlockTime}><Icon name="clock" size={14} /><strong>{timeRangeLabel(selectedBlock.starts_at, selectedBlock.ends_at)}</strong><span className="execution-time-edit-icon"><Icon name="pencil" size={13} /></span></button> : <div className="execution-time-value"><Icon name="clock" size={14} /><strong>{timeRangeLabel(selectedBlock.starts_at, selectedBlock.ends_at)}</strong></div>}</div><div className="execution-plan-actions"><button type="button" className="execution-open-task" disabled={savingExecution || Boolean(quickCompletingBlockId)} onClick={() => openTimelineTask(selectedBlock.task_id, selectedBlock.id)}>查看任务<Icon name="external-link" size={12} /></button></div></div>
                   {selectedBlock.review && !canRecordSelectedBlock ? <>
                     <div className={`floating-facts execution-${selectedBlock.review.outcome}`}><div><span>任务结果</span><strong>{reviewOutcomeCopy[selectedBlock.review.outcome]}</strong></div>{selectedBlock.review.followup_action && <div><span>下一步</span><strong>{taskNextActionLabels[selectedBlock.review.followup_action]}</strong></div>}{selectedBlock.review.actual_minutes !== null && <div><span>实际耗时</span><strong>{selectedBlock.review.actual_minutes} 分钟</strong></div>}{selectedBlock.review.remaining_workload_minutes !== null && <div><span>剩余工作量</span><strong>{selectedBlock.review.remaining_workload_minutes} 分钟</strong></div>}{selectedBlock.review.notes && <div className="wide"><span>备注</span><strong>{selectedBlock.review.notes}</strong></div>}{selectedBlock.review.defer_reason && <div className="wide"><span>原因</span><strong>{selectedBlock.review.defer_reason}</strong></div>}</div>
                     {selectedBlock.execution_note && selectedBlock.execution_note !== selectedBlock.review.notes && <p className="execution-capture-note">{selectedBlock.execution_note}</p>}
@@ -6321,7 +6329,7 @@ function TodayPage({
                   </> : executionDraft ? <>
                     <ExecutionCaptureFields key={selectedBlock.id} draft={executionDraft} disabled={savingExecution || busy || Boolean(quickCompletingBlockId)} onChange={updateExecutionDraft}
                       onCompleteTask={selectedTaskIsCrossDay && selectedTask && ["open", "scheduled", "done"].includes(selectedTask.status) && !selectedTask.deleted_at ? () => updateExecutionDraft({ result: "completed", outcome: "completed", wholeTask: true }) : undefined}
-                      completeTaskDisabled={loading || Boolean(preview) || !taskResultEditable(selectedTask, clock.getTime())} />
+                      taskCompleted={selectedTask?.status === "done"} completeTaskDisabled={loading || Boolean(preview) || !taskResultEditable(selectedTask, clock.getTime())} />
                     <p className="execution-capture-note">{executionDraft.wholeTask ? "保存后完成整个任务，已有日期记录会保留，后续未执行安排将不再显示。" : "仅记录当天结果，不改变其他日期的记录；所有日期完成后，任务自动完成。"}</p>
                   </> : null}
                   {executionMessage && <span role="alert" className="execution-capture-note error">{executionMessage}</span>}

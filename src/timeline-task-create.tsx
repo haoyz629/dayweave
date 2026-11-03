@@ -2,11 +2,13 @@ import { FormEvent, PointerEvent as ReactPointerEvent, RefObject, useEffect, use
 import { createPortal } from "react-dom";
 import { confirmCreationDraft, createManualTaskDraft, discardTaskDraft, saveTaskDraft, Task, TaskDraft, TaskDraftInput, Priority } from "./tauri";
 import { compactBlockDuration } from "./task-block-display";
+import { TaskTimeRangeFields } from "./task-time-range-fields";
+import { constrainTimeRange, normalizeClockInput, sanitizeTimeInput } from "./time-range-control";
 import "./timeline-task-create.css";
 
-export type TimelineCreateRange = { start: number; end: number };
+export type TimelineCreateRange = { start: number; end: number; dragging?: boolean };
 const clock = (minute: number) => `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
-const minute = (value: string) => { const [h, m] = value.split(":").map(Number); return h * 60 + m; };
+const minute = (value: string) => { if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return NaN; const [h, m] = value.split(":").map(Number); return h * 60 + m; };
 
 // The task model uses same-date timestamps; 24:00 is not a valid time.
 function selectedRange(anchor: number, end: number): TimelineCreateRange {
@@ -62,7 +64,7 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
   function updateSelection() {
     if (!pointer.current) return;
     rangeRef.current = selectedRange(pointer.current.anchor, snapAt(pointer.current.y));
-    onRange(rangeRef.current);
+    onRange({ ...rangeRef.current, dragging: true });
   }
 
   function autoScroll() {
@@ -120,6 +122,26 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
     }
   }
 
+  function commitTimeInput(field: "start" | "end", rawValue: string, delta = 0) {
+    if (!rangeRef.current) return;
+    const value = minute(normalizeClockInput(sanitizeTimeInput(rawValue)));
+    const next = constrainTimeRange(field, (Number.isFinite(value) ? value : rangeRef.current[field]) + delta, rangeRef.current, 0, 1439, 15, 1);
+    updateTimes(field, clock(next[field]));
+  }
+
+  function renderTimeInput(field: "start" | "end") {
+    if (!form) return null;
+    return <input type="text" name={field} inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={5} value={form[field]} aria-label={field === "start" ? "输入开始时间" : "输入结束时间"}
+      onFocus={(event) => event.currentTarget.select()}
+      onChange={(event) => { setForm({ ...form, [field]: sanitizeTimeInput(event.target.value) }); setError(""); }}
+      onBlur={(event) => commitTimeInput(field, event.currentTarget.value)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") { event.preventDefault(); commitTimeInput(field, event.currentTarget.value); event.currentTarget.select(); }
+        else if (event.key === "ArrowUp" || event.key === "ArrowDown") { event.preventDefault(); commitTimeInput(field, event.currentTarget.value, event.key === "ArrowUp" ? 5 : -5); }
+        else if (event.key === "Escape") { event.preventDefault(); updateTimes(field, clock(rangeRef.current![field])); }
+      }} />;
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!form || savingRef.current || disabled) return;
@@ -155,7 +177,7 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
     finally { savingRef.current = false; setSaving(false); close(); }
   }
 
-  const duration = form ? minute(form.end) - minute(form.start) : 0;
+  const duration = rangeRef.current ? rangeRef.current.end - rangeRef.current.start : 0;
   return <>
     <div ref={trackRef} className="selection-create-track" role="button" tabIndex={disabled ? -1 : 0}
       aria-label="框选创建任务" aria-disabled={disabled} title="在右侧拖选时间创建任务；Enter 创建 15 分钟任务"
@@ -178,7 +200,10 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
       <form noValidate onSubmit={(event) => void submit(event)}>
         <fieldset disabled={saving}>
           <label>任务标题<input ref={titleRef} name="title" maxLength={300} value={form.title} onChange={(event) => { setForm({ ...form, title: event.target.value }); setError(""); }} placeholder="这段时间要做什么？" /></label>
-          <div className="selection-times"><label>开始时间<input type="time" name="start" step={60} value={form.start} onChange={(event) => updateTimes("start", event.target.value)} /></label><label>结束时间<input type="time" name="end" step={60} value={form.end} onChange={(event) => updateTimes("end", event.target.value)} /></label></div>
+          <TaskTimeRangeFields duration={duration} maxDuration={1439 - minute(form.start)} disabled={saving}
+            startInput={renderTimeInput("start")}
+            endInput={renderTimeInput("end")}
+            onDuration={(minutes) => updateTimes("end", clock(minute(form.start) + minutes))} />
           <label>优先级<select name="priority" value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value as Priority })}><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
         </fieldset>
         {error && <p className="selection-error" role="alert">{error}</p>}

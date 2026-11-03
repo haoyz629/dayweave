@@ -6,6 +6,7 @@ import ts from "typescript";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { recurringClockRange, recurringRangeInput } from "./recurring-schedule.ts";
+import { compactBlockDuration } from "./task-block-display.ts";
 
 const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -27,6 +28,8 @@ function collect(node) {
   ts.forEachChild(node, collect);
 }
 collect(source);
+const fieldsSource = ts.createSourceFile("task-time-range-fields.tsx", readFileSync(new URL("./task-time-range-fields.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+functions.set("TaskTimeRangeFields", fieldsSource.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "TaskTimeRangeFields").getText(fieldsSource).replace("export ", ""));
 const compile = code => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
 function load(names, state) {
   vm.createContext(state);
@@ -171,7 +174,7 @@ test("recurring block editor reuses an overlay calendar and compact midnight-awa
   let prevented = false, stopped = false;
   tree.props.onKeyDown({ key: "Escape", preventDefault() { prevented = true; }, stopPropagation() { stopped = true; } }); tree = render();
   assert.equal(prevented && stopped, true); assert.equal(dateButton().props["aria-expanded"], false);
-  const rail = tree.props.children[1].props.children[1];
+  const rail = tree.props.children[1];
   assert.equal(rail.props.start, "23:30"); assert.equal(rail.props.end, "24:00");
   assert.equal(rail.props.minimumDuration, 1); assert.equal(rail.props.maxMinute, 1440); assert.equal(rail.props.allowMidnightEnd, true);
   assert.equal(rail.props.inputsOnly, true); assert.equal(rail.props.describedBy, undefined);
@@ -179,9 +182,9 @@ test("recurring block editor reuses an overlay calendar and compact midnight-awa
   assert.equal(value.time, "23:59"); assert.equal(value.duration, 1); assert.equal(value.date, "2026-11-05");
 });
 
-test("inputs-only range omits the rail, hints, presets and visible edge labels while defaults stay intact", () => {
-  const state = load(["BlockEditorTimeRangeRail"], {
-    React, Fragment: React.Fragment, Icon: () => null, useRef: React.useRef, useState: React.useState, useEffect: React.useEffect,
+test("inputs-only range keeps presets but omits the rail and edge labels while defaults stay intact", () => {
+  const state = load(["TaskTimeRangeFields", "BlockEditorTimeRangeRail"], {
+    React, compactBlockDuration, Fragment: React.Fragment, Icon: () => null, useRef: React.useRef, useState: React.useState, useEffect: React.useEffect,
     MIN_TASK_BLOCK_MINUTES: 15,
     clockMinutes: value => { const [h, m] = value.split(":").map(Number); return h * 60 + m; },
     minutesClock: minute => `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`,
@@ -194,6 +197,7 @@ test("inputs-only range omits the rail, hints, presets and visible edge labels w
     assert.equal((html.match(/type="text"/g) ?? []).length, 2);
     if (inputsOnly) {
       assert.doesNotMatch(html, /time-rail-surface|time-duration-presets|time-range-marker|>开始<|>结束</);
+      assert.match(html, /task-time-range-presets/); assert.match(html, /推荐时长/);
       assert.match(html, /aria-label="输入开始时间"/); assert.match(html, /aria-label="输入结束时间"/);
     } else {
       assert.match(html, /time-rail-surface/); assert.match(html, /time-duration-presets/); assert.match(html, /time-range-marker/);

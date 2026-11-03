@@ -43,14 +43,18 @@ export function timelineLaneLayout(items: TimelineLaneInput[], preview: Timeline
     }
 
     const columns: TimelineLaneInput[][] = [];
-    const columnEnds: number[] = [];
     const assignments: Array<{ item: TimelineLaneInput; column: number }> = [];
-    for (const item of sorted.slice(groupStart, groupEnd)) {
-      let column = columnEnds.findIndex((end) => end <= item.startMinute);
+    const group = sorted.slice(groupStart, groupEnd)
+      .sort((left, right) => Number(left.layoutKey === preview?.layoutKey) - Number(right.layoutKey === preview?.layoutKey));
+    for (const item of group) {
+      // Keep only the active drag rightmost; released blocks use the normal time order.
+      const firstColumn = item.layoutKey === preview?.layoutKey
+        ? columns.reduce((first, column, index) => column.some((other) => overlaps(item, other)) ? index + 1 : first, 0)
+        : 0;
+      let column = columns.findIndex((entries, index) => index >= firstColumn && entries.every((other) => !overlaps(item, other)));
       if (column < 0) column = columns.length;
       if (!columns[column]) columns[column] = [];
       columns[column].push(item);
-      columnEnds[column] = item.endMinute;
       assignments.push({ item, column });
     }
 

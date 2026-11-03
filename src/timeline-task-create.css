@@ -19,7 +19,7 @@ body:has(.selection-create-track) .floating-assistant:not(.open) { right: 60px; 
 .selection-create-dialog label { display: grid; gap: 5px; margin: 0 0 12px; font-size: 12px; color: var(--jx-ink-soft); }
 .selection-create-dialog input, .selection-create-dialog select { width: 100%; min-width: 0; height: 34px; padding: 6px 9px; border: 1px solid var(--jx-edge); border-radius: 6px; background: var(--jx-paper); color: var(--jx-ink); font: 13px var(--jx-font-sans); }
 .selection-create-dialog input:focus-visible, .selection-create-dialog select:focus-visible, .selection-create-dialog button:focus-visible { outline: 2px solid var(--state-plan); outline-offset: 1px; }
-.selection-times { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.selection-create-dialog .task-time-range-fields { margin-bottom: 12px; }
 .selection-create-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; border-top: 1px solid var(--jx-edge-soft); }
 .selection-create-dialog footer small { color: var(--jx-muted); white-space: nowrap; }
 .selection-create-dialog footer div { display: flex; gap: 8px; }

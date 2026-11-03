@@ -7140,6 +7140,7 @@ html[data-mode="dark"] .sidebar-summary-card { --state-plan: #bdc9ff; }
 .timeline-floating-panel.task-block-editor .execution-time-value { display: inline-flex; min-width: 0; min-height: 22px; width: fit-content; align-items: center; gap: 5px; padding: 0; border: 0; border-radius: 3px; color: #94a3b8; background: transparent; text-align: left; }
 .timeline-floating-panel.task-block-editor .execution-time-value strong { color: var(--jx-ink); font-size: 14px; font-weight: 650; line-height: 22px; }
 .timeline-floating-panel.task-block-editor button.execution-time-value:hover strong { color: #4056c8; }
+.execution-time-edit-icon { display: inline-flex; align-items: center; margin-left: 3px; color: var(--jx-muted); }
 .timeline-floating-panel.task-block-editor .execution-open-task { display: inline-flex; min-height: 28px; align-items: center; gap: 5px; padding: 0 11px; border-color: #e2e8f0; border-radius: 8px; color: #475569; background: #fff; box-shadow: 0 1px 2px rgb(15 23 42 / 5%); font-size: 11px; font-weight: 500; }
 .timeline-floating-panel.task-block-editor .execution-open-task svg { color: #94a3b8; }
 .timeline-floating-panel.task-block-editor > .recurring-time-form { flex: 1 0 auto; align-content: start; padding: 24px 24px 28px; }
@@ -7151,11 +7152,6 @@ html[data-mode="dark"] .sidebar-summary-card { --state-plan: #bdc9ff; }
 .recurring-block-date-trigger:hover, .recurring-block-date-trigger[aria-expanded="true"] { border-color: var(--jx-focus); background: var(--jx-focus-soft); }
 .recurring-block-date-trigger:focus-visible { outline: 2px solid var(--jx-focus); outline-offset: 3px; }
 .recurring-block-calendar.schedule-picker-calendar { position: fixed; inset: auto; min-height: 0; max-height: calc(100dvh - 24px); margin: 0; padding: 10px; overflow-y: auto; border: 1px solid var(--jx-edge-soft); border-radius: 12px; color: var(--jx-ink); background: var(--jx-raised); box-shadow: 0 12px 32px rgb(15 23 42 / 16%); }
-.recurring-block-range-section { display: grid; min-width: 0; gap: 16px; }
-.recurring-block-range-section > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.recurring-block-range-section > header output { padding: 3px 9px; border-radius: 6px; color: var(--jx-ink-soft); background: var(--jx-paper); font-size: 11px; font-weight: 500; }
-.recurring-block-range-section .time-range-rail { gap: 20px; }
-.recurring-block-range-section .time-range-values.block-editor-values input { height: 42px; border-radius: 10px; background: var(--jx-raised); }
 .timeline-floating-panel.task-block-editor .execution-capture-fields { flex: 1 0 auto; padding: 16px 24px 32px; }
 .timeline-floating-panel.task-block-editor .execution-result-label { color: #334155; font-size: 12px; font-weight: 600; line-height: 17px; }
 .timeline-floating-panel.task-block-editor .execution-capture-fields .floating-outcomes { gap: 12px; padding-top: 8px; }

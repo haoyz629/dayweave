@@ -664,6 +664,9 @@ html[data-mode="dark"] .timeline-fact-priority.priority-low { color: #bad4ff; bo
 html[data-mode="dark"] .timeline-fact-priority.priority-unset { color: #cbd2de; border-color: #545e6d; background: #353a43; }
 html[data-mode="dark"] .timeline-fact-type { color: var(--color-gray-ink); border-color: var(--color-gray-edge); background: var(--color-gray-bg); }
 html[data-mode="dark"] .timeline-fact-type.type-recurring { color: var(--color-teal-ink); border-color: var(--color-teal-edge); background: var(--color-teal-bg); }
+.timeline-task-tags { display: block; flex: none; min-width: 0; height: 18px; overflow: hidden; }
+.timeline-task-tags .task-list-tags { flex-wrap: nowrap; gap: 4px; margin: 0; overflow: hidden; }
+.timeline-task-tags .task-list-tags > span { flex: 0 1 auto; padding: 0 5px; line-height: 16px; }
 .timeline-task-info { display: grid; min-width: 0; gap: 5px; margin-top: auto; color: var(--jx-ink-soft); font-size: 11px; line-height: 1.4; }
 .timeline-task-url, .timeline-task-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .timeline-task-url { color: #4056a8; }
@@ -694,10 +697,6 @@ html[data-mode="dark"] .timeline-fact-type.type-recurring { color: var(--color-t
 .timeline-event.is-drag-saving .timeline-event-body { cursor: progress; }
 .timeline-drag-source { position: absolute; z-index: 0; top: var(--timeline-top); height: var(--timeline-height); border: 1px dashed var(--state-plan-border); border-radius: 12px; pointer-events: none; }
 .timeline-drag-label { position: fixed; z-index: 100; padding: 6px 10px; border: 1px solid var(--state-plan-border); border-radius: 6px; color: var(--jx-ink); background: var(--jx-raised); font: 500 12px/1.4 var(--jx-font-mono); pointer-events: none; box-shadow: 0 3px 10px rgb(32 34 31 / 12%); }
-.timeline-event.recurring-event .recurring-resize-handle { position: absolute; right: 0; bottom: 0; left: 0; z-index: 2; height: 8px; cursor: ns-resize; touch-action: none; }
-.timeline-event.recurring-event .recurring-resize-handle::after { position: absolute; bottom: 2px; left: calc(50% - 10px); width: 20px; height: 2px; border-radius: 2px; background: var(--state-recurring); content: ""; opacity: 0; }
-.timeline-event.recurring-event:hover .recurring-resize-handle::after { opacity: .7; }
-.timeline-week button.recurring-drop-target { outline: 2px solid var(--state-recurring); outline-offset: -3px; background: var(--state-recurring-surface); }
 .recurring-time-form > label, .recurring-time-fields { margin: 12px 16px 0; }
 .recurring-time-form label { display: grid; gap: 6px; color: var(--jx-ink-soft); font-size: 12px; }
 .recurring-time-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -708,6 +707,8 @@ html[data-mode="dark"] .timeline-fact-type.type-recurring { color: var(--color-t
 .recurring-calendar-error { margin: 8px 16px; color: var(--jx-ink-soft); font-size: 12px; }
 @container (max-width: 360px) { .timeline-block-clock, .timeline-fact-full { display: none; }.timeline-fact-short { display: inline; } }
 @container (max-height: 92px) { .timeline-task-info { display: none; } }
+@container (max-height: 75px) { .timeline-task-tags { display: none; } }
+@container (max-height: 140px) { .timeline-task-body:has(.timeline-task-tags) .timeline-task-info { display: none; } }
 @container (max-height: 40px) {
   .timeline-task-body, .timeline-event.execution-block .timeline-task-body { padding-top: 4px; padding-bottom: 3px; }
   .timeline-task-leading, .timeline-event-check { top: 4px; }

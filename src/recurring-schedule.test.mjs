@@ -141,17 +141,18 @@ test("timeline scope commit revalidates history at confirmation and does not wri
   assert.match(state.recurringChangeError, /历史/);
 });
 
-test("recurring drag updates time, bounded duration, or a week-date drop without saving", () => {
-  const state = { pixelsPerHour: 60, selectedDate: "2026-10-26", timelineScrollRef: { current: { scrollTop: 0 } }, timelineDragRef: { current: null }, document: { elementFromPoint: () => null } };
+test("recurring drag only moves time, preserving duration and ignoring week-date targets", () => {
+  const state = { pixelsPerHour: 60, selectedDate: "2026-10-26", timelineScrollRef: { current: { scrollTop: 0 } }, timelineDragRef: { current: null }, document: { elementFromPoint() { throw Error("week dates must not be drop targets"); } } };
   setters(state, ["timelineDrag"]);
   run(["updateTimelineDrag"], state);
-  const session = () => ({ key: "recurring:occurrence", active: true, originalStart: 600, start: 600, originalDuration: 30, duration: 30, downY: 100, downScroll: 0, x: 100, y: 160, occurrence, mode: "move", targetDate: state.selectedDate });
-  state.timelineDragRef.current = session(); state.updateTimelineDrag();
-  assert.equal(state.timelineDrag.start, 660); assert.equal(state.timelineDrag.end, 690);
-  state.timelineDragRef.current = { ...session(), mode: "resize", y: 10000 }; state.updateTimelineDrag();
-  assert.equal(state.timelineDrag.end, 1440);
-  state.timelineDragRef.current = session(); state.document.elementFromPoint = () => ({ closest: () => ({ dataset: { recurringDropDate: "2026-10-28" } }) }); state.updateTimelineDrag();
-  assert.equal(state.timelineDrag.targetDate, "2026-10-28"); assert.equal(state.timelineDrag.start, 600);
+  const session = y => ({ key: "recurring:occurrence", active: true, originalStart: 600, start: 600, duration: 30, downY: 100, downScroll: 0, x: 100, y, occurrence });
+  for (const [y, start] of [[160, 660], [10000, 1410], [-10000, 0]]) {
+    state.timelineDragRef.current = session(y); state.updateTimelineDrag();
+    assert.equal(state.timelineDrag.start, start);
+    assert.equal(state.timelineDrag.end - state.timelineDrag.start, 30);
+    assert.equal(state.timelineDrag.targetDate, undefined);
+  }
+  assert.doesNotMatch(text, /recurring-resize-handle|data-recurring-drop-date|recurring-drop-target|拖底边改时长|拖至周日期栏改日期/);
 });
 
 test("scope confirmation shows target only at save, offers both scopes and no completion actions", () => {

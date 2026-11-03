@@ -160,11 +160,11 @@ const slots = ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"];
 type TaskView = "draft" | "recurring" | TaskListStatus;
 type CreateItemType = "task" | "recurring";
 type LedgerResizeSession = { pointerId: number; startX: number; startWidth: number };
-type TimelineReturnContext = { date: string; blockId?: string; taskId?: string };
+type TimelineReturnContext = { date: string; blockId?: string; taskId?: string; occurrenceId?: string };
 type TaskSeed = Pick<Task, "title" | "priority" | "tags">;
-type NavigationIntent = { active: string; date?: string; taskView?: TaskView; createTask?: boolean; taskId?: string; taskSeed?: TaskSeed; timelineReturnContext?: TimelineReturnContext };
+type NavigationIntent = { active: string; date?: string; taskView?: TaskView; createTask?: boolean; taskId?: string; recurringItemId?: string; taskSeed?: TaskSeed; timelineReturnContext?: TimelineReturnContext };
 type PlanLeaveIntent = { kind: "navigation"; intent: NavigationIntent } | { kind: "date"; date: string };
-type TaskViewRequest = { view?: TaskView; createTask?: boolean; taskId?: string; taskSeed?: TaskSeed };
+type TaskViewRequest = { view?: TaskView; createTask?: boolean; taskId?: string; recurringItemId?: string; taskSeed?: TaskSeed };
 type PendingTaskChange =
   | { kind: "select"; taskId: string; edit?: boolean }
   | { kind: "new-independent"; seed: TaskSeed }
@@ -498,12 +498,13 @@ function TimelineTaskFacts({ priority, type, inline = false }: { priority?: Task
   </span>;
 }
 
-function TimelineTaskContent({ title, range, duration, priority, type, url, note }: {
-  title: string; range: string; duration: string; priority?: Task["priority"]; type: TaskBlockType | null; url: string; note: string;
+function TimelineTaskContent({ title, range, duration, priority, type, url, note, tags = [] }: {
+  title: string; range: string; duration: string; priority?: Task["priority"]; type: TaskBlockType | null; url: string; note: string; tags?: string[];
 }) {
   return <>
     <span className="timeline-task-head"><strong>{title}</strong><TimelineTaskFacts priority={priority} type={type} inline /><time><span className="timeline-block-clock">{range} </span><span className="timeline-block-duration">({duration})</span></time></span>
     <TimelineTaskFacts priority={priority} type={type} />
+    {tags.length > 0 && <span className="timeline-task-tags"><TaskTagList tags={tags} /></span>}
     {(url || note) && <span className="timeline-task-info">{url && <span className="timeline-task-url">{url}</span>}{url && note && <span className="timeline-task-divider" />}{note && <span className="timeline-task-note">{note}</span>}</span>}
   </>;
 }
@@ -2109,8 +2110,8 @@ function TaskDetailResources({ notes }: { notes: string | null }) {
   </>;
 }
 
-function TaskPageHeader({ task, editing = false, draftLabel = "草稿", onBack, busy = false, children }: {
-  task?: Task | RecurringItem; editing?: boolean; draftLabel?: string; onBack?: () => void; busy?: boolean; children?: React.ReactNode;
+function TaskPageHeader({ task, editing = false, draftLabel = "草稿", onBack, backLabel, busy = false, children }: {
+  task?: Task | RecurringItem; editing?: boolean; draftLabel?: string; onBack?: () => void; backLabel?: string; busy?: boolean; children?: React.ReactNode;
 }) {
   const recurring = task && "frequency" in task;
   const deleted = task?.status === "deleted" || Boolean(recurring && task.deleted_at);
@@ -2118,7 +2119,7 @@ function TaskPageHeader({ task, editing = false, draftLabel = "草稿", onBack, 
   const label = task ? recurring ? deleted ? "回收站" : recurringItemStatusLabel(task) : statusCopy[taskListStatus(task)] : draftLabel;
   return <header className="task-compact-header task-page-header">
     <div className="task-compact-title-row">
-      {onBack && <button type="button" className="task-context-return-icon" aria-label={editing ? "返回任务详情" : "返回今日计划中的任务块"} title={editing ? "返回任务详情" : "返回任务块"} disabled={busy} onClick={onBack}><Icon name="chevron-left" size={17} /></button>}
+      {onBack && <button type="button" className="task-context-return-icon" aria-label={backLabel ?? (editing ? "返回任务详情" : "返回今日计划中的任务块")} title={backLabel ?? (editing ? "返回任务详情" : "返回任务块")} disabled={busy} onClick={onBack}><Icon name="chevron-left" size={17} /></button>}
       {children}
       <nav className="task-detail-breadcrumb" aria-label={editing ? "编辑位置" : "详情位置"}><span>{deleted ? "回收站" : "任务"}</span><Icon name="chevron-right" size={12} /><h2 aria-current="page">{editing ? "编辑任务" : "任务详情"}</h2></nav>
     </div>
@@ -2237,9 +2238,9 @@ function recurringScheduleLabel(item: RecurringItem) {
   return `${item.interval_value === 1 ? "每周" : `每 ${item.interval_value} 周`} · ${selectedDays}`;
 }
 
-function DeletedRecurringItemDetails({ item, children }: { item: RecurringItem; children?: React.ReactNode }) {
+function DeletedRecurringItemDetails({ item, children, busy = false, onBack }: { item: RecurringItem; children?: React.ReactNode; busy?: boolean; onBack?: () => void }) {
   return <>
-    <TaskPageHeader task={item} />
+    <TaskPageHeader task={item} busy={busy} onBack={onBack} />
     <section className="terminal-task-detail ordinary-task-detail recycled-task-detail" aria-label="回收站重复事项详情">
     <header><h2>{item.title}</h2><TaskTagList tags={item.tags} expanded /></header>
     {children}
@@ -2255,11 +2256,11 @@ function DeletedRecurringItemDetails({ item, children }: { item: RecurringItem; 
   </>;
 }
 
-function EndedRecurringItemDetails({ item, busy, onTrash }: {
-  item: RecurringItem; busy: boolean; onTrash: () => void;
+function EndedRecurringItemDetails({ item, busy, onTrash, onBack }: {
+  item: RecurringItem; busy: boolean; onTrash: () => void; onBack?: () => void;
 }) {
   return <>
-    <TaskPageHeader task={item} />
+    <TaskPageHeader task={item} busy={busy} onBack={onBack} />
     <section className="terminal-task-detail ordinary-task-detail" aria-label="已结束重复事项详情">
     <header><h2>{item.title}</h2><TaskTagList tags={item.tags} expanded /></header>
     <p className="terminal-task-help">该事项不会再出现，过去的记录仍会保留。现在可以将它移入回收站。</p>
@@ -2436,6 +2437,21 @@ function TaskWorkspace({
       taskViewInitialized.current = true;
       setTaskViewReady(true);
       void openIndependentDraft(requestedView.taskSeed);
+    } else if (requestedView.recurringItemId) {
+      const target = recurringItems.find((item) => item.id === requestedView.recurringItemId);
+      if (target) {
+        setView(target.deleted_at ? "deleted" : "recurring");
+        setCreating(false);
+        setSelectedId(null);
+        setDraft(null);
+        setSelectedRecurringId(target.id);
+        setSearch("");
+        setTagFilter("");
+        setCompactTaskEditorDismissed(false);
+        handledRequestedView.current = requestedView;
+        taskViewInitialized.current = true;
+        setTaskViewReady(true);
+      }
     } else if (requestedView.taskId) {
       const target = tasks.find((task) => task.id === requestedView.taskId);
       if (target) {
@@ -2484,7 +2500,7 @@ function TaskWorkspace({
       setTaskViewReady(true);
     }
     setFilterMenuOpen(false);
-  }, [requestedView, tasks]);
+  }, [requestedView, tasks, recurringItems]);
 
   useEffect(() => {
     if (!filterMenuOpen) return;
@@ -3780,10 +3796,10 @@ function TaskWorkspace({
               </footer>
             </form>
           ) : view === "recurring" && selectedRecurringItem?.status === "ended" ? (
-            <EndedRecurringItemDetails item={selectedRecurringItem} busy={busy} onTrash={() => setPendingTrashRecurringItem(selectedRecurringItem)} />
+            <EndedRecurringItemDetails item={selectedRecurringItem} busy={busy} onTrash={() => setPendingTrashRecurringItem(selectedRecurringItem)} onBack={timelineReturnContext ? () => onReturnToTimeline(timelineReturnContext) : undefined} />
           ) : view === "recurring" && selectedRecurringItem ? (
             <form id="recurring-editor-form" className="task-form create-task-form edit-task-form task-compact-form" onSubmit={saveRecurringItem}>
-              <TaskPageHeader task={selectedRecurringItem} editing />
+              <TaskPageHeader task={selectedRecurringItem} editing busy={busy || recurringTargetLoading} onBack={timelineReturnContext ? () => onReturnToTimeline(timelineReturnContext) : undefined} backLabel="返回今日计划中的任务块" />
               <div className="task-compact-body">
                 <RecurringItemEditor key={selectedRecurringItem.id} form={recurringForm} availableTags={availableTags} disabled={busy || recurringTargetLoading} idPrefix="edit-recurring" compact onChange={setRecurringForm} />
               </div>
@@ -3813,7 +3829,7 @@ function TaskWorkspace({
               </footer>
             </form>
           ) : view === "deleted" && selectedRecurringItem?.deleted_at ? (
-            <DeletedRecurringItemDetails item={selectedRecurringItem}>
+            <DeletedRecurringItemDetails item={selectedRecurringItem} busy={busy} onBack={timelineReturnContext ? () => onReturnToTimeline(timelineReturnContext) : undefined}>
               <RecycleBinBanner deletedAt={selectedRecurringItem.deleted_at} nowMs={recycleNow} itemLabel="重复事项" busy={busy} onRestore={() => void restoreSelectedRecurringItem(selectedRecurringItem)} onPermanentDelete={() => setPendingPermanentRecurringItem(true)} />
             </DeletedRecurringItemDetails>
           ) : !selectedTask || !draft ? <div className="inspector-empty"><Icon name={taskViewIcon[view]} size={21} /><p>选择一项查看详情</p></div> : selectedTask.status === "deleted" ? (
@@ -4728,7 +4744,7 @@ function shanghaiClockParts(value: Date) {
 
 function TodayPage({
   today, selectedDate, onSelectDate, tasks, recurringItems, recurringOccurrences, schedule, availability, loading, error, preview, busy,
-  onIncludeTask, onRemoveBlock, onUpdatePlan, onSaveBlockTime, onConfirmPlan, onCancelPlan, onOpenTasks, onFactsChanged, onNotify, onNewTask, message,
+  onIncludeTask, onRemoveBlock, onUpdatePlan, onSaveBlockTime, onConfirmPlan, onCancelPlan, onOpenTasks, onOpenRecurringItem, onFactsChanged, onNotify, onNewTask, message,
   timelineReturnContext, onTimelineReturnHandled, visible, headerViewSlot
 }: {
   today: string;
@@ -4750,6 +4766,7 @@ function TodayPage({
   onConfirmPlan: () => void;
   onCancelPlan: () => Promise<boolean>;
   onOpenTasks: (taskId?: string, returnContext?: TimelineReturnContext) => void;
+  onOpenRecurringItem: (itemId: string, returnContext: TimelineReturnContext) => void;
   onFactsChanged: (date?: string) => Promise<void>;
   onNotify: (label: string, message: string, icon?: IconName, undoId?: string, taskSeed?: TaskSeed) => void;
   onNewTask: (seed: TaskSeed) => void;
@@ -4795,13 +4812,13 @@ function TodayPage({
   const timelineFloatingPanelRef = useRef<HTMLElement>(null);
   const timelineSelectionTriggerRef = useRef<HTMLElement | null>(null);
   const timelineSelectionAnchorRef = useRef<HTMLElement | null>(null);
-  const [timelineDrag, setTimelineDrag] = useState<{ key: string; start: number; end: number; x: number; y: number; targetDate?: string } | null>(null);
+  const [timelineDrag, setTimelineDrag] = useState<{ key: string; start: number; end: number; x: number; y: number } | null>(null);
   const [savingDraggedBlock, setSavingDraggedBlock] = useState(false);
   const timelineDragRef = useRef<{
     key: string; block: PlanBlock | RulePlanBlock; draftIndex: number | null; preview: RulePlanPreview | null;
     element: HTMLElement; pointerId: number; downY: number; downScroll: number; y: number; x: number;
     originalStart: number; duration: number; start: number; active: boolean; sourceLane: TimelineLane;
-    occurrence?: RecurringOccurrence; mode: "move" | "resize"; originalDuration: number; targetDate: string;
+    occurrence?: RecurringOccurrence;
   } | null>(null);
   const timelineDragFrameRef = useRef(0);
   const timelineDragSavingRef = useRef(false);
@@ -5046,7 +5063,7 @@ function TodayPage({
     if (current.active) current.element.querySelector<HTMLElement>(".timeline-event-body")?.focus({ preventScroll: true });
   }
 
-  function beginTimelineDrag(event: ReactPointerEvent<HTMLElement>, block: PlanBlock | RulePlanBlock, draftIndex: number | null = null, occurrence?: RecurringOccurrence, mode: "move" | "resize" = "move") {
+  function beginTimelineDrag(event: ReactPointerEvent<HTMLElement>, block: PlanBlock | RulePlanBlock, draftIndex: number | null = null, occurrence?: RecurringOccurrence) {
     timelineDragClickRef.current = null;
     if (event.button !== 0 || event.pointerType !== "mouse" || (occurrence ? !canEditRecurringOccurrence(occurrence) : !canDragTimelineBlock(block, draftIndex !== null))
       || (event.target instanceof Element && event.target.closest(".timeline-event-check"))) return;
@@ -5061,7 +5078,7 @@ function TodayPage({
       block: { ...block }, draftIndex, preview, element: event.currentTarget, pointerId: event.pointerId,
       downY: event.clientY, downScroll: scroller.scrollTop, y: event.clientY, x: event.clientX,
       originalStart: start, duration: timeRangeDurationMinutes(block.starts_at, block.ends_at), start, active: false,
-      sourceLane: timelineItemLanes[key], occurrence, mode, originalDuration: timeRangeDurationMinutes(block.starts_at, block.ends_at), targetDate: selectedDate
+      sourceLane: timelineItemLanes[key], occurrence
     };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
@@ -5070,28 +5087,17 @@ function TodayPage({
     const current = timelineDragRef.current, scroller = timelineScrollRef.current;
     if (!current?.active || !scroller) return;
     const movement = (current.y - current.downY + scroller.scrollTop - current.downScroll) * 60 / pixelsPerHour;
-    const dropDate = current.occurrence && current.mode === "move"
-      ? document.elementFromPoint(current.x, current.y)?.closest<HTMLElement>("[data-recurring-drop-date]")?.dataset.recurringDropDate : undefined;
-    if (dropDate) {
-      current.targetDate = dropDate;
-      current.start = current.originalStart;
-    } else if (current.mode === "resize") {
-      current.duration = Math.max(1, Math.min(1440 - current.originalStart, Math.round((current.originalDuration + movement) / 5) * 5));
-    } else {
-      current.targetDate = selectedDate;
-      current.start = Math.max(0, Math.min(1440 - current.duration, Math.round((current.originalStart + movement) / 15) * 15));
-    }
+    current.start = Math.max(0, Math.min(1440 - current.duration, Math.round((current.originalStart + movement) / 15) * 15));
     setTimelineDrag((previous) => previous?.key === current.key && previous.start === current.start && previous.end === current.start + current.duration
-      && previous.x === current.x && previous.y === current.y && previous.targetDate === current.targetDate ? previous
-      : { key: current.key, start: current.start, end: current.start + current.duration, x: current.x, y: current.y, targetDate: current.targetDate });
+      && previous.x === current.x && previous.y === current.y ? previous
+      : { key: current.key, start: current.start, end: current.start + current.duration, x: current.x, y: current.y });
   }
 
   function scrollTimelineDrag() {
     const current = timelineDragRef.current, scroller = timelineScrollRef.current;
     if (!current?.active || !scroller) return;
     const bounds = scroller.getBoundingClientRect(), edge = 36;
-    const onDateBar = current.occurrence && document.elementFromPoint(current.x, current.y)?.closest("[data-recurring-drop-date]");
-    const speed = onDateBar ? 0 : current.y < bounds.top + edge ? -Math.min(7, (bounds.top + edge - current.y) / 4)
+    const speed = current.y < bounds.top + edge ? -Math.min(7, (bounds.top + edge - current.y) / 4)
       : current.y > bounds.bottom - edge ? Math.min(7, (current.y - bounds.bottom + edge) / 4) : 0;
     if (speed) scroller.scrollTop += speed;
     updateTimelineDrag();
@@ -5115,11 +5121,11 @@ function TodayPage({
     const current = clearTimelineDrag();
     if (!current?.active) return;
     timelineDragClickRef.current = current.key;
-    if (current.start === current.originalStart && current.duration === current.originalDuration && current.targetDate === selectedDate) { setTimelineDrag(null); return; }
+    if (current.start === current.originalStart) { setTimelineDrag(null); return; }
     if (current.occurrence) {
       const input = recurringInput(current.occurrence);
       if (!input) { setTimelineDrag(null); return; }
-      stageRecurringChange({ occurrence: current.occurrence, input: { ...input, display_time: minutesClock(current.start), display_duration_minutes: current.duration }, targetDate: current.targetDate });
+      stageRecurringChange({ occurrence: current.occurrence, input: { ...input, display_time: minutesClock(current.start), display_duration_minutes: current.duration }, targetDate: selectedDate });
       return;
     }
     timelineDragSavingRef.current = true;
@@ -5369,9 +5375,10 @@ function TodayPage({
     setFollowingNow(false);
     setTimelineTooltip(null);
     setPlanDraftTimeEdit(null);
-    const block = timelineReturnContext.blockId
-      ? taskBlocks.find((item) => item.id === timelineReturnContext.blockId)
-      : taskBlocks.find((item) => item.task_id === timelineReturnContext.taskId);
+    const block = timelineReturnContext.occurrenceId
+      ? recurringOccurrences.find((item) => item.id === timelineReturnContext.occurrenceId)
+      : timelineReturnContext.blockId ? taskBlocks.find((item) => item.id === timelineReturnContext.blockId)
+        : taskBlocks.find((item) => item.task_id === timelineReturnContext.taskId);
     if (!block) {
       onTimelineReturnHandled();
       return;
@@ -5382,7 +5389,7 @@ function TodayPage({
     const frame = window.requestAnimationFrame(() => {
       const scroller = timelineScrollRef.current;
       const target = Array.from(scroller?.querySelectorAll<HTMLElement>("[data-timeline-kind][data-timeline-id]") ?? [])
-        .find((candidate) => candidate.dataset.timelineKind === "block" && candidate.dataset.timelineId === block.id) ?? null;
+        .find((candidate) => candidate.dataset.timelineKind === (timelineReturnContext.occurrenceId ? "recurring" : "block") && candidate.dataset.timelineId === block.id) ?? null;
       if (scroller && target) {
         (target.querySelector<HTMLElement>(".timeline-event-body") ?? target).focus({ preventScroll: true });
         target.dataset.returnLocated = "true";
@@ -5398,7 +5405,7 @@ function TodayPage({
       onTimelineReturnHandled();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [timelineReturnContext?.date, timelineReturnContext?.blockId, timelineReturnContext?.taskId, selectedDate, loading, error, schedule]);
+  }, [timelineReturnContext?.date, timelineReturnContext?.blockId, timelineReturnContext?.taskId, timelineReturnContext?.occurrenceId, selectedDate, loading, error, schedule, recurringOccurrences]);
 
   useEffect(() => {
     if (!timelineTooltip) return;
@@ -5985,6 +5992,15 @@ function TodayPage({
     onOpenTasks(taskId, { date: selectedDate, blockId });
   }
 
+  function openTimelineRecurringItem(item: RecurringOccurrence) {
+    if (savingRecurringChange || pendingRecurringChange) return;
+    setSelection(null);
+    setRecurringTimeEdit(null);
+    setTimelineTooltip(null);
+    timelineSelectionAnchorRef.current = null;
+    onOpenRecurringItem(item.recurring_item_id, { date: selectedDate, occurrenceId: item.id });
+  }
+
   function pauseTimelineFollowing() {
     timelineEntryDateRef.current = null;
     if (selectedDate === today && followingNow) setFollowingNow(false);
@@ -6176,7 +6192,7 @@ function TodayPage({
               const workStateLabel = dayInfo?.workState === "rest" ? "休" : dayInfo?.workState === "work" ? "班" : "";
               const calendarLabels = dayInfo?.labels.map((label) => label.text).join("、") ?? "";
               const primaryCalendarLabel = dayInfo?.labels[0] ?? null;
-              return <button key={date} type="button" data-recurring-drop-date={date} className={`${isWeekend ? "weekend " : ""}${date === today ? "today " : ""}${date === selectedDate ? "selected " : ""}${timelineDrag?.key.startsWith("recurring:") && timelineDrag.targetDate === date && date !== selectedDate ? "recurring-drop-target " : ""}${dayInfo?.workState ? dayInfo.workState : ""}`.trim()} aria-pressed={date === selectedDate} aria-current={date === today ? "date" : undefined} aria-label={`${date}，星期${weekday}${lunarLabel ? `，农历${lunarLabel}` : ""}${calendarLabels ? `，${calendarLabels}` : ""}${workStateLabel ? `，${workStateLabel === "休" ? "放假" : "调休上班"}` : ""}`} onClick={() => { if (!pendingRecurringChange) selectCalendarDate(date); }}>
+              return <button key={date} type="button" className={`${isWeekend ? "weekend " : ""}${date === today ? "today " : ""}${date === selectedDate ? "selected " : ""}${dayInfo?.workState ? dayInfo.workState : ""}`.trim()} aria-pressed={date === selectedDate} aria-current={date === today ? "date" : undefined} aria-label={`${date}，星期${weekday}${lunarLabel ? `，农历${lunarLabel}` : ""}${calendarLabels ? `，${calendarLabels}` : ""}${workStateLabel ? `，${workStateLabel === "休" ? "放假" : "调休上班"}` : ""}`} onClick={() => { if (!pendingRecurringChange) selectCalendarDate(date); }}>
                 <span className="timeline-week-heading"><small>{weekday}</small>{workStateLabel && <span className={`work-state ${dayInfo?.workState}`}>{workStateLabel}</span>}</span>
                 <span className="timeline-week-date"><strong>{Number(date.slice(8, 10))}</strong></span>
                 <span className="timeline-week-calendar-meta" aria-hidden="true">
@@ -6211,6 +6227,7 @@ function TodayPage({
               {selection && <div className={`timeline-floating-layer${planDraftTimeEdit || selectedRecurringOccurrence ? " is-time-editor" : selectedBlock ? " is-block-editor" : ""}`}><section id="timeline-context-panel" ref={timelineFloatingPanelRef} className={`timeline-floating-panel${planDraftTimeEdit || selectedRecurringOccurrence ? " plan-draft-editor" : selectedBlock ? " task-block-editor" : ""}`} role="dialog" aria-modal={planDraftTimeEdit || selectedBlock || selectedRecurringOccurrence ? true : undefined} aria-label={selectedRecurringOccurrence ? `${selectedRecurringOccurrence.title}时间调整` : planDraftTimeEdit && (selectedDraftBlock || selectedBlock) ? `${selectedDraftBlock?.task_title ?? selectedBlock?.task_title}时间调整` : selectedBlock ? `${selectedBlock.task_title}任务结果` : selectedEvent ? `${selectedEvent.title}日程详情` : "时间线详情"} aria-live="polite" tabIndex={-1} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeTimelinePanel(); } }}>
                 {selectedRecurringOccurrence && recurringTimeEdit ? <>
                   <header><div><strong>{selectedRecurringOccurrence.title}</strong><small>重复任务块<CopySeparator />{isPastDate ? "历史只读" : "调整时间"}</small></div><button type="button" aria-label="关闭重复任务块" onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></header>
+                  <div className="execution-plan-time"><div className="execution-plan-fact"><span>计划时间</span><div className="execution-time-value"><Icon name="clock" size={14} /><strong>{recurringTimeRange(selectedRecurringOccurrence)}</strong></div></div><div className="execution-plan-actions"><button type="button" className="execution-open-task" disabled={savingRecurringChange || Boolean(pendingRecurringChange)} onClick={() => openTimelineRecurringItem(selectedRecurringOccurrence)}>查看任务<Icon name="external-link" size={12} /></button></div></div>
                   {canEditRecurringOccurrence(selectedRecurringOccurrence) ? <form className="plan-draft-time-form recurring-time-form" noValidate onSubmit={saveRecurringTimeEdit}>
                     <label>日期<input type="date" min={today} value={recurringTimeEdit.date} onChange={(event) => setRecurringTimeEdit({ ...recurringTimeEdit, date: event.target.value, error: "" })} /></label>
                     <div className="recurring-time-fields"><label>开始时间<input type="time" value={recurringTimeEdit.time} onChange={(event) => setRecurringTimeEdit({ ...recurringTimeEdit, time: event.target.value, error: "" })} /></label><label>时长（分钟）<input type="number" min={1} max={1440} value={recurringTimeEdit.duration ?? ""} onChange={(event) => setRecurringTimeEdit({ ...recurringTimeEdit, duration: event.target.value ? Number(event.target.value) : null, error: "" })} /></label></div>
@@ -6300,20 +6317,19 @@ function TodayPage({
                   return <div key={item.id} data-timeline-kind="recurring" data-timeline-id={item.id}
                     className={`timeline-event recurring-event${editable ? " can-drag" : ""}${dragging ? " is-dragging" : ""}${selection?.kind === "recurring" && selection.id === item.id ? " selected" : ""}`}
                     style={draggedTimelineStyle(layoutKey, timelineEventPosition(starts_at, ends_at, selectedDate, axisStart, pixelsPerHour, timelineItemLanes[layoutKey]))}
-                    onPointerDown={(event) => beginTimelineDrag(event, block, null, item, event.target instanceof Element && event.target.closest(".recurring-resize-handle") ? "resize" : "move")}
+                    onPointerDown={(event) => beginTimelineDrag(event, block, null, item)}
                     onPointerMove={moveTimelineDrag} onPointerUp={(event) => void finishTimelineDrag(event)} onPointerCancel={cancelTimelineDrag}
                     onLostPointerCapture={() => { if (timelineDragRef.current) cancelTimelineDrag(); }}
                     onClick={(event) => {
                       if (event.detail !== 0 && timelineDragClickRef.current === layoutKey || timelineDragSavingRef.current) { timelineDragClickRef.current = null; return; }
                       selectRecurringOccurrence(item, event.currentTarget.querySelector<HTMLElement>(".timeline-event-body") ?? event.currentTarget, event.currentTarget);
                     }}
-                    {...timelineTooltipProps({ kind: "重复事项", title: item.title, time, detail: editable ? "上下拖动改时间 · 拖底边改时长 · 拖至周日期栏改日期 · 点击精确编辑" : "历史任务块只读", tone: "recurring", url, note: body }, "block-bottom")}
+                    {...timelineTooltipProps({ kind: "重复事项", title: item.title, time, detail: editable ? "上下拖动调整时间·点击精确编辑" : "历史任务块只读", tone: "recurring", url, note: body }, "block-bottom")}
                   >
                     <span className="timeline-task-leading recurring" aria-hidden="true"><img src={recurringIcon} alt="" /></span>
                     <button type="button" className="timeline-event-body timeline-task-body" aria-label={`重复事项：${item.title}，${time}`} aria-haspopup="dialog" aria-controls="timeline-context-panel" aria-pressed={selection?.kind === "recurring" && selection.id === item.id}>
-                      <TimelineTaskContent title={item.title} range={range} duration={duration} type="recurring" url={url} note={body} />
+                      <TimelineTaskContent title={item.title} range={range} duration={duration} type="recurring" url={url} note={body} tags={item.tags} />
                     </button>
-                    {editable && <span className="recurring-resize-handle" aria-hidden="true" />}
                   </div>;
                 })}
                 {draftBlocks.map((block, index) => {
@@ -6341,14 +6357,14 @@ function TodayPage({
                     kind: "计划草案",
                     title: block.task_title,
                     time,
-                    detail: `${type ? `${taskBlockTypeLabels[type].full} · ` : ""}${task?.priority ? `${priorityCopy[task.priority]} · ` : ""}预计 ${block.estimated_minutes} 分钟 · 拖动或点击调整时间`,
+                    detail: `${type ? `${taskBlockTypeLabels[type].full} · ` : ""}${task?.priority ? `${priorityCopy[task.priority]} · ` : ""}预计 ${block.estimated_minutes} 分钟 · 上下拖动调整时间·点击精确编辑`,
                     tone: "draft"
                   }, "block-top")}
                   onClick={(event) => {
                     if (event.detail !== 0 && timelineDragClickRef.current === draftLayoutKeys[index] || timelineDragSavingRef.current) { timelineDragClickRef.current = null; return; }
                     selectPlanDraftBlock(index, event.currentTarget);
                   }}
-                ><span className="timeline-task-body"><TimelineTaskContent title={block.task_title} range={range} duration={duration} priority={task?.priority} type={type} url={url} note={body} /></span></button>;
+                ><span className="timeline-task-body"><TimelineTaskContent title={block.task_title} range={range} duration={duration} priority={task?.priority} type={type} url={url} note={body} tags={task?.tags} /></span></button>;
                 })}
                 {visibleTaskBlocks.map((block) => {
                   const task = tasks.find((task) => task.id === block.task_id);
@@ -6389,7 +6405,7 @@ function TodayPage({
                       time,
                       detail: `${task?.priority ? `${priorityCopy[task.priority]} · ` : ""}${block.review
                         ? `${reviewOutcomeCopy[block.review.outcome]} · ${block.review.followup_action ? taskNextActionLabels[block.review.followup_action] : "已记录"}`
-                        : effectiveOutcome ? `本次${reviewOutcomeCopy[effectiveOutcome]} · 已记录` : canDragTimelineBlock(block) ? "上下拖动调整时间 · 点击查看" : ""}`,
+                        : effectiveOutcome ? `本次${reviewOutcomeCopy[effectiveOutcome]} · 已记录` : canDragTimelineBlock(block) ? "上下拖动调整时间·点击精确编辑" : ""}`,
                       tone: "task",
                       url,
                       note: body
@@ -6397,7 +6413,7 @@ function TodayPage({
                   >
                     {!preview && <button type="button" className={`timeline-event-check${taskCompleted ? " done" : ""}${blockHasFact && !taskCompleted ? " recorded" : ""}${blockIsSaving ? " saving" : ""}`} aria-label={quickCompleteLabel} title={historicalBlockCompletionLocked(selectedDate, block, clock.getTime()) ? HISTORY_COMPLETION_LOCKED_MESSAGE : block.review && !taskCompleted ? "已有复盘记录，请在弹窗中修改结果" : !completionAction ? "当前结果不可修改" : quickCompleteText} aria-pressed={taskCompleted || blockHasFact} disabled={!completionAction || Boolean(quickCompletingBlockId) || busy || loading || savingExecution || savingDraggedBlock || Boolean(timelineDrag)} onClick={(event) => { event.stopPropagation(); void quickCompleteTimelineBlock(block); }}>{blockIsSaving ? <span className="timeline-check-spinner" /> : taskCompleted ? <Icon name="check" size={11} /> : null}</button>}
                     <button type="button" className="timeline-event-body timeline-task-body" aria-label={`打开本次执行：${block.task_title}，${time}${type ? `，${taskBlockTypeLabels[type].full}` : ""}${task?.priority ? `，${priorityCopy[task.priority]}` : ""}`} aria-haspopup="dialog" aria-controls="timeline-context-panel" aria-pressed={selection?.kind === "block" && selection.id === block.id}>
-                      <TimelineTaskContent title={block.task_title} range={range} duration={duration} priority={task?.priority} type={type} url={url} note={body} />
+                      <TimelineTaskContent title={block.task_title} range={range} duration={duration} priority={task?.priority} type={type} url={url} note={body} tags={task?.tags} />
                     </button>
                   </div>;
                 })}
@@ -6926,11 +6942,11 @@ export default function App() {
     if (intent.date && intent.date !== selectedDate) {
       setScheduleLoading(true);
       setSelectedDate(intent.date);
-    } else if (intent.active === "今日" && intent.timelineReturnContext?.taskId) {
+    } else if (intent.active === "今日" && (intent.timelineReturnContext?.taskId || intent.timelineReturnContext?.occurrenceId)) {
       void refreshSchedule(selectedDate);
     }
-    setRequestedTaskView(intent.taskView || intent.createTask || intent.taskId || intent.taskSeed
-      ? { view: intent.taskView, createTask: intent.createTask, taskId: intent.taskId, taskSeed: intent.taskSeed }
+    setRequestedTaskView(intent.taskView || intent.createTask || intent.taskId || intent.recurringItemId || intent.taskSeed
+      ? { view: intent.taskView, createTask: intent.createTask, taskId: intent.taskId, recurringItemId: intent.recurringItemId, taskSeed: intent.taskSeed }
       : null);
     setTimelineReturnContext(intent.timelineReturnContext ?? null);
     const normalized = normalizeTodayNavigation(intent.active);
@@ -7041,7 +7057,7 @@ export default function App() {
       <button type="button" className="mobile-nav-button" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen((value) => !value)}><Icon name="more" size={18} />菜单</button>
       {active === "今日" && <div className="today-workspace">
         <div className="today-schedule-pane">
-          <TodayPage headerViewSlot={headerViewSlot} visible today={today} selectedDate={selectedDate} onSelectDate={requestDateSelection} tasks={tasks} recurringItems={recurringItems} recurringOccurrences={recurringOccurrences} schedule={daySchedule} availability={availability} loading={scheduleLoading} error={scheduleError} preview={planPreview} busy={planBusy} onIncludeTask={includeTimelineTask} onRemoveBlock={removeTimelineBlock} onUpdatePlan={updatePlanDraft} onSaveBlockTime={saveBlockTime} onConfirmPlan={() => void confirmRulePlan()} onCancelPlan={discardPlanDraft} onOpenTasks={(taskId, returnContext) => requestNavigation({ active: "任务", taskId, timelineReturnContext: returnContext })} onNewTask={(taskSeed) => requestNavigation({ active: "任务", taskSeed })} onFactsChanged={async (date = selectedDate) => { await Promise.all([refreshTasks(false), refreshSchedule(date, false)]); }} onNotify={(label, toastMessage, icon, undoId, taskSeed) => setPlanToast({ id: Date.now(), label, message: toastMessage, icon, undoId, taskSeed })} message={message} timelineReturnContext={timelineReturnContext} onTimelineReturnHandled={() => setTimelineReturnContext(null)} />
+          <TodayPage headerViewSlot={headerViewSlot} visible today={today} selectedDate={selectedDate} onSelectDate={requestDateSelection} tasks={tasks} recurringItems={recurringItems} recurringOccurrences={recurringOccurrences} schedule={daySchedule} availability={availability} loading={scheduleLoading} error={scheduleError} preview={planPreview} busy={planBusy} onIncludeTask={includeTimelineTask} onRemoveBlock={removeTimelineBlock} onUpdatePlan={updatePlanDraft} onSaveBlockTime={saveBlockTime} onConfirmPlan={() => void confirmRulePlan()} onCancelPlan={discardPlanDraft} onOpenTasks={(taskId, returnContext) => requestNavigation({ active: "任务", taskId, timelineReturnContext: returnContext })} onOpenRecurringItem={(recurringItemId, returnContext) => requestNavigation({ active: "任务", recurringItemId, timelineReturnContext: returnContext })} onNewTask={(taskSeed) => requestNavigation({ active: "任务", taskSeed })} onFactsChanged={async (date = selectedDate) => { await Promise.all([refreshTasks(false), refreshSchedule(date, false)]); }} onNotify={(label, toastMessage, icon, undoId, taskSeed) => setPlanToast({ id: Date.now(), label, message: toastMessage, icon, undoId, taskSeed })} message={message} timelineReturnContext={timelineReturnContext} onTimelineReturnHandled={() => setTimelineReturnContext(null)} />
         </div>
       </div>}
       {active === "任务" && <TaskWorkspace tasks={tasks} recurringItems={recurringItems} loading={tasksLoading} error={tasksError} onReload={refreshTasks} onTaskCommitted={taskCommitted} onRecurringChanged={async () => { await Promise.all([refreshTasks(false), refreshSchedule(selectedDate, false)]); }} today={today} onDirtyChange={setTaskEditorDirty} externalNavigationRequest={pendingNavigation} onExternalNavigationResolved={resolvePendingNavigation} requestedView={requestedTaskView} timelineReturnContext={timelineReturnContext} onReturnToTimeline={(returnContext) => requestNavigation({ active: "今日", timelineReturnContext: returnContext })} onOpenToday={(date = today, taskId) => requestNavigation({ active: "今日", date, timelineReturnContext: taskId ? { date, taskId } : undefined })} />}

@@ -273,7 +273,7 @@ test("timeline detail flows provide contextual return actions", () => {
   assert.doesNotMatch(appSource, /className="schedule-picker-back"/);
   assert.match(appSource, /planDraftTimeEdit\.sourceBlockId && <button[^>]*className="timeline-panel-back"[^>]*aria-label="返回任务块详情"/);
   assert.match(appSource, /<TaskPageHeader task=\{selectedTask\} editing busy=\{busy\} onBack=\{\(\) => void requestTaskChange\(\{ kind: "detail" \}\)\} \/>/);
-  assert.match(appSource, /className="task-context-return-icon" aria-label=\{editing \? "返回任务详情"/);
+  assert.match(appSource, /className="task-context-return-icon" aria-label=\{backLabel \?\? \(editing \? "返回任务详情"/);
   assert.match(appSource, /onOpenTasks\(taskId, \{ date: selectedDate, blockId \}\)/);
   assert.match(appSource, /setSelection\(null\);\s*setExecutionDraft\(null\);\s*setExecutionMessage\(""\);\s*const frame/);
   assert.match(appSource, /requestNavigation\(\{ active: "今日", timelineReturnContext: returnContext \}\)/);

@@ -59,7 +59,7 @@ function deferred() {
 function createHost(initial = [], overrides = {}) {
   let current;
   const server = [...initial];
-  const calls = { list: 0, create: [], notifications: 0 };
+  const calls = { list: 0, create: [], notifications: 0, portals: [] };
   const listeners = new Map();
   const document = {
     body: {},
@@ -101,7 +101,7 @@ function createHost(initial = [], overrides = {}) {
   };
   const jsx = (type, props, key) => ({ type, props: props ?? {}, key });
   const exports = {};
-  const modules = { react, "react-dom": { createPortal: (node) => node }, "react/jsx-runtime": { jsx, jsxs: jsx }, "./tauri": api, "./task-tags": rules, "./task-tags.css": {} };
+  const modules = { react, "react-dom": { createPortal: (node, target) => { calls.portals.push(target); return node; } }, "react/jsx-runtime": { jsx, jsxs: jsx }, "./tauri": api, "./task-tags": rules, "./task-tags.css": {} };
   new Function("require", "exports", "document", componentCode)((name) => {
     if (!(name in modules)) throw new Error(`Unexpected import: ${name}`);
     return modules[name];
@@ -139,7 +139,7 @@ function nodes(tree, predicate) {
 const byClass = (editor, className) => nodes(editor.tree, (node) => node.props.className?.split(" ").includes(className));
 const input = (editor) => nodes(editor.tree, (node) => node.type === "input" && node.props.type !== "checkbox")[0];
 const options = (editor) => nodes(editor.tree, (node) => node.type === "input" && node.props.type === "checkbox");
-const addButton = (editor) => nodes(byClass(editor, "task-tag-entry"), (node) => node.type === "button")[0];
+const addButton = (editor) => byClass(editor, "task-tag-create")[0];
 const keyEvent = (key, nativeEvent = {}) => ({ key, nativeEvent, prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; } });
 function search(editor, value) { input(editor).props.onChange({ target: { value } }); editor.render(); }
 async function open(editor) {
@@ -161,6 +161,8 @@ test("detail can show every tag while list defaults retain three tags and an ove
   const overflow = nodes(list.tree, node => node.type === "span" && node.props.title === tags.slice(3).join("、"));
   assert.equal(overflow.length, 1);
   assert.deepEqual(overflow[0].props.children, ["+", 2]);
+  assert.equal(overflow[0].props.className, "task-tag-overflow");
+  assert.equal(overflow[0].props["aria-label"], "还有 2 个标签");
   assert.deepEqual(chips(detail).map(node => node.props.children), tags);
   assert.deepEqual(chips(detail).map(node => node.props["data-tag-color"]), [0, 1, 2, 3, 4]);
   assert.equal(nodes(detail.tree, node => node.type === "span" && node.props.title === tags.slice(3).join("、")).length, 0);
@@ -179,7 +181,7 @@ test("all editors use a dropdown, rows share one initial request and persisted c
   rows.forEach((row) => { row.render(); assert.equal(nodes(row.tree, (node) => node.props.title === " work ")[0].props["data-tag-color"], 3); });
   await open(editor);
   assert.equal(host.calls.list, 2);
-  assert.equal(byClass(editor, "task-tag-chip")[0].props["data-tag-color"], 3);
+  assert.equal(byClass(editor, "task-tag-option")[0].props["data-tag-color"], 3);
   assert.equal(byClass(editor, "task-tag-option-name")[0].props["data-tag-color"], 3);
 });
 
@@ -219,7 +221,7 @@ test("creating persists immediately, auto-selects canonical name/color and notif
   assert.deepEqual(host.calls.create, ["new"]);
   assert.deepEqual(editor.props.tags, ["New"]);
   assert.equal(input(editor).props.value, "");
-  assert.equal(byClass(editor, "task-tag-chip")[0].props["data-tag-color"], 5);
+  assert.equal(byClass(editor, "task-tag-option")[0].props["data-tag-color"], 5);
   assert.equal(nodes(row.tree, (node) => node.props.title === "new")[0].props["data-tag-color"], 5);
   assert.ok(host.calls.notifications > before);
 });
@@ -269,7 +271,7 @@ test("legacy over-limit task selections remain visible/removable but cannot grow
   const host = createHost([...legacy, "other"].map((name) => ({ name, color: 1 })));
   const editor = host.editor({ tags: legacy });
   await open(editor);
-  assert.equal(byClass(editor, "task-tag-chip").length, 12);
+  assert.equal(options(editor).filter((option) => option.props.checked).length, 12);
   assert.equal(options(editor).filter((option) => !option.props.disabled).length, 12);
   const extra = options(editor).find((option) => !option.props.checked);
   assert.equal(extra.props.disabled, true);
@@ -279,7 +281,8 @@ test("legacy over-limit task selections remain visible/removable but cannot grow
   editor.render();
   assert.equal(nodes(editor.tree, (node) => node.props.role === "alert").length, 1);
   assert.deepEqual(host.calls.create, []);
-  nodes(editor.tree, (node) => node.props["aria-label"] === "移除标签 tag-0")[0].props.onClick();
+  search(editor, "tag-0");
+  options(editor)[0].props.onChange({ target: { checked: false } });
   editor.render();
   assert.equal(editor.props.tags.length, 11);
   search(editor, "tag-1");
@@ -466,7 +469,7 @@ test("removing below the task limit enables additions again, including after a l
   const editor = host.editor({ tags });
   await open(editor);
   for (const name of ["tag-0", "tag-1"]) {
-    nodes(editor.tree, (node) => node.props["aria-label"] === `移除标签 ${name}`)[0].props.onClick();
+    options(editor).find((node) => node.props["aria-label"] === name).props.onChange({ target: { checked: false } });
     editor.render();
   }
   search(editor, "other");
@@ -476,4 +479,56 @@ test("removing below the task limit enables additions again, including after a l
   assert.equal(editor.props.tags.length, 10);
   assert.equal(editor.props.tags.at(-1), "other");
   assert.deepEqual(host.calls.create, []);
+});
+
+test("approved A renders one color-dot/name/check row per tag without duplicate selected chips", async () => {
+  const host = createHost([{ name: "开发", color: 0 }, { name: "设计", color: 1 }]);
+  const editor = host.editor({ tags: ["开发"] });
+  await open(editor);
+  assert.equal(byClass(editor, "task-tag-chips").length, 0);
+  assert.equal(byClass(editor, "task-tag-option").length, 2);
+  assert.equal(byClass(editor, "task-tag-swatch").length, 2);
+  assert.deepEqual(byClass(editor, "task-tag-check").map(node => node.props.children), ["✓", ""]);
+  assert.deepEqual(options(editor).map(node => node.props["aria-label"]), ["开发", "设计"]);
+  options(editor)[1].props.onChange({ target: { checked: true } });
+  editor.render();
+  assert.deepEqual(editor.changes, [["开发", "设计"]]);
+  assert.deepEqual(byClass(editor, "task-tag-check").map(node => node.props.children), ["✓", "✓"]);
+  assert.deepEqual(host.calls.create, []);
+});
+
+test("A keeps a 44px semantic selection surface and a scoped 8px trigger without changing list chips", () => {
+  const css = readFileSync(new URL("./task-tags.css", import.meta.url), "utf8");
+  assert.match(css, /\.task-tag-dropdown-trigger \{[^}]*border-radius: 8px/);
+  assert.match(css, /\.task-tag-option \{[^}]*min-height: 44px[^}]*font-size: 14px/);
+  assert.match(css, /\.task-tag-option:has\(input:checked\) \{[^}]*var\(--task-tag-ink[^}]*var\(--task-tag-bg/);
+  assert.match(css, /\.task-tag-option input \{[^}]*opacity: 0/);
+  assert.match(css, /\.task-tag-option:has\(input:focus-visible\)/);
+  assert.match(css, /\.task-tag-editor\.task-tag-dropdown-panel \.task-tag-entry > input \{[^}]*border: 0[^}]*background: transparent/);
+  assert.match(css, /\.task-list-tags > span \{[^}]*font-size: 10px/);
+  assert.match(css, /\.task-list-tags > \.task-tag-overflow \{[^}]*flex: none/);
+});
+
+test("disabled A cannot open from stale trigger handlers or arrow keys", async () => {
+  const host = createHost([{ name: "开发", color: 0 }]);
+  const editor = host.editor({ disabled: true });
+  const trigger = byClass(editor, "task-tag-dropdown-trigger")[0];
+  trigger.props.onClick();
+  trigger.props.onKeyDown(keyEvent("ArrowDown"));
+  editor.render();
+  assert.equal(input(editor), undefined);
+  assert.deepEqual(editor.changes, []);
+});
+
+test("tag panels stay inside a native modal instead of becoming inert behind it", async () => {
+  const host = createHost([{ name: "开发", color: 0 }]);
+  const editor = host.editor();
+  const trigger = byClass(editor, "task-tag-dropdown-trigger")[0];
+  const dialog = {};
+  let selector;
+  trigger.props.ref.current = { closest(value) { selector = value; return dialog; } };
+  await open(editor);
+  assert.equal(host.calls.portals.at(-1), dialog);
+  assert.equal(selector, "dialog");
+  assert.equal(byClass(editor, "task-tag-dropdown-panel").length, 1);
 });

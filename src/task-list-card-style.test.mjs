@@ -67,11 +67,22 @@ test("long dates and workload can wrap instead of colliding with the status", ()
   assert.equal(declarations(`${list} .task-capsule-status`)["min-height"], "24px");
 });
 
-test("quick actions appear directly at the upper right on hover or keyboard focus", () => {
+test("compact quick actions overlay the upper right without reserving a bottom row", () => {
   const actions = declarations(`${list} .task-capsule-row .ledger-row-actions`);
+  assert.equal(actions.position, "absolute");
   assert.equal(actions.top, "8px");
   assert.equal(actions.right, "8px");
-  assert.equal(actions.bottom, undefined);
+  assert.equal(actions["min-height"], "28px");
+  assert.equal(actions.transform, "none");
+  assert.equal(actions.margin, "0");
+  const button = declarations(`${list} .task-capsule-row .ledger-quick-action`);
+  assert.equal(button.height, "28px");
+  assert.equal(button["font-size"], "12px");
+  assert.equal(button["font-weight"], "500");
+  assert.equal(button["border-color"], "var(--color-gray-edge)");
+  assert.equal(button["box-shadow"], "none");
+  assert.equal(declarations(`${list} .task-capsule-row .ledger-quick-action.caution`)["border-color"], "var(--color-amber-edge)");
+  assert.equal(declarations(`${list} .task-capsule-row .ledger-quick-action.danger`)["border-color"], "var(--color-red-edge)");
   assert.equal(declarations(".ledger-row-actions").opacity, "0");
   assert.equal(declarations(".ledger-row-actions")["pointer-events"], "none");
   assert.match(css, /\.task-ledger-row:hover \.ledger-row-actions, \.task-ledger-row:has\(:focus-visible\) \.ledger-row-actions/);

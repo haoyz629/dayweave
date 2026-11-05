@@ -104,19 +104,27 @@ export function taskExecutionResolution(
 }
 
 export function timelineTaskCompletionAction(block: PlanBlock | null, task: Task | undefined, date: string, _today: string, now = Date.now()) {
-  if (!block || !task || task.id !== block.task_id || task.status !== block.task_status || task.deleted_at) return null;
+  if (!block) return null;
+  const recycled = block.task_status === "deleted";
+  if (!task || task.id !== block.task_id || task.status !== block.task_status || (!recycled && task.deleted_at)) return null;
   const recordDate = block.result_date ?? date;
   if (!blockResultEditable(recordDate, now) || recordDate !== date) return null;
-  if (!["open", "scheduled", "done"].includes(task.status)) return null;
+  if (recycled) return !block.review && block.execution_status === "planned" ? "complete-block" : null;
+  if (!task || !["open", "scheduled", "done"].includes(task.status)) return null;
   const outcome = block.review?.outcome ?? block.execution_status;
   if (historicalBlockCompletionLocked(recordDate, block, now)) return null;
   if (outcome !== "planned" && outcome !== "completed") return block.review ? null : "clear";
   return outcome === "completed" ? "uncomplete-block" : "complete-block";
 }
 
+
 export function timelineTaskDialogState(block: Pick<PlanBlock, "task_status" | "execution_status" | "review">) {
   const outcome = block.review?.outcome ?? block.execution_status;
-  if (block.task_status === "deleted") return { status: "deleted", label: "已删除", action: null } as const;
+  if (block.task_status === "deleted") {
+    return outcome === "completed"
+      ? { status: "completed", label: "当天已完成", action: null } as const
+      : { status: "deleted", label: "回收站任务", action: outcome === "planned" && !block.review ? "complete-block" : null } as const;
+  }
   if (outcome === "completed") {
     return { status: "completed", label: "当天已完成", action: "uncomplete-block" } as const;
   }
@@ -124,9 +132,9 @@ export function timelineTaskDialogState(block: Pick<PlanBlock, "task_status" | "
   return { status: "executing", label: "执行中", action: null } as const;
 }
 
-// Recycled tasks are hidden from the timeline without deleting their facts.
-// Completed tasks retain facts, but unexecuted current/future blocks are no longer work to do.
+// Recycled tasks expose only existing blocks dated today or earlier. Their
+// planned facts remain actionable only through the completed-only path above.
 export function visibleTaskScheduleBlocks(blocks: PlanBlock[], date: string, today: string) {
-  return blocks.filter((block) => block.task_status !== "deleted"
+  return blocks.filter((block) => (block.task_status !== "deleted" || date <= today)
     && !(date >= today && block.task_status === "done" && block.execution_status === "planned" && !block.review));
 }

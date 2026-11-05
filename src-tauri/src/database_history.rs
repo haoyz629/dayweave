@@ -129,7 +129,7 @@ pub(super) fn load(connection: &Connection, task_id: &str) -> AppResult<Vec<Task
             reason.filter(|note| note != "明确完成整个任务")
         } else if kind == "execution_resolved" { reason } else { None };
         events.push((TaskHistoryEventDto { id: format!("change:{id}"), occurred_at: Some(timestamp), plan_date: None,
-            kind: if automatic { "automatic_status" } else if reopened { "reopened" } else if kind == "restored" { "restored" } else { "status" }.into(), status, note, review_note: None }, 2, order));
+            kind: if automatic { "automatic_status" } else if reopened { "reopened" } else if matches!(kind.as_str(), "soft_deleted" | "restored") { kind.as_str() } else { "status" }.into(), status, note, review_note: None }, 2, order));
     }
     for event in current_events(connection, task_id)? {
         if seen.insert(serde_json::to_string(&event)?) { events.push((event, 1, i64::MAX)); }
@@ -258,6 +258,7 @@ mod tests {
         db.complete_task_with_note(&id, Some(&block), Some("completion note".into())).unwrap();
         db.soft_delete_manual_task(&id, true).unwrap();
         assert_eq!(db.get_task_metadata(&id).unwrap().history.last().unwrap().status.as_deref(), Some("deleted"));
+        assert_eq!(db.get_task_metadata(&id).unwrap().history.last().unwrap().kind, "soft_deleted");
         db.restore_task(&id).unwrap();
         // Equal instants with different UTC offsets must sort by event type and audit insertion order.
         db.connection.execute("UPDATE task_changes SET created_at = '2026-10-16T04:00:00Z'
@@ -271,6 +272,28 @@ mod tests {
         let last = events.last().unwrap();
         assert_eq!((last.kind.as_str(), last.status.as_deref()), ("restored", Some("done")));
         assert_eq!(events, db.get_task_metadata(&id).unwrap().history);
+    }
+
+    #[test]
+    fn task_trash_restore_cycles_append_distinct_history_and_survive_reopen() {
+        let _clock = TestToday::new(TODAY);
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("trash-history.sqlite");
+        let mut db = Database::open(&path).unwrap();
+        let id = db.create_manual_task("trash cycles").unwrap();
+        for _ in 0..2 {
+            db.soft_delete_manual_task(&id, true).unwrap();
+            db.restore_task(&id).unwrap();
+        }
+        let history = db.get_task_metadata(&id).unwrap().history;
+        assert_eq!(history.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
+            vec!["created", "soft_deleted", "restored", "soft_deleted", "restored"]);
+        assert_eq!(history.iter().skip(1).map(|e| e.status.as_deref()).collect::<Vec<_>>(),
+            vec![Some("deleted"), Some("open"), Some("deleted"), Some("open")]);
+        assert!(history.iter().all(|e| e.occurred_at.is_some()));
+        drop(db);
+        let db = Database::open(&path).unwrap();
+        assert_eq!(db.get_task_metadata(&id).unwrap().history, history);
     }
 
     #[test]

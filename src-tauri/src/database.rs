@@ -29,6 +29,9 @@ pub use database_tags::TaskTagDefinition;
 
 #[path = "database_recurring.rs"]
 mod database_recurring;
+#[path = "database_recurring_execution.rs"]
+mod database_recurring_execution;
+pub use database_recurring_execution::RecurringExecutionEventDto;
 
 pub struct Database {
     connection: Connection,
@@ -803,6 +806,7 @@ fn fact_fingerprint(connection: &Connection, kind: &str, id: &str) -> AppResult<
         &[
             "SELECT * FROM recurring_occurrences WHERE id = ?1",
             "SELECT * FROM recurring_items WHERE id = (SELECT recurring_item_id FROM recurring_occurrences WHERE id = ?1)",
+            "SELECT * FROM recurring_execution_events WHERE occurrence_id = ?1 ORDER BY id",
         ]
     };
     let facts = queries.iter().map(|sql| fact_rows(connection, sql, id)).collect::<AppResult<Vec<_>>>()?;
@@ -1399,13 +1403,18 @@ impl Database {
         if item.deleted_at.is_some() {
             return Err(AppError::Domain("重复事项已在回收站中".into()));
         }
-        if item.status != "ended" {
-            return Err(AppError::Domain("请先结束重复事项，再移入回收站".into()));
+        if !matches!(item.status.as_str(), "paused" | "ended") {
+            return Err(AppError::Domain("请先暂停重复事项，再移入回收站".into()));
         }
+        if item.status != "ended" {
+            database_recurring::record_status(&transaction, item_id, "ended")?;
+        }
+        let timestamp = now();
         transaction.execute(
-            "UPDATE recurring_items SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
-            params![item_id, now()],
+            "UPDATE recurring_items SET status = 'ended', deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
+            params![item_id, timestamp],
         )?;
+        database_recurring_execution::record_lifecycle(&transaction, &item, "soft_deleted", &timestamp)?;
         transaction.commit()?;
         Ok(())
     }
@@ -1416,10 +1425,12 @@ impl Database {
         if item.deleted_at.is_none() {
             return Err(AppError::Domain("只有回收站中的重复事项可以恢复".into()));
         }
+        let timestamp = now();
         transaction.execute(
             "UPDATE recurring_items SET deleted_at = NULL, updated_at = ?2 WHERE id = ?1",
-            params![item_id, now()],
+            params![item_id, timestamp],
         )?;
+        database_recurring_execution::record_lifecycle(&transaction, &item, "restored", &timestamp)?;
         transaction.commit()?;
         Ok(())
     }
@@ -1457,13 +1468,19 @@ impl Database {
         ).optional()?.ok_or_else(|| AppError::NotFound(format!("重复事项发生记录 {occurrence_id}")))?;
         validate_review_target(&transaction, &occurrence_date, "recurring", occurrence_id)?;
         let before = load_occurrence(&transaction, occurrence_id)?;
+        if before.outcome.as_deref() == Some(input.outcome.as_str()) && before.review_notes == notes {
+            clear_review_draft(&transaction, &occurrence_date, "recurring", occurrence_id)?;
+            transaction.commit()?;
+            return Ok(before);
+        }
         let timestamp = now();
         transaction.execute(
             "UPDATE recurring_occurrences
-             SET outcome = ?2, review_notes = ?3, reviewed_at = ?4, updated_at = ?4
+             SET outcome = ?2, review_notes = ?3, reviewed_at = ?4, updated_at = ?4, is_exception = 1
              WHERE id = ?1",
             params![occurrence_id, input.outcome, notes, timestamp],
         )?;
+        database_recurring_execution::record(&transaction, occurrence_id, &timestamp)?;
         let occurrence = load_occurrence(&transaction, occurrence_id)?;
         clear_review_draft(&transaction, &occurrence_date, "recurring", occurrence_id)?;
         let payload = FactUndo { task: None, block: None, occurrence: Some(before), review: None,
@@ -1747,8 +1764,14 @@ impl Database {
                         params![review.id, review.outcome, review.notes])?;
                 }
                 if let Some(occurrence) = payload.occurrence {
+                    if occurrence.occurrence_date != shanghai_today() {
+                        return Err(AppError::Domain("只能撤销今天的重复事项结果；过去记录只读".into()));
+                    }
+                    validate_review_target(&transaction, &occurrence.occurrence_date, "recurring", &occurrence.id)?;
                     transaction.execute("UPDATE recurring_occurrences SET outcome = ?2, review_notes = ?3, reviewed_at = ?4, updated_at = ?5 WHERE id = ?1",
                         params![occurrence.id, occurrence.outcome, occurrence.review_notes, occurrence.reviewed_at, now()])?;
+                    database_recurring_execution::record(&transaction, &occurrence.id, &now())?;
+                    clear_review_draft(&transaction, &occurrence.occurrence_date, "recurring", &occurrence.id)?;
                 }
                 if target_type == "execution_capture" {
                     let payload: FactUndo = serde_json::from_str(&before_json)?;
@@ -3578,7 +3601,7 @@ impl Database {
                         review.created_at, review.updated_at, review.followup_action, pb.result_date, pb.result_ends_at
                  FROM plan_blocks pb JOIN tasks task ON task.id = pb.task_id
                  LEFT JOIN review_entries review ON review.plan_block_id = pb.id
-                 WHERE pb.daily_plan_id = ?1 AND task.status <> 'deleted'
+                 WHERE pb.daily_plan_id = ?1
                  ORDER BY pb.starts_at",
             )?;
             task_blocks = statement.query_map([plan_id], |row| {
@@ -3639,12 +3662,15 @@ impl Database {
         if plan_date != capture_date {
             return Err(AppError::Domain("执行日期必须与执行块所属日期一致".into()));
         }
-        if task_status == TaskStatus::Deleted.as_str() {
-            return Err(AppError::Domain("回收站任务不能记录执行状态".into()));
-        }
         let in_window = database_results::allow_capture(&transaction, capture_date, &input.plan_block_id)?;
         database_results::require_block_outcome_change(&transaction, &input.plan_block_id, input.outcome.as_str())?;
         let task_id: String = transaction.query_row("SELECT task_id FROM plan_blocks WHERE id = ?1", [&input.plan_block_id], |row| row.get(0))?;
+        let task = load_task_dto_in_transaction(&transaction, &task_id)?;
+        if database_results::save_recycled_completion(&transaction, &task, capture_date,
+            &input.plan_block_id, input.outcome.as_str(), input.note.as_deref())? {
+            transaction.commit()?;
+            return Ok(());
+        }
         database_history::preserve_current(&transaction, &task_id)?;
         let before = execution_snapshot(&transaction, &input.plan_block_id)?;
         database_results::freeze_block(&transaction, &input.plan_block_id)?;
@@ -6240,6 +6266,9 @@ const MIGRATIONS: &[(i64, &str)] = &[
         -- Completion contexts are recovered conservatively by the versioned Rust migration.
     "#),
     (27, database_recurring::MIGRATION),
+    (28, database_recurring_execution::MIGRATION),
+    (29, database_recurring_execution::STATUS_TIMESTAMP_MIGRATION),
+    (30, database_recurring_execution::LIFECYCLE_MIGRATION),
 ];
 
 #[cfg(test)]
@@ -9168,6 +9197,51 @@ mod tests {
     }
 
     #[test]
+    fn paused_recurring_item_trash_ends_atomically_and_preserves_execution_history() {
+        let mut database = Database::in_memory().unwrap();
+        let today = shanghai_today();
+        let item = database.create_recurring_item(recurring_item("暂停后收尾", &today)).unwrap();
+        let occurrence = database.list_recurring_occurrences(&today).unwrap()[0].clone();
+        let saved = database.save_recurring_occurrence_review(&occurrence.id, RecurringOccurrenceReviewInput {
+            outcome: "completed".into(), notes: Some("已经执行的记录".into()),
+        }).unwrap();
+        database.set_recurring_item_status(&item.id, "paused").unwrap();
+        let events_before = database.list_recurring_execution_history(&item.id).unwrap();
+        let status_count: i64 = database.connection.query_row("SELECT COUNT(*) FROM recurring_status_versions WHERE recurring_item_id=?1", [&item.id], |r| r.get(0)).unwrap();
+        assert!(database.soft_delete_recurring_item(&item.id, false).is_err());
+        let unchanged = database.list_recurring_items(true, false).unwrap().remove(0);
+        assert_eq!(unchanged.status, "paused");
+        assert!(unchanged.deleted_at.is_none());
+        // A failed lifecycle append must roll back the item update as well.
+        database.connection.execute_batch("CREATE TRIGGER reject_test_end BEFORE INSERT ON recurring_status_versions WHEN NEW.status='ended' BEGIN SELECT RAISE(ABORT, 'test end failure'); END;").unwrap();
+        assert!(database.soft_delete_recurring_item(&item.id, true).is_err());
+        let unchanged = database.list_recurring_items(true, false).unwrap().remove(0);
+        assert_eq!(unchanged.status, "paused");
+        assert!(unchanged.deleted_at.is_none());
+        database.connection.execute_batch("DROP TRIGGER reject_test_end").unwrap();
+        database.soft_delete_recurring_item(&item.id, true).unwrap();
+        let deleted = database.list_recurring_items(true, true).unwrap().remove(0);
+        assert_eq!(deleted.status, "ended");
+        assert!(deleted.deleted_at.is_some());
+        assert!(database.soft_delete_recurring_item(&item.id, true).is_err());
+        let events_after = database.list_recurring_execution_history(&item.id).unwrap();
+        assert_eq!(&events_after[..events_before.len()], events_before.as_slice());
+        assert_eq!(events_after.len(), events_before.len() + 2);
+        assert_eq!(events_after[events_after.len() - 2].kind, "ended");
+        assert_eq!(events_after.last().unwrap().kind, "soft_deleted");
+        assert_eq!(load_occurrence(&database.connection, &occurrence.id).unwrap(), saved);
+        database.restore_recurring_item(&item.id).unwrap();
+        let restored = database.list_recurring_items(true, false).unwrap().remove(0);
+        assert_eq!(restored.status, "ended");
+        assert!(restored.deleted_at.is_none());
+        let tomorrow = parse_plan_date(&today).unwrap().succ_opt().unwrap().to_string();
+        assert!(database.list_recurring_occurrences(&tomorrow).unwrap().is_empty());
+        database.soft_delete_recurring_item(&item.id, true).unwrap();
+        let final_count: i64 = database.connection.query_row("SELECT COUNT(*) FROM recurring_status_versions WHERE recurring_item_id=?1", [&item.id], |r| r.get(0)).unwrap();
+        assert_eq!(final_count, status_count + 1, "recycling an ended item must not duplicate its end event");
+    }
+
+    #[test]
     fn recurring_item_timeline_window_requires_a_valid_non_crossing_duration() {
         let mut database = Database::in_memory().unwrap();
         let today = shanghai_today();
@@ -9449,3 +9523,11 @@ mod database_recurring_tests;
 #[cfg(test)]
 #[path = "database_cross_day_tests.rs"]
 mod cross_day_tests;
+
+#[cfg(test)]
+#[path = "database_recurring_execution_tests.rs"]
+mod recurring_execution_tests;
+
+#[cfg(test)]
+#[path = "database_recycled_execution_tests.rs"]
+mod recycled_execution_tests;

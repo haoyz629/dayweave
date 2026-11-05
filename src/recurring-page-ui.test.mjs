@@ -6,6 +6,7 @@ import ts from "typescript";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { recurringClockRange } from "./recurring-schedule.ts";
+import { recycleCleanupMessage } from "./recycle-retention.ts";
 
 const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -40,11 +41,12 @@ function harness(overrides = {}) {
   const writes = [];
   const state = {
     React, Icon: () => null, ConfirmationDialog: ({ children }) => React.createElement("section", null, children), Toast: () => null,
-    item, selectedRecurringId: item.id, view: "recurring", busy: false, pendingEndRecurringItem: null, pendingTrashRecurringItem: null,
+    item, selectedRecurringId: item.id, view: "recurring", busy: false, hasUnsavedChanges: false, pendingEndRecurringItem: null, pendingTrashRecurringItem: null,
     writes, refreshed: 0, feedback: "", uiErrorMessage: String,
     async setRecurringItemStatus(...args) { writes.push(args); if (state.failure) throw Error("数据库忙"); },
     async onRecurringChanged() { state.refreshed++; },
     selectRecurringItem(value) { state.selected = value; }, restoreSelectedRecurringItem() {},
+    changeRecurringItemStatus(status, target) { return state.setRecurringItemStatus(target.id, status); },
     ...overrides
   };
   for (const key of ["busy", "pendingEndRecurringItem", "pendingTrashRecurringItem", "feedback", "selectedId", "selectedRecurringId", "pendingPermanentRecurringItem"]) {
@@ -57,17 +59,22 @@ function harness(overrides = {}) {
   return { state, renderActions, renderDialog };
 }
 
-test("active and paused recurring capsules expose an end action even when selected", () => {
+test("recurring shortcuts follow lifecycle state, independent of selection", async () => {
   for (const status of ["active", "paused"]) for (const selectedRecurringId of [item.id, null]) {
     const h = harness({ item: { ...item, status }, selectedRecurringId });
-    const tree = h.renderActions();
-    const end = nodes(tree, node => node.props["aria-label"] === `结束${item.title}`)[0];
-    assert.ok(end);
-    assert.equal(end.props.disabled, false);
-    assert.equal(nodes(tree, node => node.props["aria-label"] === `将${item.title}移入回收站`).length, 0);
-    end.props.onClick();
-    assert.equal(h.state.pendingEndRecurringItem.id, item.id);
-    assert.equal(h.state.writes.length, 0, "click must ask for confirmation, not end immediately");
+    const buttons = nodes(h.renderActions(), node => node.type === "button");
+    assert.deepEqual(buttons.map(node => node.props["aria-label"]), status === "active" ? [`暂停${item.title}`] : [`恢复${item.title}`, `结束${item.title}`, `将${item.title}移入回收站`]);
+    assert.ok(buttons.every(button => button.props.disabled === false));
+    await buttons[0].props.onClick();
+    assert.deepEqual(h.state.writes, [[item.id, status === "active" ? "paused" : "active"]]);
+    if (status === "paused") {
+      buttons[1].props.onClick();
+      assert.equal(h.state.pendingEndRecurringItem.id, item.id);
+      assert.equal(h.state.writes.length, 1, "ending still requires confirmation");
+      buttons[2].props.onClick();
+      assert.equal(h.state.pendingTrashRecurringItem.id, item.id);
+      assert.equal(h.state.writes.length, 1, "trashing still requires confirmation");
+    }
   }
   assert.match(css, /\.task-ledger-row:hover \.ledger-row-actions/);
   assert.match(css, /\.task-ledger-row:has\(:focus-visible\) \.ledger-row-actions/);
@@ -91,13 +98,14 @@ test("ended capsules expose trash instead of end; recycled capsules keep restore
   }
 });
 
-test("busy state disables end/trash shortcuts and guards confirmed writes", async () => {
-  for (const status of ["active", "ended"]) {
-    const h = harness({ item: { ...item, status }, busy: true });
-    const button = nodes(h.renderActions(), node => node.props["aria-label"] === (status === "active" ? `结束${item.title}` : `将${item.title}移入回收站`))[0];
-    assert.equal(button.props.disabled, true);
-    await h.state.endRecurringItemFromList(h.state.item);
-    assert.equal(h.state.writes.length, 0);
+test("busy or unsaved editor disables all recurring shortcuts", async () => {
+  for (const status of ["active", "paused", "ended"]) for (const block of [{ busy: true }, { hasUnsavedChanges: true }]) {
+    const h = harness({ item: { ...item, status }, ...block });
+    assert.ok(nodes(h.renderActions(), node => node.type === "button").every(button => button.props.disabled));
+    if (block.busy) {
+      await h.state.endRecurringItemFromList(h.state.item);
+      assert.equal(h.state.writes.length, 0);
+    }
   }
 });
 
@@ -240,4 +248,110 @@ test("recurring pages reuse the ordinary header with lifecycle status icons", ()
 test("ordinary notes consume spare height without changing planning controls", () => {
   assert.match(css, /:is\(#new-task-form, #task-editor-form\) \.task-notes-region \{ flex: 1 0 150px; height: auto; \}/);
   assert.match(css, /#recurring-editor-form \.recurring-editor-surface \{ gap: 24px; \}/);
+});
+
+test("recycled recurring details share ordinary bottom actions without a pinned banner", () => {
+  const state = {
+    React, recycleCleanupMessage,
+    Icon: ({ name }) => React.createElement("svg", { "data-icon": name }),
+    TaskPageHeader: () => React.createElement("nav", { className: "task-page-header" }),
+    TaskTagList: ({ tags }) => React.createElement("span", { className: "task-list-tags" }, tags.join("、")),
+    TaskDetailResources: ({ notes }) => React.createElement("section", { className: "task-detail-resources" }, notes),
+    RecurringExecutionHistory: () => React.createElement("section", { "aria-label": "执行记录" }),
+    SeparatedCopy: ({ text }) => text
+  };
+  const names = ["recurringScheduleLabel", "RecycleBinActions", "DeletedRecurringItemDetails"];
+  Object.assign(state, evaluate(`${names.map(name => functions.get(name).getText(source)).join("\n")}\n({ ${names.join(",")} });`, state));
+  const deleted = { ...item, status: "ended", deleted_at: "2026-10-26T18:00:00+08:00", frequency: "weekly", interval_value: 1, weekdays: [2, 4], starts_on: "2026-10-01", ends_on: null, display_time: "14:00", display_duration_minutes: 60, tags: ["开发", "产品"], notes: "保留的备注" };
+  const calls = [];
+  for (const busy of [false, true]) {
+    const actions = state.RecycleBinActions({ deletedAt: deleted.deleted_at, nowMs: Date.parse("2026-10-27T10:00:00+08:00"), itemLabel: "重复事项", busy, onRestore: () => calls.push("restore"), onPermanentDelete: () => calls.push("delete") });
+    const buttons = nodes(actions, node => node.type === "button");
+    assert.equal(buttons.length, 2);
+    assert.ok(buttons.every(node => node.props.disabled === busy));
+    if (!busy) buttons.forEach(button => button.props.onClick());
+    const html = renderToStaticMarkup(state.DeletedRecurringItemDetails({ item: deleted, busy, children: actions }));
+    assert.match(html, /ordinary-task-detail recycled-task-detail/);
+    assert.match(html, /aria-label="回收站重复事项详情"><header>/);
+    assert.match(html, /<section class="task-detail-resources">保留的备注<\/section><footer class="task-detail-actions">/);
+    assert.ok(html.indexOf("</footer>") < html.indexOf("terminal-task-help"));
+    for (const label of ["重复规则", "有效日期", "今日页显示", "显示时长"]) assert.ok(html.includes(label));
+    assert.equal((html.match(/<dt><svg/g) ?? []).length, 4);
+    assert.match(html, /60<span class="task-detail-unit">分钟<\/span>/);
+    assert.match(html, /开发、产品/);
+    assert.match(html, /保留的备注/);
+    assert.match(html, /恢复重复事项/);
+    assert.match(html, /永久删除/);
+    assert.ok(html.includes(recycleCleanupMessage(deleted.deleted_at, Date.parse("2026-10-27T10:00:00+08:00"))));
+    assert.doesNotMatch(html, /recycle-bin-banner|最早开始|预计工作量/);
+    assert.match(html, /aria-label="执行记录"/);
+  }
+  assert.deepEqual(calls, ["restore", "delete"]);
+  assert.doesNotMatch(css, /\.recycled-task-detail > \.recycle-bin-banner|:has\(\.recycled-task-detail\)/);
+  assert.match(functions.get("DeletedTaskDetails").getText(source), /<RecycleBinActions deletedAt=\{task.deleted_at\}/);
+});
+
+test("recurring selection and back navigation protect edits, and discard returns to saved details", async () => {
+  const baseline = { title: "已保存" };
+  const state = { busy: false, draftSaving: false, creating: false, hasUnsavedChanges: true,
+    selectedTask: null, selectedRecurringItem: item, selectedRecurringId: item.id, recurringDetailEditing: true,
+    recurringForm: { title: "未保存" }, recurringEditBaseline: baseline, pendingTaskChange: null };
+  for (const key of ["feedback", "selectedId", "selectedRecurringId", "recurringForm", "recurringDetailEditing", "pendingTaskChange"]) {
+    state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = value; };
+  }
+  evaluate(["cancelRecurringEditing", "applyTaskChange", "requestTaskChange", "resolvePendingChange", "selectRecurringItem", "discardAndContinue"].map(name => functions.get(name).getText(source)).join("\n"), state);
+  await state.selectRecurringItem({ id: "other" });
+  assert.equal(state.selectedRecurringId, item.id);
+  assert.equal(state.pendingTaskChange.kind, "select-recurring");
+  state.resolvePendingChange(false);
+  assert.equal(state.recurringForm.title, "未保存");
+  assert.equal(state.recurringDetailEditing, true);
+  await state.requestTaskChange({ kind: "recurring-detail" });
+  assert.equal(state.recurringDetailEditing, true);
+  await state.discardAndContinue();
+  assert.equal(state.recurringForm, baseline);
+  assert.equal(state.recurringDetailEditing, false);
+  assert.equal(state.pendingTaskChange, null);
+  state.hasUnsavedChanges = false;
+  await state.selectRecurringItem({ id: "other" });
+  assert.equal(state.selectedRecurringId, "other");
+  assert.equal(state.selectedId, null);
+});
+
+test("recurring status shortcuts change the clicked series, guard unsaved edits and preserve failures", async () => {
+  const writes = [];
+  const state = { busy: false, hasUnsavedChanges: false, selectedRecurringItem: item, uiErrorMessage: String,
+    async setRecurringItemStatus(...args) { writes.push(args); if (state.fail) throw Error("数据库忙"); },
+    async onRecurringChanged() {} };
+  for (const key of ["busy", "feedback"]) state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = value; };
+  evaluate(functions.get("changeRecurringItemStatus").getText(source), state);
+  await state.changeRecurringItemStatus("paused", { id: "other" });
+  assert.deepEqual(writes, [["other", "paused"]]);
+  state.hasUnsavedChanges = true;
+  await state.changeRecurringItemStatus("active");
+  assert.equal(writes.length, 1);
+  state.hasUnsavedChanges = false; state.fail = true;
+  await state.changeRecurringItemStatus("active");
+  assert.match(state.feedback, /状态未改变.*数据库忙/);
+  assert.equal(state.busy, false);
+});
+
+test("active and paused details show saved facts and history with an explicit edit entry", () => {
+  const calls = [];
+  const state = { React, Icon: () => null, SeparatedCopy: ({ text }) => text,
+    TaskPageHeader: () => null, TaskTagList: () => null, TaskDetailResources: ({ notes }) => notes,
+    RecurringExecutionHistory: () => React.createElement("section", { "aria-label": "执行记录" }) };
+  evaluate(["recurringScheduleLabel", "RecurringItemDetails"].map(name => functions.get(name).getText(source)).join("\n"), state);
+  for (const status of ["active", "paused"]) {
+    const detail = state.RecurringItemDetails({ item: { ...item, status, frequency: "daily", interval_value: 1, starts_on: "2026-10-01", tags: [], notes: "已保存备注" }, busy: false,
+      onEdit: () => calls.push("edit"), onPause() {}, onResume() {}, onEnd() {} });
+    const html = renderToStaticMarkup(detail);
+    for (const label of ["重复事项只读详情", "重复规则", "有效日期", "今日页显示", "显示时长", "已保存备注", "执行记录"]) assert.ok(html.includes(label));
+    assert.doesNotMatch(html, /<input|<textarea|recurring-editor-form/);
+    const buttons = nodes(detail, node => node.type === "button");
+    assert.deepEqual(buttons.map(button => renderToStaticMarkup(button).replace(/<[^>]*>/g, "")), status === "active" ? ["暂停事项", "编辑任务"] : ["恢复事项", "编辑任务", "结束事项"]);
+    buttons[1].props.onClick();
+    assert.equal(buttons.length, status === "active" ? 2 : 3);
+  }
+  assert.deepEqual(calls, ["edit", "edit"]);
 });

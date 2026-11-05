@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 const source = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
-test("Gantt navigation reuses the existing guarded task selection", () => {
-  const app = source("./App.tsx");
-  assert.match(app, /label: "甘特图"/);
-  assert.match(app, /active === "甘特图" && <GanttPage/);
-  assert.match(app, /onOpenTask=\{\(task\) => requestNavigation\(\{ active: "任务", taskId: task.id \}\)\}/);
+test("removed Gantt module has no navigation, runtime imports or dedicated files", () => {
+  for (const file of ["App.tsx", "styles.css", "color-system.css"]) {
+    assert.doesNotMatch(source(`./${file}`), /gantt|甘特图/i);
+  }
+  for (const file of ["gantt-page.tsx", "gantt-page.css", "gantt-model.ts", "gantt-model.test.mjs", "assets/nav-gantt.svg"]) {
+    assert.equal(existsSync(new URL(`./${file}`, import.meta.url)), false, file);
+  }
 });
 
 test("wide editor centers its complete writing column while retaining left-aligned fields", () => {
@@ -20,11 +22,11 @@ test("task tags sit after priority in the shared title controls and use a dropdo
   const app = source("./App.tsx");
   const start = app.indexOf("function TaskEditorRegions(");
   const editor = app.slice(start, app.indexOf("\nfunction ", start + 1));
-  assert.match(editor, /className="task-title-controls">[\s\S]*className=\{`priority-select-control[\s\S]*<TaskTagEditor[^>]*dropdown/);
+  assert.match(editor, /className="task-title-controls">[\s\S]*<TaskPrioritySelector[\s\S]*<TaskTagEditor[^>]*dropdown/);
   assert.equal((editor.match(/<TaskTagEditor/g) ?? []).length, 1);
   const tags = source("./task-tag-editor.tsx");
   assert.match(tags, /aria-haspopup="dialog" aria-expanded=\{open\}/);
-  assert.match(tags, /type="checkbox" checked=\{matchesTag\(tags, tag\)\}/);
+  assert.match(tags, /type="checkbox" aria-label=\{tag\} checked=\{checked\}/);
   assert.match(tags, /createPortal\(/);
   assert.match(tags, /event.key !== "Escape"/);
   assert.match(source("./task-tags.css"), /\.task-title-controls \{ display: flex;[^}]*gap: 8px/);

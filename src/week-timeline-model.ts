@@ -69,9 +69,9 @@ export function weekEntries(date: string, schedule: DaySchedule, occurrences: Re
     const start = item.display_time ? Number(item.display_time.slice(0, 2)) * 60 + Number(item.display_time.slice(3, 5)) : NaN;
     const end = Math.min(1440, start + (item.display_duration_minutes ?? 0));
     const timed = Number.isFinite(start) && start >= 0 && start < 1440 && end > start;
-    entries.push({ layoutKey: `recurring:${item.id}`, date, title: item.title, status: "重复事项", tone: "recurring",
+    entries.push({ layoutKey: `recurring:${item.id}`, date, title: item.title, status: item.outcome === "completed" ? "本次已完成" : item.outcome === "partial" ? "本次部分完成" : item.outcome === "not_completed" ? "本次未完成" : "重复事项", tone: "recurring",
       startMinute: timed ? start : null, endMinute: timed ? end : null,
-      time: timed ? `${weekClock(start)}–${weekClock(end)}` : "时间未指定", notes: item.notes, tags: item.tags });
+      time: timed ? `${weekClock(start)}–${weekClock(end)}` : "时间未指定", notes: [item.notes, item.review_notes].filter(Boolean).join("\n\n") || null, tags: item.tags });
   }
   for (const event of schedule.fixed_events.filter(event => !event.deleted_at)) {
     const range = clippedRange(date, event.starts_at, event.ends_at);

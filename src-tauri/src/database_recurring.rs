@@ -83,7 +83,13 @@ pub(super) fn backfill(tx: &Transaction<'_>) -> AppResult<()> {
         insert_initial_version(tx, &item)?;
         let version = tx.last_insert_rowid();
         tx.execute("UPDATE recurring_occurrences SET rule_version_id=?2, is_exception=CASE WHEN occurrence_date<?3 OR outcome IS NOT NULL THEN 1 ELSE 0 END WHERE recurring_item_id=?1", params![id, version, shanghai_today()])?;
-        if item.status != "active" { record_status(tx, &id, &item.status)?; }
+        if item.status != "active" {
+            // Migration 27 runs before the timestamp column exists. These legacy
+            // lifecycle facts have date precision only; never invent an action time.
+            let tomorrow = parse_plan_date(&shanghai_today())?.succ_opt().ok_or_else(|| AppError::Schema("日期超出范围".into()))?;
+            tx.execute("INSERT INTO recurring_status_versions(recurring_item_id,effective_from,status) VALUES(?1,?2,?3)",
+                params![id, tomorrow.to_string(), item.status])?;
+        }
     }
     Ok(())
 }
@@ -92,8 +98,8 @@ pub(super) fn record_status(tx: &Transaction<'_>, item_id: &str, status: &str) -
     // Like the existing lifecycle, today's schedule remains available for review.
     // Unlike the old lifecycle, unvisited history also remains reconstructible.
     let tomorrow = parse_plan_date(&shanghai_today())?.succ_opt().ok_or_else(|| AppError::Schema("日期超出范围".into()))?;
-    tx.execute("INSERT INTO recurring_status_versions(recurring_item_id,effective_from,status) VALUES(?1,?2,?3)",
-        params![item_id, tomorrow.to_string(), status])?;
+    tx.execute("INSERT INTO recurring_status_versions(recurring_item_id,effective_from,status,occurred_at) VALUES(?1,?2,?3,?4)",
+        params![item_id, tomorrow.to_string(), status, now()])?;
     Ok(())
 }
 

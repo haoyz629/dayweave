@@ -86,6 +86,7 @@ export function TaskTagEditor({ tags, suggestions = [], disabled, id, onChange }
     if (restoreFocus) triggerRef.current?.focus();
   }
   function show() {
+    if (latest.current.disabled) return;
     setOpen(true);
     void refreshCatalog(true);
   }
@@ -99,7 +100,7 @@ export function TaskTagEditor({ tags, suggestions = [], disabled, id, onChange }
       const below = window.innerHeight - trigger.bottom - 16;
       const above = trigger.top - 16;
       const placeAbove = below < 280 && above > below;
-      const maxHeight = Math.max(80, Math.min(440, placeAbove ? above : below));
+      const maxHeight = Math.max(80, Math.min(500, placeAbove ? above : below));
       const height = Math.min(panelRef.current?.scrollHeight ?? 400, maxHeight);
       setPlacement({
         left: Math.max(12, Math.min(trigger.right - width, window.innerWidth - width - 12)),
@@ -218,18 +219,22 @@ export function TaskTagEditor({ tags, suggestions = [], disabled, id, onChange }
     {open && createPortal(<div ref={panelRef} id={`${id}-panel`} className="task-tag-editor task-tag-dropdown-panel" role="dialog" aria-label="选择任务标签" aria-busy={pending || loading} style={placement}
       onKeyDown={(event) => {
         if (!event.target || !(event.target as HTMLElement).matches('.task-tag-option input')) return;
-        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+        if (event.key === "Enter") { event.preventDefault(); (event.target as HTMLInputElement).click(); return; }
+        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
         event.preventDefault();
         const options = optionInputs();
         const index = options.indexOf(event.target as HTMLInputElement);
-        if (event.key === "ArrowUp" && index === 0) inputRef.current?.focus();
+        if (event.key === "Home") options[0]?.focus();
+        else if (event.key === "End") options[options.length - 1]?.focus();
+        else if (event.key === "ArrowUp" && index === 0) inputRef.current?.focus();
         else options[(index + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length]?.focus();
       }}>
       <div className="task-tag-search-header">
         <header><strong>任务标签</strong><button type="button" aria-label="关闭标签选择" onClick={() => close(true)}>×</button></header>
-        <label htmlFor={id}>搜索或新建标签 <small>可多选</small></label>
+        <label className="sr-only" htmlFor={id}>搜索或新建标签</label>
         <div className="task-tag-entry">
-          <input ref={inputRef} id={id} value={input} disabled={busy} placeholder="搜索标签，或输入新名称" aria-invalid={Boolean(message)} aria-describedby={message ? `${id}-error` : undefined}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><circle cx="10" cy="10" r="6" /><path d="m15 15 5 5" /></svg>
+          <input ref={inputRef} id={id} value={input} disabled={busy} placeholder="搜索或新建标签" autoComplete="off" aria-invalid={Boolean(message)} aria-describedby={message ? `${id}-error` : undefined}
             onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }}
             onChange={(event) => { setInput(event.target.value); setError(""); }}
             onKeyDown={(event) => {
@@ -245,34 +250,31 @@ export function TaskTagEditor({ tags, suggestions = [], disabled, id, onChange }
                 options[event.key === "ArrowDown" ? 0 : options.length - 1]?.focus();
               }
             }} />
-          {input.trim() && !exact && <button type="button" disabled={busy || loading || !loaded || taskFull || globalFull} onMouseDown={(event) => event.preventDefault()} onClick={() => void create()}>{pending ? "添加中…" : "添加"}</button>}
         </div>
         {message && <p id={`${id}-error`} className="task-tag-error" role="alert">{message}</p>}
       </div>
       <div className="task-tag-scroll-area">
-        {selected.length > 0 && <div className="task-tag-chips" aria-label="已添加标签">{selected.map((tag) => <span className="task-tag-chip" data-tag-color={colorFor(definitions, tag)} key={tagKey(tag)}>
-          <span title={tag}>{tag}</span><button type="button" disabled={busy} aria-label={`移除标签 ${tag}`} onClick={() => remove(tag)}>×</button>
-        </span>)}</div>}
         <div className="task-tag-options" role="group" aria-label="已有标签">{available.map((tag) => {
           const checked = matchesTag(tags, tag);
-          return <label key={tagKey(tag)} className="task-tag-option">
-            <input type="checkbox" checked={matchesTag(tags, tag)} disabled={busy || (taskFull && !checked)} onChange={(event) => event.target.checked ? select(tag) : remove(tag)} />
+          return <label key={tagKey(tag)} className="task-tag-option" data-tag-color={colorFor(definitions, tag)} title={tag}>
+            <input type="checkbox" aria-label={tag} checked={checked} disabled={busy || (taskFull && !checked)} onChange={(event) => event.target.checked ? select(tag) : remove(tag)} />
+            <span className="task-tag-swatch" aria-hidden="true" />
             <span className="task-tag-option-name" data-tag-color={colorFor(definitions, tag)} title={tag}>{tag}</span>
+            <span className="task-tag-check" aria-hidden="true">{checked ? "✓" : ""}</span>
           </label>;
-        })}{available.length === 0 && <p className="task-tag-empty">{loading ? "正在加载标签…" : input.trim() ? "没有匹配标签，可点击“添加”新建。" : "还没有标签，输入名称即可创建。"}</p>}</div>
+        })}{available.length === 0 && <p className="task-tag-empty">{loading ? "正在加载标签…" : input.trim() ? "没有匹配的已有标签" : "还没有标签，输入名称即可创建。"}</p>}</div>
+        {input.trim() && !exact && <button type="button" className="task-tag-create" disabled={busy || loading || !loaded || taskFull || globalFull} onMouseDown={(event) => event.preventDefault()} onClick={() => void create()}><span aria-hidden="true">＋</span><span>{pending ? "添加中…" : `新建「${input.trim()}」`}</span></button>}
       </div>
       <footer>
-        <span>已选 {selected.length}/{MAX_TASK_TAGS}；全局 {definitions.length}/{MAX_GLOBAL_TAGS}</span>
-        {taskFull && <span role="status">已达每项上限，仅可取消已选标签。</span>}
-        {globalFull && <span role="status">已达全局上限，可选择已有标签。</span>}
-        <span>勾选后随任务保存；Esc 关闭</span>
+        <div><strong className="task-tag-count">已选 {selected.length}/{MAX_TASK_TAGS}</strong><span className="task-tag-global-count">全局 {definitions.length}/{MAX_GLOBAL_TAGS}</span></div>
+        {taskFull ? <span role="status">已达每项上限，仅可取消已选标签。</span> : globalFull ? <span role="status">已达全局上限，可选择已有标签。</span> : <span>勾选后随任务保存</span>}
       </footer>
-    </div>, document.body)}
+    </div>, triggerRef.current?.closest("dialog") ?? document.body)}
   </div>;
 }
 
 export function TaskTagList({ tags, expanded = false }: { tags: string[]; expanded?: boolean }) {
   const { definitions } = useTagCatalog();
   if (!tags.length) return null;
-  return <span className="task-list-tags" aria-label="标签">{(expanded ? tags : tags.slice(0, 3)).map((tag) => <span key={tag} data-tag-color={colorFor(definitions, tag)} title={tag}>{tag}</span>)}{!expanded && tags.length > 3 && <span title={tags.slice(3).join("、")}>+{tags.length - 3}</span>}</span>;
+  return <span className="task-list-tags" aria-label="标签">{(expanded ? tags : tags.slice(0, 3)).map((tag) => <span key={tag} data-tag-color={colorFor(definitions, tag)} title={tag}>{tag}</span>)}{!expanded && tags.length > 3 && <span className="task-tag-overflow" aria-label={`还有 ${tags.length - 3} 个标签`} title={tags.slice(3).join("、")}>+{tags.length - 3}</span>}</span>;
 }

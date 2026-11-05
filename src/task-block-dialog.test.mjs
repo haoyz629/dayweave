@@ -116,6 +116,7 @@ test("historical completed results cannot be cancelled or changed to incomplete"
   assert.equal(button(completed, "primary-action"), undefined);
   assert.equal(completed.elements().some(node => node.props["data-outcome"]), false);
   assert.match(completed.markup(), /创建历史任务自动完成/);
+  assert.doesNotMatch(completed.markup(), /floating-readonly/);
   assert.doesNotMatch(completed.markup(), /实际耗时|实际分钟/);
   completed.state.selectedBlock.review = { outcome: "completed", notes: "独立复盘备注", actual_minutes: null, remaining_workload_minutes: null };
   assert.match(completed.markup(), /创建历史任务自动完成/);

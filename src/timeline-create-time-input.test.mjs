@@ -20,7 +20,7 @@ function harness(start = "09:00", end = "10:00") {
   const calls = [];
   const state = {
     React, constrainTimeRange, normalizeClockInput, sanitizeTimeInput,
-    form: { title: "输入验证", priority: "medium", start, end }, rangeRef: { current: { start: toMinute(start), end: toMinute(end) } },
+    form: { title: "输入验证", priority: "medium", tags: [], start, end }, rangeRef: { current: { start: toMinute(start), end: toMinute(end) } },
     savingRef: { current: false }, disabled: false, titleRef: { current: { focus() {} } },
     setForm(value) { state.form = value; }, setError(value) { state.error = value; }, onRange(value) { calls.push(value); }
   };
@@ -88,4 +88,43 @@ test("creation still rejects malformed raw clocks before any IPC call", async ()
     await h.state.submit({ preventDefault() {} });
     assert.match(h.state.error, /结束时间/);
   }
+});
+
+test("slide creation saves selected tags, and retries update the same draft without losing inputs", async () => {
+  const h = harness();
+  const writes = [];
+  let fail = true, created = null, closed = 0;
+  Object.assign(h.state, {
+    date: "2026-10-29", draftRef: { current: null }, savedInputRef: { current: "" },
+    setSaving() {}, close() { closed++; },
+    async createManualTaskDraft(input) { writes.push({ command: "create", input }); return { id: "draft", version: 1 }; },
+    async saveTaskDraft(id, version, input) { writes.push({ command: "save", id, version, input }); return { id, version: version + 1 }; },
+    async confirmCreationDraft(draft) { writes.push({ command: "confirm", draft }); if (fail) throw new Error("retry"); return { item_type: "task", item: { id: "task" } }; },
+    async onCreated(task) { created = task; }
+  });
+  h.state.form.tags = ["开发", "设计"];
+  await h.state.submit({ preventDefault() {} });
+  assert.match(h.state.error, /输入已保留/);
+  assert.deepEqual(writes[0].input.tags, ["开发", "设计"]);
+  assert.equal(closed, 0);
+  h.state.form.tags = ["设计"];
+  fail = false;
+  await h.state.submit({ preventDefault() {} });
+  assert.deepEqual(writes.map(write => write.command), ["create", "confirm", "save", "confirm"]);
+  assert.equal(writes[2].id, "draft");
+  assert.equal(writes[2].version, 1);
+  assert.deepEqual(writes[2].input.tags, ["设计"]);
+  assert.equal(writes[2].input.priority, "medium");
+  assert.equal(writes[2].input.earliest_start_time, "09:00");
+  assert.equal(writes[2].input.due_time, "10:00");
+  assert.equal(created.id, "task");
+  assert.equal(closed, 1);
+});
+
+test("slide creation keeps tags alongside priority and disables both during saves", () => {
+  const text = readFileSync(new URL("./timeline-task-create.tsx", import.meta.url), "utf8");
+  assert.match(text, /className="selection-task-options">\s*<div className="selection-priority-field">[\s\S]*?<TaskTagEditor[^>]*tags=\{form.tags\} disabled=\{saving \|\| disabled\}/);
+  assert.match(text, /onChange=\{\(tags\) => setForm\(\{ \.\.\.form, tags \}\)\}/);
+  const css = readFileSync(new URL("./timeline-task-create.css", import.meta.url), "utf8");
+  assert.match(css, /\.selection-task-options \{[^}]*display: flex[^}]*align-items: flex-end/);
 });

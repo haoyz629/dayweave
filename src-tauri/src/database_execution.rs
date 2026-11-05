@@ -59,9 +59,6 @@ impl Database {
         let task = load_task_dto_in_transaction(&transaction, &task_id)?;
         let in_window = database_results::allow_capture(&transaction, capture_date, &input.plan_block_id)?;
         database_results::require_block_outcome_change(&transaction, &input.plan_block_id, input.outcome.as_str())?;
-        if task.deleted_at.is_some() || task.status == "deleted" {
-            return Err(AppError::Domain("回收站任务不能记录结果".into()));
-        }
         if plan_date != shanghai_today() && input.next_action.is_some() {
             return Err(AppError::Domain("跨日宽限不能修改下一步安排或工作量".into()));
         }
@@ -70,6 +67,11 @@ impl Database {
         }
         if task.updated_at != input.expected_task_updated_at {
             return Err(AppError::Domain("任务已经变化，请重新加载后再记录".into()));
+        }
+        if database_results::save_recycled_completion(&transaction, &task, capture_date,
+            &input.plan_block_id, input.outcome.as_str(), input.note.as_deref())? {
+            transaction.commit()?;
+            return self.get_task(&task_id);
         }
         if final_record && input.next_action.is_some() {
             return Err(AppError::Domain("该执行块已有最终结果，不能重复安排".into()));

@@ -65,7 +65,7 @@ function editor({ saved = true } = {}) {
     async onRecurringChanged() {}, onTaskCommitted() {}, async onReload() {}, async showCommittedToast() {}
   };
   state.pendingHistoricalCreation = null;
-  for (const key of ["busy", "newTaskError", "newTaskForm", "persistedNewTaskDraft", "taskDrafts", "recurringForm", "newTaskAutosaveArmed", "createItemType", "draftSaving", "feedback", "creating", "successToast", "pendingDiscardNew", "pendingHistoricalCreation", "view", "selectedRecurringId", "selectedId", "draft"]) {
+  for (const key of ["busy", "newTaskError", "newTaskForm", "persistedNewTaskDraft", "taskDrafts", "recurringForm", "newTaskAutosaveArmed", "createItemType", "draftSaving", "feedback", "creating", "successToast", "pendingDiscardNew", "pendingHistoricalCreation", "view", "selectedRecurringId", "selectedId", "draft", "search", "tagFilter"]) {
     state[`set${key[0].toUpperCase()}${key.slice(1)}`] = (value) => { state[key] = typeof value === "function" ? value(state[key]) : value; };
   }
   const context = vm.createContext(state);
@@ -493,4 +493,30 @@ test("editing during historical confirmation persistence cannot create stale con
   assert.equal(state.committed.length, 0);
   assert.equal(state.pendingHistoricalCreation, null);
   assert.equal(state.newTaskForm.title, "保存期间修改");
+});
+
+test("recurring creation keeps the editor open until refresh and then selects the new unfiltered series", async () => {
+  const { state } = editor();
+  state.applyCreateItemType("recurring");
+  state.selectedRecurringId = "existing-series";
+  state.search = "unrelated title";
+  state.tagFilter = "unrelated tag";
+  let release, refreshStarted;
+  const refreshing = new Promise(resolve => { refreshStarted = resolve; });
+  state.onRecurringChanged = async () => {
+    refreshStarted();
+    await new Promise(resolve => { release = resolve; });
+  };
+  const pending = state.commitNewTask();
+  await refreshing;
+  assert.equal(state.creating, true, "automatic list selection stays gated while old data is visible");
+  assert.equal(state.selectedRecurringId, "existing-series");
+  release();
+  assert.equal(await pending, true);
+  assert.equal(state.creating, false);
+  assert.equal(state.view, "recurring");
+  assert.equal(state.selectedRecurringId, "created-1");
+  assert.equal(state.search, "");
+  assert.equal(state.tagFilter, "");
+  assert.equal(state.committed.length, 1);
 });

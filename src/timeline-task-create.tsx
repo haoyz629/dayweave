@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import { confirmCreationDraft, createManualTaskDraft, discardTaskDraft, saveTaskDraft, Task, TaskDraft, TaskDraftInput, Priority } from "./tauri";
 import { compactBlockDuration } from "./task-block-display";
 import { TaskTimeRangeFields } from "./task-time-range-fields";
+import { TaskPrioritySelector } from "./task-priority-selector";
+import { TaskTagEditor } from "./task-tag-editor";
 import { constrainTimeRange, normalizeClockInput, sanitizeTimeInput } from "./time-range-control";
 import "./timeline-task-create.css";
 
@@ -34,7 +36,7 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
   const draftRef = useRef<TaskDraft | null>(null);
   const savedInputRef = useRef("");
   const savingRef = useRef(false);
-  const [form, setForm] = useState<{ title: string; start: string; end: string; priority: Priority } | null>(null);
+  const [form, setForm] = useState<{ title: string; start: string; end: string; priority: Priority; tags: string[] } | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -79,7 +81,7 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
 
   function open(range: TimelineCreateRange) {
     rangeRef.current = range; onRange(range); onStart(); setError("");
-    setForm({ title: "", start: clock(range.start), end: clock(range.end), priority: "medium" });
+    setForm({ title: "", start: clock(range.start), end: clock(range.end), priority: "medium", tags: [] });
   }
 
   function start(event: ReactPointerEvent<HTMLDivElement>) {
@@ -155,7 +157,7 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
       earliest_start_date: date, earliest_start_time: form.start,
       due_date: date, due_time: form.end,
       total_workload_minutes: end - start, remaining_workload_minutes: end - start,
-      field_states_json: "{}", tags: [], recurrence: null
+      field_states_json: "{}", tags: form.tags, recurrence: null
     };
     savingRef.current = true; setSaving(true); setError("");
     let task: Task;
@@ -192,7 +194,7 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
           open(selectedRange(snapAt(rect.top + 90), snapAt(rect.top + 90)));
         }
       }}><span className="selection-track-plus" aria-hidden="true">＋</span></div>
-    {form && createPortal(<dialog ref={dialogRef} className="selection-create-dialog" aria-labelledby="timeline-create-title"
+    {form && createPortal(<dialog ref={dialogRef} role="dialog" className="selection-create-dialog" aria-labelledby="timeline-create-title"
       onCancel={(event) => { event.preventDefault(); close(); }}
       onClick={(event) => { if (event.target === event.currentTarget) { const r = event.currentTarget.getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) close(); } }}>
       <header><strong id="timeline-create-title">创建单日任务</strong><button type="button" aria-label="关闭创建任务" disabled={saving} onClick={close}>×</button></header>
@@ -204,7 +206,10 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
             startInput={renderTimeInput("start")}
             endInput={renderTimeInput("end")}
             onDuration={(minutes) => updateTimes("end", clock(minute(form.start) + minutes))} />
-          <label>优先级<select name="priority" value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value as Priority })}><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
+          <div className="selection-task-options">
+            <div className="selection-priority-field"><label htmlFor="timeline-create-priority">优先级</label><TaskPrioritySelector id="timeline-create-priority" value={form.priority} disabled={saving || disabled} onChange={(priority) => setForm({ ...form, priority })} /></div>
+            <TaskTagEditor id="timeline-create-tags" tags={form.tags} disabled={saving || disabled} onChange={(tags) => setForm({ ...form, tags })} />
+          </div>
         </fieldset>
         {error && <p className="selection-error" role="alert">{error}</p>}
         <footer><small>{duration >= 15 ? compactBlockDuration(duration) : "至少 15 分钟"}</small><div><button type="button" disabled={saving} onClick={close}>取消</button><button type="submit" className="primary-action" disabled={saving || disabled}>{saving ? "正在创建…" : "创建任务"}</button></div></footer>

@@ -17,7 +17,7 @@ const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true
 const functions = new Map(), expressions = new Map();
 let capsule, editableCompletionButton;
 function collect(node) {
-  if (ts.isFunctionDeclaration(node) && ["taskMatchesView", "taskIsEditable", "TaskCapsuleFact", "TaskCapsuleContent", "CompletedTaskDetails", "DeletedTaskDetails", "TaskPageHeader", "TaskDetailContent", "TaskDetailResources", "taskDisplayHistory", "TaskStatusHistory", "TaskCompletionDialog"].includes(node.name?.text)) functions.set(node.name.text, node.getText(source));
+  if (ts.isFunctionDeclaration(node) && ["taskMatchesView", "taskIsEditable", "TaskCapsuleFact", "TaskCapsuleContent", "CompletedTaskDetails", "DeletedTaskDetails", "RecycleBinActions", "TaskPageHeader", "TaskDetailContent", "TaskDetailResources", "taskDisplayHistory", "TaskStatusHistory", "TaskCompletionDialog"].includes(node.name?.text)) functions.set(node.name.text, node.getText(source));
   if (ts.isVariableDeclaration(node) && ["statusCopy", "taskViewCopy", "taskViewGroups", "taskEmptyCopy", "counts"].includes(node.name.getText(source))) expressions.set(node.name.getText(source), node.initializer.getText(source));
   if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(source) === "TaskCapsuleContent" && node.attributes.properties.some(attr => attr.name?.getText(source) === "statusTone" && attr.initializer?.getText(source) === "{taskListStatus(task)}")) capsule = node.getText(source);
   if (ts.isJsxElement(node) && node.openingElement.tagName.getText(source) === "button" && node.getText(source).includes('className="task-compact-complete"') && node.getText(source).includes('requestTaskChange({ kind: "transition", status: "done" })')) editableCompletionButton = node.getText(source);
@@ -125,8 +125,8 @@ test("three-state details share resources, actual lifecycle notes and state-spec
     if (status === "deleted") {
       assert.match(html, /恢复任务/); assert.match(html, /永久删除/); assert.match(html, /将于 2026-11-19 自动清理/);
       assert.ok(html.indexOf("task-detail-cleanup") < html.indexOf("永久删除"));
-      assert.match(html, /状态更新为回收站/);
-      assert.ok(html.indexOf("完成备注") < html.indexOf("状态更新为回收站"));
+      assert.match(html, /已移入回收站/);
+      assert.ok(html.indexOf("完成备注") < html.indexOf("已移入回收站"));
       assert.doesNotMatch(html, /取消整体完成|>完成整个任务<|>编辑任务<|>新建任务</);
     } else if (status === "done") {
       assert.match(html, /取消完成/); assert.match(html, /完成备注/);
@@ -152,9 +152,9 @@ test("restored history ends in its restored state, retaining deletion and previo
   const { state } = harness();
   const restored = { ...history.at(-1), id: "restored", kind: "restored", status: "done", occurred_at: "2026-10-20T11:40:00+08:00" };
   const html = renderToStaticMarkup(state.TaskStatusHistory({ task: { ...original, status: "done" }, metadata: { history: [...history, restored] }, busy: false, ...callbacks }));
-  assert.ok(html.indexOf("状态更新为回收站") < html.indexOf("恢复为已完成"));
+  assert.ok(html.indexOf("已移入回收站") < html.indexOf("已从回收站恢复为已完成"));
   assert.match(html, /完成备注/); assert.match(html, /执行备注/);
-  assert.match(html, /<summary>[\s\S]*?status-done[^>]*>已完成/);
+  assert.match(html, /<strong>已从回收站恢复为已完成<\/strong>/);
 });
 
 test("completion dialog supplies an optional separate note with length and busy guards", () => {
@@ -162,17 +162,21 @@ test("completion dialog supplies an optional separate note with length and busy 
   const html = renderToStaticMarkup(state.TaskCompletionDialog({ task: original, note: "本次完成备注", busy: false, error: null, onNoteChange() {}, onCancel() {}, onConfirm() {} }));
   assert.match(html, /选填/); assert.match(html, /maxLength="500"/i); assert.match(html, /本次完成备注/); assert.match(html, /确认完成/);
   assert.match(html, /完成任务/);
-  assert.match(html, /后续未执行的安排将不再显示，已有执行记录会保留/);
+  assert.match(html, /<h2 id="task-completion-title">原任务<\/h2>/);
+  assert.match(html, /aria-labelledby="task-completion-heading task-completion-title"/);
+  assert.doesNotMatch(html, /后续未执行|执行记录会保留|aria-describedby|task-completion-description/);
+  assert.match(html, /task-completion-count" aria-hidden="true">6 \/ 500<\/span><\/span><textarea/);
   const busy = renderToStaticMarkup(state.TaskCompletionDialog({ task: original, note: "", busy: true, error: "失败", onNoteChange() {}, onCancel() {}, onConfirm() {} }));
   assert.equal((busy.match(/disabled=""/g) ?? []).length, 3);
   assert.match(busy, /role="alert">失败/);
 });
 
-test("history summary uses current task state rather than a historical block outcome", () => {
+test("history title counts records and each date counts only its own operations", () => {
   const { state } = harness();
-  for (const [status, label] of [["done", "已完成"], ["deleted", "回收站"]]) {
+  for (const status of ["done", "deleted"]) {
     const html = renderToStaticMarkup(state.TaskStatusHistory({ task: { ...original, status }, metadata: { history: history.slice(0, 2) }, busy: false, ...callbacks }));
-    assert.match(html.match(/<summary>[\s\S]*?<\/summary>/)?.[0] ?? "", new RegExp(`>${label}<`));
+    assert.match(html.match(/<summary>[\s\S]*?<\/summary>/)?.[0] ?? "", /执行记录.*2 条动态/);
+    assert.match(html, /<summary><span class="task-detail-history-date">2026-10-20<\/span><span class="task-detail-history-count">2 条动态<\/span><\/summary>/);
     assert.match(html, /<strong>任务未完成<\/strong>/);
   }
 });
@@ -180,7 +184,7 @@ test("history summary uses current task state rather than a historical block out
 test("lifecycle history summary uses its real Shanghai event day, not task creation day", () => {
   const { state } = harness();
   const html = renderToStaticMarkup(state.TaskStatusHistory({ task: { ...original, status: "deleted" }, metadata: { history: [{ ...history.at(-1), occurred_at: "2026-10-22T17:30:00Z" }] }, busy: false, ...callbacks }));
-  assert.match(html.match(/<summary>[\s\S]*?<\/summary>/)?.[0] ?? "", />2026-10-23</);
+  assert.match(html, /<summary><span class="task-detail-history-date">2026-10-23<\/span>/);
 });
 
 test("history events cannot inherit global status background classes", () => {
@@ -190,12 +194,21 @@ test("history events cannot inherit global status background classes", () => {
   for (const status of ["open", "not_completed", "done", "deleted"]) assert.match(html, new RegExp(`<li[^>]*data-status="${status}"`));
 });
 
-test("same-day event times stay compact while multi-day history retains its dates", () => {
+test("history groups dates newest first and retains actual dates for backfilled operations", () => {
   const { state } = harness();
-  const events = [...history, { ...history.at(-1), id: "next-day", occurred_at: "2026-10-21T09:01:02+08:00", plan_date: null }];
+  const events = [...history, { ...history[1], id: "backfill", plan_date: "2026-10-19", occurred_at: "2026-10-21T09:01:02+08:00" }, { ...history.at(-1), id: "next-day", occurred_at: "2026-10-21T09:02:03+08:00", plan_date: null }];
+  const before = structuredClone(events);
   const html = renderToStaticMarkup(state.TaskStatusHistory({ task: { ...original, status: "deleted" }, metadata: { history: events }, busy: false, ...callbacks }));
-  assert.match(html, />2026-10-20 11:30:00<\/time>/);
+  const dates = [...html.matchAll(/<summary><span class="task-detail-history-date">(\d{4}-\d{2}-\d{2})<\/span>/g)].map(match => match[1]);
+  assert.deepEqual(dates, ["2026-10-21", "2026-10-20"]);
+  const dateTags = [...html.matchAll(/<details\b[^>]*class="task-detail-history"[^>]*>/g)].map(match => match[0]);
+  assert.match(dateTags[0], /\bopen=""/);
+  for (const tag of dateTags.slice(1)) assert.doesNotMatch(tag, /\bopen(?:=|\s|>)/);
+  assert.match(html, />11:30:00<\/time>/);
   assert.match(html, />09:01:02<\/time>/);
+  assert.match(html, />09:02:03<\/time>/);
+  assert.equal((html.match(/<li\b/g) ?? []).length, events.length);
+  assert.deepEqual(events, before);
 });
 
 test("detail values and action groups match the approved presentation without changing stored resources", () => {
@@ -238,6 +251,12 @@ test("detail typography, neutral timeline and completion modal are explicitly sc
   assert.match(css, /html\[data-mode="dark"\] \.task-inspector:has\(\.ordinary-task-detail\)/);
   assert.match(css, /\.task-completion-backdrop \{ padding: 16px;/);
   assert.match(text, /initialFocus="textarea:not\(:disabled\)"/);
+  assert.match(css, /\.task-completion-header h2 \{[^}]*font: 700 24px\/1\.45[^}]*overflow-wrap: anywhere/);
+  assert.match(css, /\.task-completion-header \.task-completion-heading \{[^}]*font-size: 14px/);
+  assert.match(css, /\.task-completion-backdrop \.task-completion-actions \{[^}]*border: 0; background: var\(--task-detail-paper\)/);
+  assert.match(css, /\.task-completion-backdrop \.task-completion-actions button \{[^}]*min-height: 44px/);
+  assert.match(css, /\.task-completion-backdrop \.task-completion-actions \.primary-action \{[^}]*color: #fff;[^}]*background: var\(--color-primary\)/);
+  assert.match(css, /@media \(max-width: 480px\) \{\s*\.task-completion-header \{[^}]*\}\s*\.task-completion-header h2 \{ font-size: 22px/);
 });
 
 test("A detail keeps status above title and all tags, with boxed facts and links before notes", () => {
@@ -296,18 +315,18 @@ test("cleared history has its own neutral tone instead of inheriting task comple
   assert.match(css, /\.ordinary-task-detail \.task-detail-event\[data-status="cleared"\] strong \{ color: var\(--task-detail-secondary\);/);
 });
 
-test("execution history starts collapsed while keeping its summary and records available", () => {
+test("execution history opens its title and latest date by default", () => {
   const { state } = harness();
   for (const status of ["open", "scheduled", "done", "deleted"]) {
     const task = { ...original, id: `task-${status}`, status };
     const tree = state.TaskStatusHistory({ task, metadata: { history }, busy: false, ...callbacks });
     const detailsElement = tree.props.children.find(child => React.isValidElement(child) && child.type === "details");
-    assert.equal(detailsElement.key, task.id, "switching tasks remounts collapsed history");
+    assert.equal(detailsElement.key, task.id, "switching tasks remounts history with its default open state");
     const html = renderToStaticMarkup(tree);
-    const details = html.match(/<details\b[^>]*class="task-detail-history"[^>]*>/)?.[0];
-    assert.ok(details);
-    assert.doesNotMatch(details, /\bopen(?:=|\s|>)/);
-    assert.match(html, /<summary>[\s\S]*?2026-10-20[\s\S]*?<\/summary>/);
+    const details = [...html.matchAll(/<details\b[^>]*>/g)].map(match => match[0]);
+    assert.equal(details.length, 2, "the title and the date are separate disclosure levels");
+    for (const tag of details) assert.match(tag, /\bopen=""/);
+    assert.match(html, /<summary>[\s\S]*?执行记录[\s\S]*?<\/summary><details[^>]*class="task-detail-history"[^>]*><summary>[\s\S]*?2026-10-20[\s\S]*?<\/summary>/);
     assert.equal((html.match(/<li\b/g) ?? []).length, history.length);
     assert.match(html, /执行备注\n第二行/);
   }
@@ -372,7 +391,8 @@ test("detail completion labels and confirmation titles distinguish multi-day fro
     const details = renderToStaticMarkup(state.CompletedTaskDetails({ task, busy: false, now, ...callbacks }));
     assert.ok(details.includes(`>${label}</button>`));
     const dialog = renderToStaticMarkup(state.TaskCompletionDialog({ task, note: "", busy: false, error: null, onNoteChange() {}, onCancel() {}, onConfirm() {} }));
-    assert.ok(dialog.includes(`id="task-completion-title">${label}</h2>`));
+    assert.ok(dialog.includes(`id="task-completion-heading">${label}</p>`));
+    assert.ok(dialog.includes(`<h2 id="task-completion-title">${task.title}</h2>`));
     const calls = [];
     Object.assign(state, { selectedTask: task, selectedMetadata: null, resultNow: now, busy: false, requestTaskChange: action => calls.push(action) });
     const button = vm.runInContext(compile(`(${editableCompletionButton});`), context);
@@ -473,7 +493,7 @@ test("history correlation is conservative for multi-day, undated, unrelated, inv
   for (const [task, events] of cases) assert.equal(state.taskDisplayHistory(task, events).length, events.length);
   assert.equal(state.taskDisplayHistory(original, [pair[0]]).length, 1);
   const html = renderToStaticMarkup(state.TaskStatusHistory({ task: { ...original, due_date: "2026-10-21" }, metadata: { history: pair }, busy: false, ...callbacks }));
-  assert.match(html, /10月20日：当天任务已完成/);
+  assert.match(html, /<strong>当天任务已完成<\/strong>/);
   assert.match(html, /所有日期均已完成，整个任务已自动完成/);
   assert.match(html, /2 条动态/);
 });
@@ -491,10 +511,10 @@ test("equivalent timestamps with offsets correlate and repeated notes render onc
 test("single-day execution and cancellation labels omit the redundant date for completed and incomplete results", () => {
   const { state } = harness();
   const cases = [
-    ["execution", "done", "任务已完成", "10月20日：当天任务已完成"],
-    ["execution", "not_completed", "任务未完成", "10月20日：当天任务未完成"],
-    ["cleared", "scheduled", "已取消任务完成", "10月20日：已取消当天完成"],
-    ["cleared_incomplete", "scheduled", "已取消任务未完成", "10月20日：已取消当天未完成"]
+    ["execution", "done", "任务已完成", "当天任务已完成"],
+    ["execution", "not_completed", "任务未完成", "当天任务未完成"],
+    ["cleared", "scheduled", "已取消任务完成", "已取消当天完成"],
+    ["cleared_incomplete", "scheduled", "已取消任务未完成", "已取消当天未完成"]
   ];
   for (const [kind, status, singleLabel, datedLabel] of cases) {
     const event = { ...history[1], kind, status };
@@ -506,13 +526,14 @@ test("single-day execution and cancellation labels omit the redundant date for c
     ]) {
       const html = renderToStaticMarkup(state.TaskStatusHistory({ task, metadata: { history: [event] }, busy: false, ...callbacks }));
       assert.ok(html.includes(`<strong>${label}</strong>`), html);
+      assert.match(html, new RegExp(`<span class="task-detail-plan-date">安排日期 10月20日</span><strong>${label}</strong>`));
       assert.match(html, /执行备注\n第二行/);
       assert.match(html, /单独复盘备注/);
       assert.match(html, /<time[^>]*>10:00:00<\/time>/);
     }
     const otherDate = { ...event, plan_date: "2026-10-19" };
     const html = renderToStaticMarkup(state.TaskStatusHistory({ task: original, metadata: { history: [otherDate] }, busy: false, ...callbacks }));
-    assert.match(html, /<strong>10月19日：/);
+    assert.match(html, /<span class="task-detail-plan-date">安排日期 10月19日<\/span>/);
     assert.deepEqual(event, before);
   }
 });
@@ -532,4 +553,10 @@ test("detail and editor headers share breadcrumb, derived status and status icon
     const detail = renderToStaticMarkup(React.createElement(state.TaskDetailContent, { task, metadata: null, busy: false, onNewTask() {} }));
     assert.ok(detail.indexOf('task-page-header') < detail.indexOf('ordinary-task-detail'));
   }
+});
+
+test("completion primary text overrides the shared neutral confirmation-button color", () => {
+  const colors = readFileSync(new URL("./color-system.css", import.meta.url), "utf8");
+  assert.match(colors, /html:root \.task-completion-backdrop \.feedback-confirm \.task-completion-actions button\.primary-action \{ color: #fff; \}/);
+  assert.ok(colors.indexOf("button.primary-action { color: #fff;") > colors.indexOf("button:not(.dialog-save):not(.dialog-discard) { color:"));
 });

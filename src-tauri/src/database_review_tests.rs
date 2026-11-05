@@ -348,8 +348,8 @@ fn repeat_today_notes_edits_have_safe_undo_and_historical_results_are_read_only(
     database.save_recurring_occurrence_review(&history,repeat_review("completed",None)).unwrap();
     assert!(database.save_recurring_occurrence_review(&history,repeat_review("partial",None)).is_err());
     assert!(database.save_review_form_draft("2026-10-10","recurring",&history,"{}",0).is_err());
-    database.apply_undo(&undo(&database).id).unwrap();
-    assert_eq!(load_occurrence(&database.connection,&history).unwrap().outcome,None);
+    assert!(database.apply_undo(&undo(&database).id).is_err());
+    assert_eq!(load_occurrence(&database.connection,&history).unwrap().outcome.as_deref(),Some("completed"));
     assert_eq!(database.count("tasks").unwrap(),0);
     assert_eq!(database.count("plan_blocks").unwrap(),0);
 }

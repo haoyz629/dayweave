@@ -118,3 +118,14 @@ test("brand renders the week beside its name and keeps both subtitle languages",
   assert.match(html, /Bring order to your day\./);
   assert.doesNotMatch(renderToStaticMarkup(context.ProductBrand()), /product-brand-week/);
 });
+
+test("calendar view switch centers its fixed-width buttons inside the existing frame", () => {
+  const css = read("./app-titlebar.css");
+  const frame = css.match(/^\.app-titlebar \.timeline-view-switch \{([^}]+)\}/m)?.[1];
+  assert.ok(frame);
+  assert.match(frame, /justify-content: center;/);
+  assert.match(frame, /width: 204px;/);
+  assert.match(frame, /height: 34px;/);
+  assert.match(css, /\.app-titlebar \.timeline-view-switch button \{ width: 64px;/);
+  assert.match(css, /@media \(max-width: 600px\)[\s\S]*\.app-titlebar \.timeline-view-switch button \{ width: 54px;/);
+});

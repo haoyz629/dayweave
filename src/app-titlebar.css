@@ -11,11 +11,11 @@
 .app-titlebar .product-brand-logo img { width: 100%; height: 100%; }
 .app-titlebar .product-brand-text { min-width: 0; }
 .app-titlebar .product-brand-name-row { display: flex; align-items: center; gap: 10px; }
-.app-titlebar .product-brand-week { display: inline-flex; flex: none; align-items: center; min-height: 20px; padding: 0 7px; border: 1px solid var(--color-blue-edge); border-radius: 99px; color: var(--color-blue-ink); background: var(--color-blue-bg); font: 500 10px/16px var(--jx-font-sans); white-space: nowrap; }
+.app-titlebar .product-brand-week, .timeline-date-copy .timeline-week-number-badge { display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 6px; min-height: 24px; margin: 0; padding: 0 7px; border: 1px solid var(--color-blue-edge); border-radius: 6px; color: var(--color-blue-ink); background: var(--color-blue-bg); font: 400 11px/16px var(--jx-font-sans); white-space: nowrap; }
 .app-titlebar .product-brand-name { margin: 0; color: var(--color-ink); font: 650 15px/18px var(--jx-font-sans); white-space: nowrap; }
 .app-titlebar .product-brand-copy { margin: 2px 0 0; color: var(--color-muted); font: 400 12px/16px var(--jx-font-sans); white-space: nowrap; }
 .app-view-slot { position: absolute; left: calc(50% + 62px); top: 11px; transform: translateX(-50%); }
-.app-titlebar .timeline-view-switch { width: 204px; height: 34px; padding: 3px; border: 1px solid var(--color-edge); border-radius: 8px; background: var(--color-panel); }
+.app-titlebar .timeline-view-switch { width: 204px; height: 34px; justify-content: center; padding: 3px; border: 1px solid var(--color-edge); border-radius: 8px; background: var(--color-panel); }
 .app-titlebar .timeline-view-switch button { width: 64px; min-height: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; color: var(--color-muted); background: transparent; font: 500 12px/26px var(--jx-font-sans); }
 .app-titlebar .timeline-view-switch button:hover { color: var(--color-ink); background: var(--color-hover); }
 .app-titlebar .timeline-view-switch button.is-active { color: var(--color-selected-ink); background: var(--color-selected-bg); box-shadow: none; font-weight: 600; }
@@ -26,7 +26,7 @@
 .app-window-controls button:hover { color: var(--color-ink); background: var(--color-hover); }
 .app-window-controls .app-window-close:hover { color: #fff; background: #c42b35; }
 .app-window-controls svg { fill: none; stroke: currentColor; stroke-width: 1; }
-.desktop-app .today-page .is-timeline-view .timeline-design-topbar { min-height: 80px; margin: 0; padding: 12px 26px 12px 25px; gap: 16px; align-items: center; flex-direction: row; border-bottom: 0; }
+.desktop-app .today-page .timeline-page-shell .timeline-design-topbar { min-height: 80px; margin: 0; padding: 12px 26px 12px 25px; gap: 16px; align-items: center; flex-direction: row; flex-wrap: wrap; border-bottom: 0; background: var(--color-panel); }
 .desktop-app .timeline-date-copy { display: flex; flex-direction: column; gap: 4px; }
 .timeline-date-primary { display: flex; align-items: center; flex-wrap: nowrap; gap: 12px; }
 .desktop-app .today-page .timeline-day-title { margin: 0; font: 650 22px/28px "Segoe UI", "Microsoft YaHei", sans-serif; letter-spacing: .1px; white-space: nowrap; }
@@ -43,7 +43,7 @@
 html:root .desktop-app .today-page .timeline-heading-plan-status .confirmed-plan-status { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 24px; margin: 0; padding: 0 7px; border: 1px solid var(--color-plan-edge); border-radius: 6px; color: var(--color-plan-ink); background: var(--color-plan-bg); font-size: 11px; font-weight: 400; line-height: 16px; }
 .timeline-heading-plan-status .confirmed-plan-status > svg { display: block; flex: none; }
 @media (max-width: 1100px) {
-  .desktop-app .today-page .is-timeline-view .timeline-design-topbar { padding-block: 12px; }
+  .desktop-app .today-page .timeline-page-shell .timeline-design-topbar { padding-block: 12px; }
   .desktop-app .timeline-top-actions { margin-left: auto; }
 }
 @media (max-width: 860px) {
@@ -69,5 +69,7 @@ html:root .desktop-app .today-page .timeline-heading-plan-status .confirmed-plan
   .app-window-controls { gap: 0; }
   .app-window-controls button { width: 26px; }
   .app-window-divider { margin-inline: 2px; }
-  .desktop-app .today-page .is-timeline-view .timeline-design-topbar { padding: 12px 16px; }
+  .desktop-app .today-page .timeline-page-shell .timeline-design-topbar { padding: 12px 16px; }
+  .desktop-app .today-page .timeline-day-title { white-space: normal; overflow-wrap: anywhere; }
+  .desktop-app .timeline-date-primary { flex-wrap: wrap; }
 }

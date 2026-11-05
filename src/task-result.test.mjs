@@ -46,6 +46,22 @@ test('today completion and cancellation act only on the block, not the whole-tas
     assert.equal(timelineTaskCompletionAction(daily,current,'2026-10-19',resultToday(now),now),'complete-block');
   }
   for(const current of [undefined,{...task,id:'other'},{...task,status:'deleted'},{...task,deleted_at:'date'}]) assert.equal(timelineTaskCompletionAction(block,current,'2026-10-19','2026-10-19',now),null);
+  const recycled={...block,task_status:'deleted'};
+  const recycledTask={...task,status:'deleted',deleted_at:'2026-10-18T10:00:00+08:00'};
+  assert.equal(timelineTaskCompletionAction(recycled,recycledTask,'2026-10-19','2026-10-19',now),'complete-block');
+  assert.equal(timelineTaskCompletionAction(recycled,{...recycledTask,id:'other'},'2026-10-19','2026-10-19',now),null);
+  assert.equal(timelineTaskCompletionAction(recycled,undefined,'2026-10-19','2026-10-19',now),null);
+  assert.equal(timelineTaskCompletionAction({...recycled,review:{outcome:'not_started'}},recycledTask,'2026-10-19','2026-10-19',now),null);
+  assert.equal(timelineTaskCompletionAction({...recycled,execution_status:'not_started'},recycledTask,'2026-10-19','2026-10-19',now),null);
+  assert.equal(timelineTaskCompletionAction({...recycled,execution_status:'completed'},recycledTask,'2026-10-19','2026-10-19',now),null);
+  assert.equal(timelineTaskCompletionAction(recycled,recycledTask,'2026-10-21','2026-10-19',now),null);
+});
+
+test('recycled blocks remain visible only on today and past dates',()=>{
+  const recycled={...block,task_status:'deleted'};
+  assert.deepEqual(visibleTaskScheduleBlocks([recycled], '2026-10-19','2026-10-19'),[recycled]);
+  assert.deepEqual(visibleTaskScheduleBlocks([recycled], '2026-10-18','2026-10-19'),[recycled]);
+  assert.deepEqual(visibleTaskScheduleBlocks([recycled], '2026-10-20','2026-10-19'),[]);
 });
 
 test('historical actions use only that block outcome, regardless of task completion or record age',()=>{

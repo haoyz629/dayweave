@@ -205,7 +205,7 @@ html:root[data-theme="codex"][data-mode="light"] { --color-canvas: #edf1f5; --co
 html:root body { color: var(--color-ink); background: var(--color-canvas); }
 html:root ::selection { color: var(--color-selected-ink); background: var(--color-selected-bg); }
 html:root ::-webkit-scrollbar-thumb { background: var(--color-gray-edge); border-color: var(--color-canvas); }
-html:root :is(.next-shell, .next-workspace, .tasks-workspace, .today-workspace, .today-schedule-pane, .today-page, .timeline-page-shell, .next-workspace > .review-page, .next-workspace > .settings-page, .next-workspace > .gantt-page) { background: var(--color-canvas); }
+html:root :is(.next-shell, .next-workspace, .tasks-workspace, .today-workspace, .today-schedule-pane, .today-page, .timeline-page-shell, .next-workspace > .review-page, .next-workspace > .settings-page) { background: var(--color-canvas); }
 html:root .next-sidebar { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-group); }
 html:root .next-sidebar nav button { color: var(--color-muted); }
 html:root .next-sidebar nav button:hover { color: var(--color-ink); background: var(--color-hover); }
@@ -302,8 +302,6 @@ html:root .timeline-nonworking { background-image: repeating-linear-gradient(135
 html:root .timeline-lanes .lane-item.task { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-panel); }
 html:root .timeline-lanes .lane-item.task:hover { border-color: var(--color-selected-edge); background: var(--color-hover); }
 html:root :is(.confirmed-plan-status, .today-page .is-timeline-view .confirmed-plan-status) { color: var(--color-plan-ink); border-color: var(--color-plan-edge); background: var(--color-plan-bg); }
-html:root .gantt-status-not_completed { --gantt-status-ink: var(--task-state-incomplete); --gantt-status-edge: var(--task-state-incomplete-border); --gantt-status-surface: var(--task-state-incomplete-surface); }
-html:root .gantt-page .gantt-mode button[aria-pressed="true"] { color: var(--color-selected-ink); border-color: var(--color-selected-edge); background: var(--color-selected-bg); }
 
 /* Date interactions use blue; only the live clock and today markers use vivid red. */
 html:root .next-workspace .today-page .timeline-week > button.today.selected .timeline-week-date { color: var(--today-red-label); background: var(--today-red); }
@@ -354,6 +352,7 @@ html:root .feedback-confirm.danger { --confirm-tone: var(--color-red-ink); --con
 html:root .feedback-confirm.success { --confirm-tone: var(--color-green-ink); --confirm-border: var(--color-green-edge); --confirm-surface: var(--color-green-bg); }
 html:root .feedback-confirm > p,
 html:root .feedback-confirm .dialog-actions button:not(.dialog-save):not(.dialog-discard) { color: var(--color-muted); }
+html:root .task-completion-backdrop .feedback-confirm .task-completion-actions button.primary-action { color: #fff; }
 html:root .recycle-bin-banner { color: var(--color-red-ink); background: var(--color-red-bg); }
 html:root .recycle-bin-banner button { color: var(--color-red-ink); border-color: var(--color-red-edge); background: var(--color-panel); }
 html:root .recycle-bin-banner button:hover:not(:disabled) { color: var(--color-red-ink); background: var(--color-red-bg); }
@@ -403,6 +402,9 @@ html:root .sidebar-summary-card { --state-plan: var(--color-plan-ink); }
 html:root .schedule-picker-calendar { --schedule-range-fill: var(--color-selected-bg); --schedule-range-node: var(--color-primary); }
 html:root .next-workspace .today-page .timeline-week > button.selected:not(.today) .timeline-week-date { color: var(--color-selected-ink); background: var(--color-selected-bg); box-shadow: inset 0 0 0 1px var(--color-selected-edge); }
 html:root .next-workspace .today-page .timeline-week > button.weekend:not(.today) .timeline-week-date { color: var(--color-red-ink); }
+html:root .next-workspace .today-page .timeline-week > button.weekend:not(.selected) { background: color-mix(in srgb, var(--color-orange-bg) 60%, var(--color-panel)); }
+html:root .next-workspace .today-page .timeline-week > button.weekend:not(.selected):hover { background: color-mix(in srgb, var(--color-orange-bg) 80%, var(--color-panel)); }
+html:root .next-workspace .today-page .timeline-week > button.weekend .timeline-week-heading > small { padding: 0 7px; border-radius: 4px; color: var(--color-orange-ink); background: var(--color-orange-bg); font-weight: 700; }
 html:root .schedule-picker-range-panel .time-range-rail.block-editor .time-rail-surface { border-color: var(--color-edge); background: var(--color-group); }
 html:root .schedule-picker-range-panel > header span { color: var(--color-selected-ink); border-color: var(--color-selected-edge); background: var(--color-selected-bg); }
 html:root :is(.schedule-picker-range-error, .inline-error) { color: var(--color-red-ink); border-color: var(--color-red-edge); background: var(--color-red-bg); }
@@ -415,9 +417,6 @@ html:root :is(.apple-schedule-values button.is-active, .schedule-boundary-card.i
 html:root .next-workspace .task-inspector .task-compact-body .task-notes-inputs > :is(input, textarea) { background: transparent; }
 html:root :is(.apple-date-grid button:hover, .schedule-picker-calendar > header button:hover) { color: var(--color-selected-ink); background: var(--color-selected-bg); }
 html:root .schedule-picker-calendar .apple-date-grid button.selected { color: #ffffff; background: var(--color-primary); }
-html:root .gantt-page { --gantt-today: var(--color-primary); }
-html:root .gantt-table .gantt-date-heading.is-today,
-html:root .gantt-day-cell.is-today { background: var(--color-selected-bg); }
 html:root .current-time-line > span { color: var(--today-red-label); box-shadow: 0 2px 8px color-mix(in srgb, var(--today-red) 32%, transparent); }
 html:root .month-grid > button.today .day-number,
 html:root .today-page .today-month-sheet .month-grid > button.today .solar-day-number { color: var(--today-red-label); }

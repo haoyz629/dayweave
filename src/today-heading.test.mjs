@@ -6,7 +6,7 @@ const styles = readFileSync(new URL("./app-titlebar.css", import.meta.url), "utf
 const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 
 test("today schedule date uses the approved compact sans heading", () => {
-  assert.match(app, /<h2 className="timeline-day-title">\{selectedDateTitle\}<\/h2>/);
+  assert.match(app, /<h2 className="timeline-day-title">\{todayView === "month" \? monthTitle : todayView === "week" \? selectedWeekHeading.range : selectedDateTitle\}<\/h2>/);
   assert.match(styles, /\.desktop-app \.today-page \.timeline-day-title \{[^}]*font: 650 22px\/28px "Segoe UI", "Microsoft YaHei", sans-serif/);
 });
 
@@ -27,12 +27,12 @@ test("historical date heading omits the completion-status hint", () => {
 });
 
 test("lunar date and solar term have their own shared separator in day and month headings", () => {
-  assert.equal(app.match(/selectedSolarTerm && <><CopySeparator \/><span className="timeline-term-chip">/g)?.length, 2);
+  assert.equal(app.match(/selectedSolarTerm && <><CopySeparator \/><span className="timeline-term-chip">/g)?.length, 1, "day and month reuse the same secondary facts row");
 });
 
 test("confirmed plan state lives in the date heading, outside the stable navigation actions", () => {
   const heading = app.slice(app.indexOf('<div className="timeline-heading">'), app.indexOf('<div className="timeline-top-actions">'));
-  const actions = app.slice(app.indexOf('<div className="timeline-top-actions">'), app.indexOf('</header>}', app.indexOf('<div className="timeline-top-actions">')));
+  const actions = app.slice(app.indexOf('<div className="timeline-top-actions">'), app.indexOf('</header>', app.indexOf('<div className="timeline-top-actions">')));
   assert.match(heading, /className="timeline-heading-plan-status" role="status"/);
   assert.match(heading, /!preview && hasConfirmedPlan && !isPastDate/);
   assert.match(heading, /计划已确认/);
@@ -54,4 +54,15 @@ test("confirmation retains its semantic color block and stays horizontally align
 test("return-today feedback follows the viewed date and reserves a stable button width", () => {
   assert.match(app, /className="timeline-return-today" onClick=\{returnToday\}>\{selectedDate === today \? "今天" : "回到今天"\}/);
   assert.match(styles, /\.timeline-date-navigation \.timeline-return-today \{ width: 60px; flex: 0 0 60px; white-space: nowrap; \}/);
+});
+
+test("week return feedback compares full Monday dates, not the selected day or week number alone", () => {
+  assert.match(app, /const isCurrentWeek = selectedWeekDates\[0\] === weekDatesFor\(today\)\[0\]/);
+  assert.match(app, /className="timeline-return-today" onClick=\{returnToday\}>\{isCurrentWeek \? "本周" : "回到本周"\}/);
+});
+
+test("viewed week badge sits beside the heading and shares blue brand-week styling", () => {
+  const primary = app.slice(app.indexOf('<div className="timeline-date-primary">'), app.indexOf('<div className="timeline-date-meta timeline-day-subline">'));
+  assert.match(primary, /todayView === "week" && <span className="timeline-week-number-badge"[^\n]+>第\{selectedWeekHeading.week\}周<\/span>/);
+  assert.match(styles, /\.app-titlebar \.product-brand-week, \.timeline-date-copy \.timeline-week-number-badge \{[^}]*min-height: 24px;[^}]*padding: 0 7px; border: 1px solid var\(--color-blue-edge\); border-radius: 6px; color: var\(--color-blue-ink\); background: var\(--color-blue-bg\); font: 400 11px\/16px/);
 });

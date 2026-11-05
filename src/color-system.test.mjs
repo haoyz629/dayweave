@@ -7,7 +7,6 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import postcss from "postcss";
 import { taskBlockTypeLabels } from "./task-block-display.ts";
-import { buildGanttRows, ganttWindow } from "./gantt-model.ts";
 
 const css = readFileSync(new URL("./color-system.css", import.meta.url), "utf8");
 const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
@@ -27,7 +26,7 @@ test("unset priorities render no timeline badge in full or compact blocks", () =
   }
   assert.doesNotMatch(renderToStaticMarkup(context.TimelineTaskFacts({ type: "recurring", priority: "high" })), /priority-high/);
   assert.doesNotMatch(app, /未设优先级|无优先级/);
-  assert.match(app, /onChange\(\{ \.\.\.form, priority: null \}\)/);
+  assert.doesNotMatch(app, /onChange\(\{ \.\.\.form, priority: null \}\)/);
 });
 
 function palette(block) { return Object.fromEntries([...block.matchAll(/(--color-[\w-]+):\s*(#[\da-f]{6})/gi)].map(([, key, value]) => [key, value])); }
@@ -58,20 +57,12 @@ test("approved palettes retain readable role pairs and independent lake-blue pla
   assert.ok(readFileSync(new URL("./main.tsx", import.meta.url), "utf8").indexOf('./color-system.css') > readFileSync(new URL("./main.tsx", import.meta.url), "utf8").indexOf('./styles.css'));
 });
 
-test("gantt unfinished filters use the same derived state as the task list", () => {
-  const base = { title: "计划任务", tags: [], earliest_start_date: "2026-10-12", due_date: "2026-10-16", status: "scheduled" };
-  const tasks = [{ ...base, id: "planned", is_incomplete: false }, { ...base, id: "unfinished", is_incomplete: true }, { ...base, id: "done", status: "done", is_incomplete: true }];
-  const window = ganttWindow("2026-10-14", "week");
-  assert.deepEqual(buildGanttRows(tasks, window, { status: "scheduled" }).rows.map(row => row.task.id), ["planned"]);
-  assert.deepEqual(buildGanttRows(tasks, window, { status: "not_completed" }).rows.map(row => row.task.id), ["unfinished"]);
-  assert.deepEqual(buildGanttRows(tasks, window, { status: "done" }).rows.map(row => row.task.id), ["done"]);
-});
-
-test("priority editing uses role colors without an unset status marker", () => {
-  assert.match(app, /\{form\.priority && <i className=\{`priority-dot priority-dot-\$\{form\.priority\}`\}/);
-  assert.match(app, /priority-dropdown-option priority-tone-\$\{opt\.tone\}/);
-  assert.match(app, /unset: \{ label: "优先级" \}/);
-  assert.match(app, /清除优先级/);
+test("priority editing defaults to medium and offers only three semantic levels", () => {
+  const selector = readFileSync(new URL("./task-priority-selector.tsx", import.meta.url), "utf8");
+  assert.match(selector, /const priority = value \?\? "medium";/);
+  assert.match(selector, /priority-dot priority-dot-\$\{priority\}/);
+  assert.match(selector, /priority-dropdown-option priority-tone-\$\{opt\.tone\}/);
+  assert.doesNotMatch(selector, /清除优先级|不设置优先级|unset: \{ label: "优先级" \}/);
   for (const priority of ["high", "medium", "low"]) {
     assert.ok(css.includes(`.priority-dot-${priority} { background: var(--priority-${priority}-accent); }`));
     assert.ok(css.includes(`.priority-dropdown-option.priority-tone-${priority} { --priority-tone: var(--priority-${priority}); --priority-surface: var(--priority-${priority}-surface); }`));
@@ -106,7 +97,6 @@ test("only live time and today markers use vivid red while date interactions sta
   assert.match(css, /\.schedule-picker-calendar \.apple-date-grid button\.selected \{ color: #ffffff; background: var\(--color-primary\)/);
   assert.match(css, /--schedule-range-fill: var\(--color-selected-bg\); --schedule-range-node: var\(--color-primary\)/);
   assert.doesNotMatch(css, /button\.schedule-picker-confirm[^}]*var\(--today-red/);
-  assert.match(css, /\.gantt-page \{ --gantt-today: var\(--color-primary\); \}/);
   assert.doesNotMatch(css, /--today-red-soft|--today-red-hover/);
   assert.match(legacy, /\.current-time-line \{[^}]+border-top: 1px solid var\(--today-red\)/);
   assert.equal(light["--color-primary"], "#3168dc");

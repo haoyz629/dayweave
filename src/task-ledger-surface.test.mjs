@@ -24,7 +24,7 @@ test("application canvases use the right workspace gray and a separate left side
   for (const selector of [
     ".next-shell", ".next-workspace", ".tasks-workspace",
     ".next-workspace > .settings-page", ".next-workspace > .review-page",
-    ".next-workspace > .gantt-page", ".calendar-composition", ".timeline-page-shell",
+    ".calendar-composition", ".timeline-page-shell",
     ".next-workspace .today-workspace", ".next-workspace .today-schedule-pane",
     ".next-workspace .today-page", ".next-workspace .today-page .timeline-main",
     ".today-page .is-timeline-view .timeline-design-topbar", ".today-page .timeline-week",

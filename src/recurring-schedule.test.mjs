@@ -108,15 +108,16 @@ test("task page resolves today/next at save and does not write before confirmati
 test("task page confirms this/future through one API and retains failed changes", async () => {
   for (const scope of ["this", "future"]) for (const fail of [false, true]) {
     const writes = [];
-    const state = { pendingItemChange: change(), busy: false, recurringEditRevision: 0, recurringChangeIssue, shanghaiDateValue: () => "2026-10-25", uiErrorMessage: String,
+    const state = { pendingItemChange: change(), busy: false, recurringEditRevision: 0, recurringDetailEditing: true, recurringChangeIssue, shanghaiDateValue: () => "2026-10-25", uiErrorMessage: String,
       updateRecurringOccurrence: async (...args) => { writes.push(args); if (fail) throw Error("数据库忙"); }, onRecurringChanged: async () => {} };
-    setters(state, ["busy", "recurringScopeError", "pendingItemChange", "recurringEditRevision", "feedback"]);
+    setters(state, ["busy", "recurringScopeError", "pendingItemChange", "recurringEditRevision", "recurringDetailEditing", "feedback"]);
     run(["commitRecurringItemChange"], state);
     await state.commitRecurringItemChange(scope);
     assert.equal(writes.length, 1); assert.equal(writes[0][0], "occurrence"); assert.equal(writes[0][3], scope);
     assert.equal(state.busy, false);
     if (fail) { assert.ok(state.pendingItemChange); assert.match(state.recurringScopeError, /原安排已保留/); }
     else { assert.equal(state.pendingItemChange, null); assert.equal(state.recurringEditRevision, 1); }
+    assert.equal(state.recurringDetailEditing, fail, "only a successful save returns to details");
   }
 });
 
@@ -170,5 +171,6 @@ test("scope confirmation shows target only at save, offers both scopes and no co
   assert.deepEqual(scopes, ["this", "future"]);
   assert.match(dialogText, /历史任务块保持不变/);
   assert.doesNotMatch(functions.get("saveRecurringItem"), /await updateRecurring/);
-  assert.doesNotMatch(text, /正在编辑：|saveRecurringOccurrenceReview|recurring-outcome-picker/);
+  assert.doesNotMatch(dialogText, /saveRecurringOccurrenceReview|recurring-outcome-picker|本次完成/);
+  assert.doesNotMatch(text, /正在编辑：|recurring-outcome-picker/);
 });

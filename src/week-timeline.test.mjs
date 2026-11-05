@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { weekDatesFor, weekHeading, shiftWeekDate, weekEntries, weekGroups, weekInitialMinute, weekClock } from './week-timeline-model.ts';
+import { readFileSync } from 'node:fs';
 
 const dates = weekDatesFor('2026-11-04');
 const entry = (key, start, end, date='2026-11-02') => ({layoutKey:key,date,title:key,status:'已安排',tone:'plan',startMinute:start,endMinute:end,time:'',notes:null,tags:[]});
@@ -27,13 +28,14 @@ test('ISO week-year and cross-year heading preserve both date years', () => {
 test('production block visibility, review precedence and notes/tags are reused', () => {
   const schedule={...empty(),task_blocks:[block('plan'),block('done',{execution_status:'completed'}),block('review',{review:{outcome:'not_started',notes:'结果备注'}}),block('deleted',{task_status:'deleted'}),block('future-done',{task_status:'done'}),block('bad',{ends_at:'bad'}),block('zero',{ends_at:'2026-11-02T09:00:00+08:00'})]};
   const rows=weekEntries('2026-11-02',schedule,[],[{id:'plan',tags:['真实标签'],notes:'原备注'}],'2026-11-02');
-  assert.equal(rows.length,3);
+  assert.equal(rows.length,4,'recycled planned blocks stay visible today, future-done blocks are hidden');
   assert.equal(rows.find(r=>r.layoutKey==='block:plan').tone,'plan');
   assert.deepEqual(rows.find(r=>r.layoutKey==='block:plan').tags,['真实标签']);
   assert.equal(rows.find(r=>r.layoutKey==='block:done').tone,'completed');
   assert.equal(rows.find(r=>r.layoutKey==='block:review').tone,'not-started');
   assert.equal(rows.find(r=>r.layoutKey==='block:review').notes,'结果备注');
-  assert.equal(weekEntries('2026-11-02',schedule,[],[],'2026-11-04').length,4,'historical unfinished facts remain visible');
+  assert.equal(rows.find(r=>r.layoutKey==='block:deleted').tone,'plan');
+  assert.equal(weekEntries('2026-11-02',schedule,[],[],'2026-11-04').length,5,'historical unfinished facts and recycled blocks remain visible');
 });
 
 test('cross-midnight and UTC-offset timestamps clip to the actual Shanghai day', () => {
@@ -101,4 +103,57 @@ test('random dense/chain layouts retain every task with no temporal lane collisi
       }
     }
   }
+});
+
+test('day and week share date content while all views use one header', () => {
+  const read = file => readFileSync(new URL(file, import.meta.url), 'utf8');
+  const app = read('./App.tsx'), week = read('./week-timeline.tsx'), css = read('./week-timeline.css');
+  assert.equal(app.match(/<header className="timeline-design-topbar">/g)?.length, 1);
+  assert.doesNotMatch(app, /className="month-controls"/);
+  assert.doesNotMatch(week, /week-timeline-toolbar/);
+  for (const source of [app, week]) assert.match(source, /<TimelineWeekDateContent /);
+  assert.match(css, /--week-columns: 64px repeat\(5, minmax\(0, 1fr\)\) repeat\(2, minmax\(0, \.5fr\)\)/);
+  assert.match(css, /\.week-timeline-dates, \.week-timeline-body \{[^}]*grid-template-columns: var\(--week-columns\)/);
+  assert.match(week, /measure\.widths\[index\]/, 'task text wrapping uses each actual day width');
+});
+
+test('week removes redundant read-only copy and includes the incomplete semantic legend', () => {
+  const read = file => readFileSync(new URL(file, import.meta.url), 'utf8');
+  const app = read('./App.tsx'), week = read('./week-timeline.tsx'), css = read('./week-timeline.css');
+  assert.doesNotMatch(app, /只读周日程/);
+  assert.match(app, /todayView !== "week" && <div className="timeline-date-meta timeline-day-subline">/);
+  assert.doesNotMatch(week, /只读 · 点击任务或日期查看完整安排/);
+  assert.match(week, /aria-label="任务状态图例"><span className="tone-plan">已安排<\/span><span className="tone-completed">已完成<\/span><span className="tone-not-started">未完成<\/span>/);
+  assert.match(css, /\.tone-not-started[^{}]*\{ --week-tone: var\(--state-not-started\); --week-bg: var\(--state-not-started-surface\); --week-edge: var\(--state-not-started-border\);/);
+});
+
+test('week dates inherit day card styling while column separators stay independent', () => {
+  const css = readFileSync(new URL('./week-timeline.css', import.meta.url), 'utf8');
+  const button = css.match(/\.today-page \.week-timeline \.week-timeline-dates > button \{([^}]+)\}/)[1];
+  assert.match(button, /height: calc\(100% - 12px\); margin: 6px 4px/);
+  assert.doesNotMatch(button, /border|border-radius|padding|background/);
+  assert.match(css, /\.week-timeline-dates > button::after \{[^}]*right: -5px; width: 1px;[^}]*pointer-events: none/);
+});
+
+test('week task blocks use narrower horizontal gutters and clearer vertical gaps', () => {
+  const week = readFileSync(new URL('./week-timeline.tsx', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./week-timeline.css', import.meta.url), 'utf8');
+  assert.match(week, /const height = Math.max\(2, timeTop\(entry.endMinute - entry.startMinute\) - 6\)/);
+  assert.match(week, /top: timeTop\(entry.startMinute\) \+ 3, height, left: `calc\([^`]+\+ 2px\)`, right: `calc\([^`]+\+ 2px\)`/);
+  assert.match(week, /measure.widths\[index\][^\n]+- 14 >= measure.time/);
+  assert.match(css, /\.week-timeline-more \{[^}]*left: calc\(66.666667% \+ 2px\); right: 2px/);
+});
+
+test('week blocks reserve tag space while hover keeps every tag', () => {
+  const source = readFileSync(new URL('./week-timeline.tsx', import.meta.url), 'utf8');
+  const sizing = ['showTime', 'showTags', 'lines'].map(name => source.match(new RegExp(`const ${name} = ([^;]+);`))?.[0]).join('\n');
+  const size = new Function('height', 'timeRows', 'entry', `${sizing}\nreturn { showTags, lines };`);
+  assert.deepEqual(size(66, 1, { tags: ['工作'] }), { showTags: true, lines: 1 });
+  assert.equal(size(30, 1, { tags: ['工作'] }).showTags, false);
+  assert.equal(size(66, 1, { tags: [] }).showTags, false);
+  assert.deepEqual(size(102, 2, { tags: ['工作', '设计'] }), { showTags: true, lines: 2 });
+  assert.match(source, /<TaskTagList tags=\{entry.tags\}/);
+  assert.match(source, /<TaskTagList tags=\{hover.entry.tags\} expanded/);
+  const css = readFileSync(new URL('./week-timeline.css', import.meta.url), 'utf8');
+  assert.match(css, /\.week-timeline-event \{[^}]*gap: 3px;[^}]*padding: 3px 4px;/);
 });

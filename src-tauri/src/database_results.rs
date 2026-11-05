@@ -161,6 +161,88 @@ pub(super) fn allow_capture(connection: &Connection, date: &str, id: &str) -> Ap
     Ok(date == today)
 }
 
+// Recycling permits completing an existing reservation, never changing the task lifecycle.
+// Return true when this narrow path handled the write (including a no-op retry).
+pub(super) fn save_recycled_completion(transaction: &Transaction<'_>, task: &TaskDto, date: &str,
+    block_id: &str, outcome: &str, note: Option<&str>) -> AppResult<bool> {
+    if task.deleted_at.is_none() && task.status != "deleted" { return Ok(false); }
+    if outcome != "completed" {
+        return Err(AppError::Domain("回收站任务只能记录已有安排的完成结果".into()));
+    }
+    let confirmed: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM plan_blocks pb
+        JOIN daily_plans dp ON dp.id = pb.daily_plan_id WHERE pb.id = ?1 AND pb.task_id = ?2
+            AND dp.status = 'confirmed' AND dp.plan_date = ?3 AND COALESCE(pb.result_date, dp.plan_date) = ?3)",
+        params![block_id, task.id, date], |row| row.get(0))?;
+    if !confirmed { return Err(AppError::Domain("只能记录该任务原日期的已确认安排".into())); }
+    allow_capture(transaction, date, block_id)?;
+    let before = execution_snapshot(transaction, block_id)?;
+    let review: Option<(String, Option<String>)> = transaction.query_row(
+        "SELECT outcome, notes FROM review_entries WHERE plan_block_id = ?1", [block_id],
+        |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
+    let normalized_note = normalize_review_text(note.map(str::to_owned), 500, "执行备注")?;
+    let same_review = match &review {
+        Some((outcome, saved_note)) => outcome == "completed"
+            && normalize_review_text(saved_note.clone(), 500, "执行备注")?.as_deref() == normalized_note.as_deref(),
+        None => true,
+    };
+    let previous_outcome = review.as_ref().map(|(outcome, _)| outcome.as_str()).unwrap_or(&before.execution_status);
+    if date < shanghai_today().as_str() && previous_outcome == "completed" {
+        return Err(AppError::Domain("历史完成记录不支持修改".into()));
+    }
+    if before.execution_status == "completed" && before.execution_captured_at.is_some()
+        && normalized_note.as_deref() == before.execution_note.as_deref() && same_review { return Ok(true); }
+    database_history::preserve_current(transaction, &task.id)?;
+    freeze_block(transaction, block_id)?;
+    let timestamp = now();
+    transaction.execute("UPDATE plan_blocks SET execution_status = 'completed', execution_note = ?2,
+        execution_captured_at = ?3, review_required = CASE WHEN ?4 THEN review_required ELSE 1 END,
+        updated_at = ?3 WHERE id = ?1", params![block_id, normalized_note, timestamp, review.is_some()])?;
+    transaction.execute("UPDATE review_entries SET outcome = 'completed', notes = ?2 WHERE plan_block_id = ?1",
+        params![block_id, normalized_note])?;
+    clear_review_draft(transaction, date, "task", block_id)?;
+    database_history::preserve_current(transaction, &task.id)?;
+    sync_recycled_completion(transaction, &task.id)?;
+    Ok(true)
+}
+
+// A recycled multi-day task is "whole-task complete" once every confirmed block is
+// complete. It stays in the recycle bin (status/deleted_at unchanged); completing all
+// dates only upgrades the restore target so recovery lands on "done".
+fn sync_recycled_completion(transaction: &Transaction<'_>, task_id: &str) -> AppResult<()> {
+    let (count, incomplete): (i64, i64) = transaction.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(CASE WHEN COALESCE(review.outcome, pb.execution_status) = 'completed' THEN 0 ELSE 1 END), 0)
+         FROM plan_blocks pb JOIN daily_plans dp ON dp.id = pb.daily_plan_id
+         LEFT JOIN review_entries review ON review.plan_block_id = pb.id
+         WHERE pb.task_id = ?1 AND dp.status = 'confirmed'",
+        [task_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    let (start, due): (Option<String>, Option<String>) = transaction.query_row(
+        "SELECT earliest_start_date, due_date FROM tasks WHERE id = ?1", [task_id],
+        |row| Ok((row.get(0)?, row.get(1)?)))?;
+    let unscheduled_date = match (start.as_deref(), due.as_deref()) {
+        (Some(start), Some(due)) if start < due => transaction.query_row(
+            "SELECT COUNT(DISTINCT dp.plan_date) < CAST(julianday(?3) - julianday(?2) AS INTEGER) + 1
+             FROM plan_blocks pb JOIN daily_plans dp ON dp.id = pb.daily_plan_id
+             WHERE pb.task_id = ?1 AND dp.status = 'confirmed' AND dp.plan_date >= ?2 AND dp.plan_date <= ?3",
+            params![task_id, start, due], |row| row.get::<_, bool>(0))?,
+        _ => false,
+    };
+    let completed = count > 0 && incomplete == 0 && !unscheduled_date;
+    if completed {
+        let current_target: String = transaction.query_row(
+            "SELECT deleted_from_status FROM tasks WHERE id = ?1", [task_id],
+            |row| row.get(0))?;
+        if current_target != "done" {
+            transaction.execute(
+                "UPDATE tasks SET deleted_from_status = 'done', remaining_workload_minutes = 0,
+                    updated_at = ?2 WHERE id = ?1 AND status = 'deleted'",
+                params![task_id, now()])?;
+            record_task_change(transaction, task_id, "status_changed",
+                Some(&current_target), Some("done"), "manual", Some("汇总全部执行块结果"))?;
+        }
+    }
+    Ok(())
+}
+
 // Migration 26: JSON snapshots are optional evidence, never a reason to abort a user's migration.
 pub(super) fn backfill_completion_context(connection: &Connection) -> AppResult<()> {
     let tasks = {

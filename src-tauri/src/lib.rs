@@ -19,6 +19,7 @@ use database::{
     ApplyResult, AvailabilitySettings, CalendarEventDto, Database, DayScheduleDto, ExecutionCaptureInput,
     ManualCalendarEventInput, ManualTaskUpdate, PlanBlockTimeUpdate, PlanBlockRemove, PlanTaskInclude, ProposalPreview, RulePlanBlock, RulePlanPreview,
     RecurringItemDto, RecurringItemInput, RecurringOccurrenceDto, RecurringOccurrenceReviewInput,
+    RecurringExecutionEventDto,
     TaskDraftDto, ReviewEntryDto, ReviewEntryInput, TaskDraftInput, TaskDto, TaskMetadataDto,
     UndoEntryDto, UnscheduledTask, purge_expired_deleted_items,
 };
@@ -214,6 +215,16 @@ fn save_recurring_occurrence_review(
     input: RecurringOccurrenceReviewInput,
 ) -> Result<RecurringOccurrenceDto, String> {
     with_database(&state, |database| database.save_recurring_occurrence_review(&occurrence_id, input))
+}
+
+#[tauri::command]
+fn list_recurring_execution_history(state: State<'_, AppState>, item_id: String) -> Result<Vec<RecurringExecutionEventDto>, String> {
+    with_database(&state, |database| database.list_recurring_execution_history(&item_id))
+}
+
+#[tauri::command]
+fn clear_recurring_occurrence_review(state: State<'_, AppState>, occurrence_id: String) -> Result<RecurringOccurrenceDto, String> {
+    with_database(&state, |database| database.clear_recurring_occurrence_review(&occurrence_id))
 }
 
 #[tauri::command]
@@ -955,6 +966,8 @@ pub fn run() {
             update_recurring_occurrence,
             list_recurring_occurrences_range,
             save_recurring_occurrence_review,
+            list_recurring_execution_history,
+            clear_recurring_occurrence_review,
             get_task,
             get_task_metadata,
             set_task_tags,

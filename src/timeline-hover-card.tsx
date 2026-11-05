@@ -1,5 +1,6 @@
 import { RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SeparatedCopy } from "./copy-separator";
+import { TaskTagList } from "./task-tag-editor";
 
 export type TimelineTooltipContent = {
   kind: "普通任务" | "单日任务" | "多日任务" | "任务安排" | "计划草案" | "固定日程" | "重复事项" | "待安排任务" | "非工作时间";
@@ -9,6 +10,7 @@ export type TimelineTooltipContent = {
   tone: "execution" | "execution-completed" | "execution-partial" | "execution-blocked" | "execution-cancelled" | "execution-not_started" | "draft" | "fixed" | "recurring" | "task" | "nonworking";
   url?: string;
   note?: string;
+  tags?: string[];
 };
 export type TimelineTooltipState = TimelineTooltipContent & {
   left: number;
@@ -147,6 +149,7 @@ export function TaskTimelineHoverCard({ content, cardRef, onPointerEnter, onPoin
     onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave} onFocus={onFocus} onBlur={onBlur}>
     <div className="timeline-hover-meta"><span>{content.kind}</span><time>{content.time}</time></div>
     <strong>{content.title}</strong>
+    <TaskTagList tags={content.tags ?? []} expanded />
     {(content.url || content.note) && <div className="timeline-hover-details">
       {content.url && <section className="timeline-hover-resource" aria-label="任务 URL">
         <span className="timeline-hover-url" ref={urlRef}>{content.url}</span>

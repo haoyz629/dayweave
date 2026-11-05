@@ -72,6 +72,19 @@ export type RecurringOccurrence = {
   updated_at: string;
 };
 
+export type RecurringExecutionEvent = {
+  id: string;
+  kind: "created" | "execution" | "paused" | "resumed" | "ended" | "soft_deleted" | "restored";
+  occurrence_id: string | null;
+  occurrence_date: string;
+  title: string;
+  display_time: string | null;
+  display_duration_minutes: number | null;
+  outcome: RecurringOccurrenceOutcome | null;
+  notes: string | null;
+  occurred_at: string;
+};
+
 export type Task = {
   id: string;
   title: string;
@@ -140,7 +153,7 @@ export type TaskHistoryEvent = {
   id: string;
   occurred_at: string | null;
   plan_date: string | null;
-  kind: "created" | "execution" | "status" | "automatic_status" | "restored" | "cleared" | "cleared_incomplete" | "reopened";
+  kind: "created" | "execution" | "status" | "automatic_status" | "soft_deleted" | "restored" | "cleared" | "cleared_incomplete" | "reopened";
   status: TaskStatus | "not_completed" | null;
   note: string | null;
   review_note: string | null;
@@ -449,6 +462,14 @@ export function saveRecurringOccurrenceReview(
   input: { outcome: RecurringOccurrenceOutcome; notes: string | null }
 ) {
   return invokeDesktop<RecurringOccurrence>("save_recurring_occurrence_review", { occurrenceId, input });
+}
+
+export function clearRecurringOccurrenceReview(occurrenceId: string) {
+  return invokeDesktop<RecurringOccurrence>("clear_recurring_occurrence_review", { occurrenceId });
+}
+
+export function listRecurringExecutionHistory(itemId: string) {
+  return invokeDesktop<RecurringExecutionEvent[]>("list_recurring_execution_history", { itemId });
 }
 
 export function getTask(taskId: string) {

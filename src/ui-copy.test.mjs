@@ -65,7 +65,7 @@ test("plan draft time editor stays compact and supports focused manual adjustmen
   assert.match(appSource, /focusedTimeRangePresentation\(/);
   assert.match(appSource, /type="text" inputMode="numeric"/);
   assert.match(appSource, /className="time-rail-endpoint-cards"/);
-  assert.match(appSource, /timeline-floating-layer\$\{planDraftTimeEdit \? " is-time-editor"/);
+  assert.match(appSource, /timeline-floating-layer\$\{planDraftTimeEdit \|\| selectedRecurringOccurrence && recurringTimeEdit \? " is-time-editor"/);
   assert.match(stylesSource, /\.timeline-floating-layer\.is-time-editor, \.timeline-floating-layer\.is-block-editor \{ position: fixed;/);
   assert.match(stylesSource, /\.time-rail-endpoint-cards \{[^}]*grid-template-columns: 31fr 38fr 31fr/);
   assert.match(appSource, /highlightedEdge === "start" \? "is-active"/);
@@ -218,20 +218,20 @@ test("formal tasks require complete time and Inbox is no longer a product state"
 });
 
 test("recycle-bin capsules open full details with state-specific recovery actions", () => {
-  assert.match(appSource, /className="ledger-quick-action icon-only" data-tooltip="恢复"/);
-  assert.match(appSource, /className="ledger-quick-action icon-only danger" data-tooltip="永久删除"/);
-  assert.match(appSource, /\{recycleRetentionMessage\(deletedAt, nowMs\)\}/);
+  assert.match(appSource, /data-tooltip="恢复" aria-label=\{`恢复\$\{(?:item|task)\.title\}`\}/);
+  assert.match(appSource, /data-tooltip="永久删除" aria-label=\{`永久删除\$\{(?:item|task)\.title\}`\}/);
+  assert.match(appSource, /\{recycleCleanupMessage\(deletedAt, nowMs\)\}/);
   assert.match(appSource, /window\.setInterval\(\(\) => setRecycleNow\(Date\.now\(\)\), 60 \* 1000\)/);
-  assert.doesNotMatch(appSource, /<RecycleBinBanner deletedAt=\{selectedTask\.deleted_at\}/);
-  assert.match(appSource, /<RecycleBinBanner deletedAt=\{selectedRecurringItem\.deleted_at\} nowMs=\{recycleNow\}/);
+  assert.doesNotMatch(appSource, /RecycleBinBanner|recycle-bin-banner/);
+  assert.match(appSource, /<RecycleBinActions deletedAt=\{selectedRecurringItem\.deleted_at\} nowMs=\{recycleNow\}/);
   assert.match(appSource, /<DeletedTaskDetails task=\{selectedTask\} metadata=\{selectedMetadata\} busy=\{busy\} now=\{recycleNow\}/);
-  assert.match(stylesSource, /\.recycle-bin-banner \{ position: sticky;/);
+  assert.doesNotMatch(stylesSource, /\.recycled-task-detail > \.recycle-bin-banner|:has\(\.recycled-task-detail\)/);
   assert.match(stylesSource, /\.ledger-quick-action\.icon-only:is\(:hover, :focus-visible\)::after/);
 });
 
 test("recycle cleanup stays beside permanent deletion and task headings omit event times", () => {
-  const deleted = appSource.slice(appSource.indexOf("function DeletedTaskDetails("), appSource.indexOf("function TaskStatusHistory("));
-  assert.match(deleted, /onClick=\{onRestore\}[\s\S]*?<div className="task-detail-delete-group">\s*<p[^>]*>[\s\S]*?recycleCleanupMessage\(task.deleted_at, now\)[\s\S]*?<button[^>]*onClick=\{onPermanentDelete\}/);
+  const actions = appSource.slice(appSource.indexOf("function RecycleBinActions("), appSource.indexOf("function TaskDetailResources("));
+  assert.match(actions, /onClick=\{onRestore\}[\s\S]*?<div className="task-detail-delete-group">\s*<p[^>]*>[\s\S]*?recycleCleanupMessage\(deletedAt, nowMs\)[\s\S]*?<button[^>]*onClick=\{onPermanentDelete\}/);
   assert.match(stylesSource, /\.task-detail-delete-group \{[^}]*display: flex;[^}]*min-width: 0;[^}]*align-items: center;/);
   const content = appSource.slice(appSource.indexOf("function TaskDetailContent("), appSource.indexOf("function DeletedTaskDetails("));
   const heading = content.match(/<section[^>]*ordinary-task-detail[\s\S]*?<header>[\s\S]*?<\/header>/)?.[0];
@@ -336,9 +336,11 @@ test("calendar, weekly overview and daily plan share the schedule workspace", ()
   assert.match(appSource, /const returnToMonthOnEscape = \(event: globalThis\.KeyboardEvent\)/);
   assert.match(appSource, /document\.querySelector\('\[role="dialog"\], \[role="alertdialog"\]'\)/);
   assert.match(appSource, /const mondayBasedIndex = weekdayIndex < 0 \? 0 : \(weekdayIndex \+ 6\) % 7/);
-  assert.match(appSource, /className="timeline-week-calendar-meta"/);
-  assert.match(appSource, /primaryCalendarLabel\.kind/);
-  assert.match(appSource, /timeline-week-heading"><small>\{weekday\}<\/small>/);
+  const dateContent = readFileSync(new URL("./timeline-week-date-content.tsx", import.meta.url), "utf8");
+  assert.match(appSource, /<TimelineWeekDateContent date=\{date\} weekday=\{weekday\} \/>/);
+  assert.match(dateContent, /className="timeline-week-calendar-meta"/);
+  assert.match(dateContent, /primaryCalendarLabel\.kind/);
+  assert.match(dateContent, /timeline-week-heading"><small>\{weekday\}<\/small>/);
   assert.equal(stylesSource.includes(".timeline-week-count"), false);
   assert.match(stylesSource, /button\.today:not\(\.selected\) \.timeline-week-date \{ color: var\(--today-red\); \}/);
   assert.match(stylesSource, /button\.today\.selected \.timeline-week-date \{ color: #fff; background: var\(--today-red\);/);
@@ -391,8 +393,9 @@ test("task editor uses shared semantic colors and keeps recycle actions in place
   assert.doesNotMatch(appSource, /className="task-region-workload"/);
   assert.match(appSource, /className=\{compact \? "apple-schedule-toolbar" : undefined\}/);
   assert.match(appSource, /sameDay \? <output className="apple-schedule-workload"/);
-  assert.match(appSource, /className=\{`priority-select-control priority-tone-\$\{form\.priority \?\? "unset"\}`\}/);
-  assert.match(appSource, /<option value="low">低优先级<\/option><option value="medium">中优先级<\/option><option value="high">高优先级<\/option>/);
+  assert.match(appSource, /<TaskPrioritySelector id=\{priorityId\} value=\{form.priority\} disabled=\{disabled\}/);
+  const prioritySource = readFileSync(new URL("./task-priority-selector.tsx", import.meta.url), "utf8");
+  for (const label of ["低优先级", "中优先级", "高优先级"]) assert.ok(prioritySource.includes(label));
   assert.match(appSource, /status=\{statusCopy\[taskListStatus\(task\)\]\} statusTone=\{taskListStatus\(task\)\}/);
   assert.match(appSource, /status="待确认" statusTone="draft"/);
   assert.match(stylesSource, /--task-state-draft:/);
@@ -625,11 +628,13 @@ test("legacy confirmed records remain readable in the block dialog without anoth
   assert.match(appSource, /const committed = target === "done" \? await completeTask/);
 });
 
-test("recurring items allow scoped schedule edits but never ask for completion or review", () => {
-  assert.doesNotMatch(appSource, /saveRecurringOccurrenceReview|canCaptureRecurringResult|selectedRecurring\.outcome|recurringNote|recurring-outcome-picker|记录重复事项/);
+test("recurring items allow optional per-occurrence completion without changing scoped schedule edits", () => {
+  assert.match(appSource, /saveRecurringOccurrenceReview|canCaptureRecurringResult/);
+  assert.match(appSource, /<RecurringOccurrenceResult/);
+  assert.match(appSource, /未勾选不会自动记为未完成/);
   assert.match(appSource, /className=\{`timeline-event recurring-event/);
   assert.match(appSource, /<RecurringScopeConfirmation/);
-  assert.match(appSource, /按规则展示，无需勾选/);
+  assert.match(appSource, /按规则展示，可记录每次完成/);
   assert.doesNotMatch(appSource, /到期展示，复盘时处理/);
 });
 

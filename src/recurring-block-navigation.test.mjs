@@ -19,7 +19,7 @@ function collect(node) {
     if (code?.startsWith("`timeline-floating-panel$")) panelClass = code;
     if (code?.startsWith("`timeline-floating-layer$")) layerClass = code;
   }
-  if (ts.isConditionalExpression(node) && node.condition.getText(source) === "selectedRecurringOccurrence && recurringTimeEdit") recurringPanel = node.whenTrue.getText(source);
+  if (ts.isConditionalExpression(node) && node.condition.getText(source) === "selectedRecurringOccurrence" && ts.isJsxFragment(node.whenTrue)) recurringPanel = node.whenTrue.getText(source);
   if (ts.isCallExpression(node) && node.expression.getText(source) === "useEffect") {
     const code = node.arguments[0]?.getText(source);
     if (code?.includes("handledRequestedView.current === requestedView")) requestedEffect = code;
@@ -46,6 +46,7 @@ test("view recurring task sends the series and original occurrence without persi
     const calls = [];
     const state = { savingRecurringChange: blocked, pendingRecurringChange: null, selectedDate: "2026-10-29", timelineSelectionAnchorRef: { current: {} }, onOpenRecurringItem: (...args) => calls.push(args) };
     setters(state, ["selection", "recurringTimeEdit", "timelineTooltip"]);
+    state.recurringResultSavingRef = { current: false };
     load(["openTimelineRecurringItem"], state).openTimelineRecurringItem(item);
     assert.equal(calls.length, blocked ? 0 : 1);
     if (!blocked) {
@@ -62,12 +63,13 @@ test("requested recurring navigation selects the exact active, ended or recycled
   for (const status of ["active", "paused", "ended", "deleted"]) {
     const target = { id: "series-2", status, deleted_at: status === "deleted" ? "2026-10-29" : null };
     const state = { requestedView: { recurringItemId: target.id }, handledRequestedView: { current: null }, taskViewInitialized: { current: false }, recurringItems: [{ id: "series-1" }, target] };
-    setters(state, ["view", "creating", "selectedId", "draft", "selectedRecurringId", "search", "tagFilter", "compactTaskEditorDismissed", "taskViewReady", "filterMenuOpen"]);
+    setters(state, ["view", "creating", "selectedId", "draft", "selectedRecurringId", "recurringDetailEditing", "search", "tagFilter", "compactTaskEditorDismissed", "taskViewReady", "filterMenuOpen"]);
     vm.runInNewContext(compile(`(${requestedEffect})()`), state);
     assert.equal(state.selectedRecurringId, target.id);
     assert.equal(state.view, status === "deleted" ? "deleted" : "recurring");
     assert.equal(state.creating, false);
     assert.equal(state.selectedId, null);
+    assert.equal(state.recurringDetailEditing, false);
     assert.equal(state.search, "");
     assert.equal(state.tagFilter, "");
     assert.equal(state.handledRequestedView.current, state.requestedView);
@@ -119,27 +121,63 @@ test("all timeline task types receive tags and empty tags produce no reserved ro
   assert.match(text, /onClick=\{\(\) => openTimelineRecurringItem\(selectedRecurringOccurrence\)\}/);
 });
 
-test("recurring click dialog shares the ordinary task shell and footer without changing form submission", () => {
-  const state = { selectedRecurringOccurrence: item, selectedBlock: null, planDraftTimeEdit: null };
+test("recurring result and time pages share the ordinary shells but never show two save footers", () => {
+  const state = { selectedRecurringOccurrence: item, selectedBlock: null, planDraftTimeEdit: null, recurringTimeEdit: null };
   assert.equal(vm.runInNewContext(compile(`(${panelClass});`), state), "timeline-floating-panel task-block-editor");
   assert.equal(vm.runInNewContext(compile(`(${layerClass});`), state), "timeline-floating-layer is-block-editor");
-  for (const editable of [true, false]) {
-    const context = { React, selectedRecurringOccurrence: { ...item, title: "重复任务" }, recurringTimeEdit: { date: "2026-11-03", time: "09:00", duration: 120, error: "" }, today: "2026-11-03", isPastDate: !editable, savingRecurringChange: false, pendingRecurringChange: null, Icon: () => null, CopySeparator: () => null, closeTimelinePanel() {}, openTimelineRecurringItem() {}, saveRecurringTimeEdit() {}, canEditRecurringOccurrence: () => editable, recurringTimeRange: () => "09:00–11:00" };
-    context.RecurringBlockTimeEditor = () => null;
-    context.setRecurringTimeEdit = () => {};
-    const html = renderToStaticMarkup(vm.runInNewContext(compile(`(${recurringPanel});`), context));
-    assert.match(html, /class="execution-plan-time"/);
-    assert.match(html, /class="execution-time-value"/);
-    assert.match(html, /class="execution-open-task"/);
-    assert.doesNotMatch(html, /floating-outcomes|execution-remove-today/);
-    if (editable) {
+  state.recurringTimeEdit = {};
+  assert.equal(vm.runInNewContext(compile(`(${panelClass});`), state), "timeline-floating-panel task-block-editor plan-draft-editor");
+  assert.equal(vm.runInNewContext(compile(`(${layerClass});`), state), "timeline-floating-layer is-time-editor");
+  for (const editable of [true, false]) for (const editingTime of editable ? [true, false] : [false]) {
+    const context = { React, useState: React.useState, useEffect: React.useEffect, selectedRecurringOccurrence: { ...item, title: "重复任务", outcome: "completed", review_notes: "本次备注" }, recurringTimeEdit: editingTime ? { date: "2026-11-03", time: "09:00", duration: 120, error: "" } : null, today: "2026-11-03", savingRecurringChange: false, pendingRecurringChange: null, Icon: () => null, CopySeparator: () => null, closeTimelinePanel() {}, returnToRecurringOccurrenceDetails() {}, adjustRecurringOccurrenceTime() {}, openTimelineRecurringItem() {}, saveRecurringTimeEdit() {}, saveRecurringResult() {}, canEditRecurringOccurrence: () => editable, canRecordRecurringOccurrence: () => editable, recurringTimeRange: () => "09:00–11:00", RecurringBlockTimeEditor: () => null, setRecurringTimeEdit() {}, quickCompletingBlockId: null, busy: false, loading: false, savingExecution: false, preview: null };
+    load(["RecurringOccurrenceResult"], context);
+    const html = renderToStaticMarkup(vm.runInContext(compile(`(${recurringPanel});`), context));
+    assert.doesNotMatch(html, /execution-remove-today/);
+    if (editingTime) {
+      assert.match(html, /返回任务块详情/);
       assert.match(html, /<form id="recurring-block-time-form"/);
       assert.match(html, /<\/form><footer class="execution-capture-footer">/);
       assert.match(html, /type="submit" form="recurring-block-time-form" class="primary-action"/);
+      assert.match(html, /aria-label="本次执行结果" hidden=""/);
+      assert.match(html, /<footer class="execution-capture-footer" hidden="">/);
+      assert.doesNotMatch(html, /execution-plan-time|execution-open-task/);
     } else {
-      assert.doesNotMatch(html, /<form|type="submit"/);
-      assert.match(html, /历史任务块保持只读/);
+      assert.match(html, /class="execution-plan-time"/);
+      assert.match(html, /class="execution-time-value"/);
+      assert.match(html, /class="execution-open-task"/);
+      assert.doesNotMatch(html, /<form|type="submit"|保存调整|hidden=""/);
+      if (editable) {
+        assert.match(html, /aria-label="调整计划时间：09:00–11:00"/);
+        assert.equal((html.match(/class="execution-capture-footer"/g) ?? []).length, 1);
+        assert.match(html, /保存结果/);
+      } else {
+        assert.doesNotMatch(html, /aria-label="调整计划时间|保存结果/);
+        assert.match(html, /历史已有结果及超出补录范围的记录保持只读/);
+      }
     }
+  }
+});
+
+test("opening a recurring block defaults to results; time editing and returning never write", () => {
+  let focused = 0;
+  const row = { ...item, occurrence_date: "2026-11-03", display_time: "09:00", display_duration_minutes: 30 };
+  const state = { selectedRecurringOccurrence: row, recurringTimeEdit: {}, savingRecurringChange: false, pendingRecurringChange: null, recurringResultSavingRef: { current: false }, canEditRecurringOccurrence: () => true, selectTimelineItem() {}, timelineFloatingPanelRef: { current: { focus() { focused++; }, querySelector: () => ({ focus() { focused++; } }) } }, window: { requestAnimationFrame(fn) { fn(); } } };
+  setters(state, ["recurringTimeEdit"]);
+  load(["selectRecurringOccurrence", "adjustRecurringOccurrenceTime", "returnToRecurringOccurrenceDetails"], state);
+  state.selectRecurringOccurrence(row, {}, {});
+  assert.equal(state.recurringTimeEdit, null);
+  state.adjustRecurringOccurrenceTime();
+  assert.equal(state.recurringTimeEdit.date, row.occurrence_date);
+  assert.equal(state.recurringTimeEdit.time, "09:00");
+  assert.equal(state.recurringTimeEdit.duration, 30);
+  state.returnToRecurringOccurrenceDetails();
+  assert.equal(state.recurringTimeEdit, null);
+  assert.equal(focused, 2);
+  for (const blocked of ["saving", "readonly"]) {
+    state.recurringResultSavingRef.current = blocked === "saving";
+    state.canEditRecurringOccurrence = () => blocked !== "readonly";
+    state.adjustRecurringOccurrenceTime();
+    assert.equal(state.recurringTimeEdit, null);
   }
 });
 

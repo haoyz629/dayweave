@@ -51,7 +51,7 @@ test("task tooltip separates only nonempty priority and status details", () => {
 });
 
 function loadCard(hooks = React, extra = {}) {
-  const state = { React, exports: {}, require: name => { if (name === "./copy-separator") return { SeparatedCopy }; assert.equal(name, "react"); return hooks; }, ...extra };
+  const state = { React, exports: {}, require: name => { if (name === "./copy-separator") return { SeparatedCopy }; if (name === "./task-tag-editor") return { TaskTagList: ({ tags }) => tags.length ? React.createElement("div", { className: "task-list-tags" }, tags.join("、")) : null }; assert.equal(name, "react"); return hooks; }, ...extra };
   vm.runInNewContext(compile(cardText), state);
   return state.exports;
 }
@@ -429,4 +429,13 @@ test("recurring save stages scope confirmation without success toast and retains
     else { assert.equal(state.pending.occurrence.id, "next"); assert.equal(feedback.length, 0); }
     assert.ok(feedback.every(value => !value.includes("重复事项已保存")));
   }
+});
+
+test("task hover cards receive every tag without truncating the source data", () => {
+  const tags = ["工作", "设计", "本周", "第四个标签"];
+  const h = componentHarness("TaskTimelineHoverCard", { content: { ...content, tags }, cardRef: { current: null }, onPointerEnter() {}, onPointerLeave() {}, onFocus() {}, onBlur() {} });
+  const tree = h.render();
+  const tagList = nodes(tree, node => node.props.tags === tags)[0];
+  assert.equal(tagList.props.expanded, true);
+  assert.match(renderToStaticMarkup(tree), /工作、设计、本周、第四个标签/);
 });

@@ -36,7 +36,7 @@ function harness({ fail = false, loaded = true } = {}) {
       calls.push(["delete", id, confirmed]);
       if (fail) throw new Error("删除失败");
       saved = { ...task, status: "deleted", deleted_at: `${date}T12:00:00+08:00` };
-      serverSchedule.task_blocks = serverSchedule.task_blocks.filter(item => item.task_id !== id);
+      serverSchedule.task_blocks = serverSchedule.task_blocks.map(item => item.task_id === id ? { ...item, task_status: "deleted" } : item);
     },
     async getTask(id) { calls.push(["get", id]); return saved; },
     async restoreManualTask(id) { calls.push(["restore", id]); saved = { ...task }; serverSchedule = structuredClone(schedule); },
@@ -59,20 +59,21 @@ function harness({ fail = false, loaded = true } = {}) {
   return { state, calls, summary, refresh: () => releaseRefresh?.() };
 }
 
-test("moving a task to trash immediately removes all its cached blocks and statistics before refresh completes", async () => {
+test("moving a task to trash preserves existing blocks and statistics before refresh completes", async () => {
   const current = harness();
   const before = structuredClone(current.state.daySchedule);
   assert.deepEqual(current.summary(), { count: 3, completed: 1, minutes: 90 });
   await current.state.moveToTrash();
   assert.equal(current.state.tasks[0].status, "deleted");
-  assert.deepEqual(current.state.daySchedule.task_blocks.map(item => item.id), ["other-block"]);
-  assert.deepEqual(current.summary(), { count: 1, completed: 0, minutes: 30 });
+  assert.deepEqual(current.state.daySchedule.task_blocks.map(item => item.id), ["block", "completed", "other-block"]);
+  assert.equal(current.state.daySchedule.task_blocks[0].task_status, "deleted");
+  assert.deepEqual(current.summary(), { count: 3, completed: 1, minutes: 90 });
   assert.deepEqual(current.state.daySchedule.fixed_events, before.fixed_events);
   assert.equal(current.state.daySchedule.plan_id, before.plan_id);
   assert.ok(current.calls.some(([name, selectedDate, loading]) => name === "schedule" && selectedDate === date && loading === false));
   assert.equal(current.state.successToast.message, "已移入回收站");
   current.refresh();
-  assert.deepEqual(current.summary(), { count: 1, completed: 0, minutes: 30 });
+  assert.deepEqual(current.summary(), { count: 3, completed: 1, minutes: 90 });
   assert.equal(before.task_blocks.length, 3, "UI cache changes do not mutate the original schedule");
 });
 
@@ -107,15 +108,13 @@ test("deletion with no loaded schedule does not manufacture a schedule", async (
   assert.equal(current.state.tasks[0].status, "deleted");
 });
 
-test("recycled task blocks never appear on past, current or future dates regardless of execution facts", () => {
-  for (const selectedDate of ["2026-10-21", date, "2026-10-23"]) {
-    for (const execution_status of ["planned", "completed", "not_started", "partial", "blocked", "cancelled"]) {
-      for (const review of [null, { outcome: "completed", notes: "保留的复盘记录" }]) {
-        const recycled = { ...block, task_status: "deleted", execution_status, review };
-        const before = structuredClone(recycled);
-        assert.deepEqual(visibleTaskScheduleBlocks([recycled, block], selectedDate, date), [block]);
-        assert.deepEqual(recycled, before, "hiding a block must preserve its recorded facts");
-      }
-    }
+test("recycled task blocks remain visible only on today or past dates", () => {
+  for (const selectedDate of ["2026-10-21", date]) {
+    const recycled = { ...block, task_status: "deleted" };
+    const before = structuredClone(recycled);
+    assert.deepEqual(visibleTaskScheduleBlocks([recycled, block], selectedDate, date), [recycled, block]);
+    assert.deepEqual(recycled, before, "showing the block must not mutate its saved facts");
   }
+  const future = { ...block, task_status: "deleted" };
+  assert.deepEqual(visibleTaskScheduleBlocks([future, block], "2026-10-23", date), [block]);
 });

@@ -194,3 +194,87 @@ test("day-view Saturday and Sunday digits stay red when selected without overrid
     assert.ok(contrast(colors["--color-red-ink"], bg) >= 4.5, `weekend on ${surface}`);
   }
 });
+
+test("light semantic surfaces share the task-priority 5% fill and 20% edge without changing ink or actions", () => {
+  const rules = [];
+  postcss.parse(css).walkRules(rule => rules.push(rule));
+  const rule = rules.find(rule => rule.selector === 'html:root:not([data-mode="dark"])');
+  assert.ok(rule, "light-only semantic palette");
+  const values = Object.fromEntries(rule.nodes.filter(node => node.type === "decl").map(node => [node.prop, node.value]));
+  const roles = ["blue", "plan", "green", "amber", "orange", "red", "teal", "gray", "purple", "pink", "yellow", "cyan"];
+  assert.equal(Object.keys(values).length, roles.length * 2, "only fills and edges change");
+  for (const role of roles) {
+    const ink = light[`--color-${role}-ink`];
+    assert.equal(values[`--color-${role}-bg`], `color-mix(in srgb, var(--color-${role}-ink) 5%, white)`);
+    assert.equal(values[`--color-${role}-edge`], `color-mix(in srgb, var(--color-${role}-ink) 20%, white)`);
+    const fill = "#" + ink.slice(1).match(/../g).map(channel => Math.round(parseInt(channel, 16) * .05 + 255 * .95).toString(16).padStart(2, "0")).join("");
+    assert.ok(contrast(ink, fill) >= 4.5, `${role} softened text contrast`);
+  }
+});
+
+test("task-page badges consume shared semantic colors without double tinting", () => {
+  const comfort = readFileSync(new URL("./task-comfort.css", import.meta.url), "utf8");
+  assert.doesNotMatch(comfort, /color-mix|--color-(?:\w+)-(?:bg|edge):/);
+  const tags = readFileSync(new URL("./task-tags.css", import.meta.url), "utf8");
+  assert.match(tags, /background: var\(--task-tag-bg/);
+  assert.match(css, /--status-bg: var\(--color-green-bg\)/);
+  assert.match(css, /--priority-medium-surface: var\(--color-amber-bg\)/);
+});
+
+test("light badge corners match without enlarging compact blocks or controls", () => {
+  const rules = [];
+  postcss.parse(css).walkRules(rule => rules.push(rule));
+  const rule = rules.find(rule => rule.selector.startsWith('html:root:not([data-mode="dark"]) :is('));
+  for (const badge of ["priority-badge", "timeline-fact-priority", "task-capsule-status", "terminal-task-status", "execution-status-badge", "confirmed-plan-status", "setting-state", "task-tag-chip", "task-list-tags > span"]) {
+    assert.ok(rule.selector.includes(`.${badge}`), badge);
+  }
+  const declarations = rule.nodes.filter(node => node.type === "decl");
+  assert.deepEqual(declarations.map(node => [node.prop, node.value]), [["border-radius", "5px"]]);
+});
+
+test("active recurring controls and overflow tags cannot bypass the shared light treatment", () => {
+  const rules = [];
+  postcss.parse(css).walkRules(rule => rules.push(rule));
+  const rule = rules.find(rule => rule.selector.includes('.task-list-tags > span:not([data-tag-color])'));
+  for (const selector of [".task-tag-option:has(input:checked)", ".recurring-weekday-btn.is-active", ".recurring-daily-tag", ".recurring-info-icon", ".apple-schedule-error"]) assert.ok(rule.selector.includes(selector), selector);
+  assert.equal(rule.nodes.find(node => node.prop === "background")?.value, "color-mix(in srgb, currentColor 5%, white)");
+  assert.equal(rule.nodes.find(node => node.prop === "border-color")?.value, "color-mix(in srgb, currentColor 20%, white)");
+  postcss.parse(readFileSync(new URL("./styles.css", import.meta.url), "utf8")).walkRules(rule => {
+    if (![".recurring-weekday-btn.is-active", ".recurring-type-card.is-active", ".recurring-editor-surface .recurring-weekday-btn.is-active"].includes(rule.selector)) return;
+    for (const node of rule.nodes) if (["background", "border", "border-color"].includes(node.prop)) assert.ok(!node.important, rule.selector);
+  });
+});
+
+test("day and week blocks restore original light surfaces without reverting shared badges", () => {
+  const rules = [];
+  postcss.parse(css).walkRules(rule => rules.push(rule));
+  function originalPair(selector, surface, edge, role) {
+    const rule = rules.find(rule => rule.selector === `html:root:not([data-mode="dark"]) ${selector}`);
+    assert.ok(rule, selector);
+    const values = Object.fromEntries(rule.nodes.map(node => [node.prop, node.value]));
+    assert.deepEqual(values, { [surface]: light[`--color-${role}-bg`], [edge]: light[`--color-${role}-edge`] });
+  }
+  originalPair('.today-page .timeline-event:is(.plan-draft-block, .execution-block)', '--state-plan-surface', '--state-plan-border', 'plan');
+  originalPair('.today-page .timeline-event.recurring-event', '--state-recurring-surface', '--state-recurring-border', 'teal');
+  originalPair('.today-page .timeline-event.fixed-event', 'background', 'border-color', 'gray');
+  for (const [outcome, role] of [['completed', 'green'], ['partial', 'cyan'], ['blocked', 'amber'], ['cancelled', 'gray'], ['not_started', 'amber']]) {
+    originalPair(`.today-page .timeline-event.execution-${outcome}`, '--execution-surface', '--execution-border', role);
+  }
+  const week = ':is(.week-timeline-event, .week-timeline-legend > span)';
+  for (const [suffix, role] of [['', 'plan'], ['.tone-completed', 'green'], ['.tone-partial', 'cyan'], [':is(.tone-blocked, .tone-not-started)', 'amber'], [':is(.tone-cancelled, .tone-fixed)', 'gray'], ['.tone-recurring', 'teal']]) {
+    originalPair(week + suffix, '--week-bg', '--week-edge', role);
+  }
+  assert.doesNotMatch(css, /--timeline-block-tone|14%, white|38%, white/);
+});
+
+test("toasts restore original light fills and edges without changing their ink or behavior", () => {
+  const rules = [];
+  postcss.parse(css).walkRules(rule => rules.push(rule));
+  for (const [suffix, role] of [['', 'blue'], ['.success', 'green'], ['.error', 'red']]) {
+    const rule = rules.find(rule => rule.selector === `html:root:not([data-mode="dark"]) .feedback-toast${suffix}`);
+    assert.ok(rule);
+    assert.deepEqual(Object.fromEntries(rule.nodes.map(node => [node.prop, node.value])), {
+      '--toast-surface': light[`--color-${role}-bg`], '--toast-edge': light[`--color-${role}-edge`]
+    });
+  }
+});

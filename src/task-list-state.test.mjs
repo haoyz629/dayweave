@@ -162,7 +162,7 @@ test("completion dialog supplies an optional separate note with length and busy 
   const html = renderToStaticMarkup(state.TaskCompletionDialog({ task: original, note: "本次完成备注", busy: false, error: null, onNoteChange() {}, onCancel() {}, onConfirm() {} }));
   assert.match(html, /选填/); assert.match(html, /maxLength="500"/i); assert.match(html, /本次完成备注/); assert.match(html, /确认完成/);
   assert.match(html, /完成任务/);
-  assert.match(html, /<h2 id="task-completion-title">原任务<\/h2>/);
+  assert.match(html, /<h2 id="task-completion-title" title="原任务">原任务<\/h2>/);
   assert.match(html, /aria-labelledby="task-completion-heading task-completion-title"/);
   assert.doesNotMatch(html, /后续未执行|执行记录会保留|aria-describedby|task-completion-description/);
   assert.match(html, /task-completion-count" aria-hidden="true">6 \/ 500<\/span><\/span><textarea/);
@@ -242,7 +242,8 @@ test("detail URL and note reuse the timeline copy control with complete independ
 test("detail typography, neutral timeline and completion modal are explicitly scoped", () => {
   const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
   assert.match(css, /\.ordinary-task-detail \{[^}]*font: 13px\/1\.6 var\(--jx-font-sans\)/);
-  assert.match(css, /\.ordinary-task-detail > header h2 \{[^}]*font-size: 26px;[^}]*line-height: 1\.45/);
+  const comfort = readFileSync(new URL("./task-comfort.css", import.meta.url), "utf8");
+  assert.match(comfort, /\.ordinary-task-detail > header h2 \{[^}]*font-size: 24px;[^}]*font-weight: 500;[^}]*line-height: 1\.5/);
   assert.match(css, /\.ordinary-task-detail \.task-detail-event \{[^}]*background: transparent/);
   assert.match(css, /\.ordinary-task-detail \.task-detail-event\[data-status="deleted"\]::after/);
   assert.match(css, /\.ordinary-task-detail \.task-detail-actions button\.task-compact-complete \{[^}]*border-color: #cbd9cd/);
@@ -251,7 +252,7 @@ test("detail typography, neutral timeline and completion modal are explicitly sc
   assert.match(css, /html\[data-mode="dark"\] \.task-inspector:has\(\.ordinary-task-detail\)/);
   assert.match(css, /\.task-completion-backdrop \{ padding: 16px;/);
   assert.match(text, /initialFocus="textarea:not\(:disabled\)"/);
-  assert.match(css, /\.task-completion-header h2 \{[^}]*font: 700 24px\/1\.45[^}]*overflow-wrap: anywhere/);
+  assert.match(comfort, /\.task-completion-header h2 \{[^}]*font-weight: 500;[^}]*white-space: nowrap;[^}]*text-overflow: ellipsis/);
   assert.match(css, /\.task-completion-header \.task-completion-heading \{[^}]*font-size: 14px/);
   assert.match(css, /\.task-completion-backdrop \.task-completion-actions \{[^}]*border: 0; background: var\(--task-detail-paper\)/);
   assert.match(css, /\.task-completion-backdrop \.task-completion-actions button \{[^}]*min-height: 44px/);
@@ -266,7 +267,7 @@ test("A detail keeps status above title and all tags, with boxed facts and links
     const task = { ...original, status, title: "完整任务标题".repeat(20), tags: ["开发", "长标签".repeat(20)], notes: "URL: https://example.com/docs\n\n多行备注\n第二行" };
     const before = structuredClone(task);
     const html = renderToStaticMarkup(React.createElement(state.TaskDetailContent, { task, metadata: { history: [] }, busy: false, onNewTask() {} }));
-    assert.match(html, /task-page-header[\s\S]*terminal-task-status[\s\S]*<\/header><section[^>]*ordinary-task-detail[\s\S]*<header><h2>/);
+    assert.match(html, /task-page-header[\s\S]*terminal-task-status[\s\S]*<\/header><section[^>]*ordinary-task-detail[\s\S]*<header><h2 title="/);
     const header = html.match(/<header>[\s\S]*?<\/header>/)?.[0] ?? "";
     assert.ok(header.includes(task.title));
     assert.match(header, /<\/h2><div class="task-list-tags" data-expanded="true">/);
@@ -277,7 +278,8 @@ test("A detail keeps status above title and all tags, with boxed facts and links
   }
   const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
   assert.match(css, /\.ordinary-task-detail > header \{ display: block;/);
-  assert.match(css, /\.ordinary-task-detail > header \.task-list-tags > span \{[^}]*max-width: 100%;[^}]*white-space: normal;[^}]*overflow-wrap: anywhere/);
+  const comfort = readFileSync(new URL("./task-comfort.css", import.meta.url), "utf8");
+  assert.match(comfort, /\.ordinary-task-detail > header \.task-list-tags > span \{[^}]*max-width: min\(100%, 180px\);[^}]*white-space: nowrap;[^}]*text-overflow: ellipsis/);
   assert.match(css, /\.ordinary-task-detail \.task-detail-facts \{[^}]*repeat\(2, minmax\(0, 1fr\)\)[^}]*border: 1px solid[^}]*border-radius: var\(--task-page-card-radius\)/);
   assert.match(css, /\.ordinary-task-detail \.task-detail-resources \{[^}]*border-radius: var\(--task-page-card-radius\)/);
 });
@@ -392,7 +394,7 @@ test("detail completion labels and confirmation titles distinguish multi-day fro
     assert.ok(details.includes(`>${label}</button>`));
     const dialog = renderToStaticMarkup(state.TaskCompletionDialog({ task, note: "", busy: false, error: null, onNoteChange() {}, onCancel() {}, onConfirm() {} }));
     assert.ok(dialog.includes(`id="task-completion-heading">${label}</p>`));
-    assert.ok(dialog.includes(`<h2 id="task-completion-title">${task.title}</h2>`));
+    assert.ok(dialog.includes(`<h2 id="task-completion-title" title="${task.title}">${task.title}</h2>`));
     const calls = [];
     Object.assign(state, { selectedTask: task, selectedMetadata: null, resultNow: now, busy: false, requestTaskChange: action => calls.push(action) });
     const button = vm.runInContext(compile(`(${editableCompletionButton});`), context);

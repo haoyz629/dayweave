@@ -202,6 +202,40 @@ html:root[data-mode="dark"] {
 html:root[data-theme="github"][data-mode="light"] { --color-canvas: #eef2f6; --color-group: #f6f8fa; --color-panel: #ffffff; --color-raised: #ffffff; }
 html:root[data-theme="codex"][data-mode="light"] { --color-canvas: #edf1f5; --color-group: #f5f7fa; --color-panel: #ffffff; --color-raised: #ffffff; }
 
+/* Match the task-page priority treatment; keep ink, solid actions and date selection intact. */
+html:root:not([data-mode="dark"]) {
+  --color-blue-bg: color-mix(in srgb, var(--color-blue-ink) 5%, white);
+  --color-blue-edge: color-mix(in srgb, var(--color-blue-ink) 20%, white);
+  --color-plan-bg: color-mix(in srgb, var(--color-plan-ink) 5%, white);
+  --color-plan-edge: color-mix(in srgb, var(--color-plan-ink) 20%, white);
+  --color-green-bg: color-mix(in srgb, var(--color-green-ink) 5%, white);
+  --color-green-edge: color-mix(in srgb, var(--color-green-ink) 20%, white);
+  --color-amber-bg: color-mix(in srgb, var(--color-amber-ink) 5%, white);
+  --color-amber-edge: color-mix(in srgb, var(--color-amber-ink) 20%, white);
+  --color-orange-bg: color-mix(in srgb, var(--color-orange-ink) 5%, white);
+  --color-orange-edge: color-mix(in srgb, var(--color-orange-ink) 20%, white);
+  --color-red-bg: color-mix(in srgb, var(--color-red-ink) 5%, white);
+  --color-red-edge: color-mix(in srgb, var(--color-red-ink) 20%, white);
+  --color-teal-bg: color-mix(in srgb, var(--color-teal-ink) 5%, white);
+  --color-teal-edge: color-mix(in srgb, var(--color-teal-ink) 20%, white);
+  --color-gray-bg: color-mix(in srgb, var(--color-gray-ink) 5%, white);
+  --color-gray-edge: color-mix(in srgb, var(--color-gray-ink) 20%, white);
+  --color-purple-bg: color-mix(in srgb, var(--color-purple-ink) 5%, white);
+  --color-purple-edge: color-mix(in srgb, var(--color-purple-ink) 20%, white);
+  --color-pink-bg: color-mix(in srgb, var(--color-pink-ink) 5%, white);
+  --color-pink-edge: color-mix(in srgb, var(--color-pink-ink) 20%, white);
+  --color-yellow-bg: color-mix(in srgb, var(--color-yellow-ink) 5%, white);
+  --color-yellow-edge: color-mix(in srgb, var(--color-yellow-ink) 20%, white);
+  --color-cyan-bg: color-mix(in srgb, var(--color-cyan-ink) 5%, white);
+  --color-cyan-edge: color-mix(in srgb, var(--color-cyan-ink) 20%, white);
+}
+
+/* Compact timeline labels retain their height; only sibling badge corners are unified. */
+html:root:not([data-mode="dark"]) :is(.task-type-badge, .timeline-fact-type, .priority-badge, .timeline-fact-priority, .task-capsule-status, .task-compact-status, .terminal-task-status, .execution-status-badge, .confirmed-plan-status, .setting-state, .task-tag-chip, .task-list-tags > span, .week-timeline-detail-list article > div > span),
+html:root:not([data-mode="dark"]) .desktop-app .today-page .timeline-heading-plan-status .confirmed-plan-status {
+  border-radius: 5px;
+}
+
 html:root body { color: var(--color-ink); background: var(--color-canvas); }
 html:root ::selection { color: var(--color-selected-ink); background: var(--color-selected-bg); }
 html:root ::-webkit-scrollbar-thumb { background: var(--color-gray-edge); border-color: var(--color-canvas); }
@@ -296,6 +330,23 @@ html:root .timeline-event.recurring-event { --state-recurring: var(--color-teal-
 html:root .timeline-event.fixed-event { color: var(--color-gray-ink); border-color: var(--color-gray-edge); background: var(--color-gray-bg); }
 html:root .timeline-event.execution-block:is(.captured, .reviewed) { color: var(--execution-color); border-color: var(--execution-border); background: var(--execution-surface); }
 html:root .timeline-event.execution-block:is(.captured, .reviewed):hover { border-color: var(--execution-color); background: var(--execution-surface); }
+
+/* Restore original block colors locally; badges keep the shared light palette. */
+html:root:not([data-mode="dark"]) .today-page .timeline-event:is(.plan-draft-block, .execution-block) { --state-plan-surface: #d6f2fa; --state-plan-border: #8acddd; }
+html:root:not([data-mode="dark"]) .today-page .timeline-event.recurring-event { --state-recurring-surface: #d3efec; --state-recurring-border: #8fcec6; }
+html:root:not([data-mode="dark"]) .today-page .timeline-event.fixed-event { background: #e4e9f0; border-color: #bac5d3; }
+html:root:not([data-mode="dark"]) .today-page .timeline-event.execution-completed { --execution-surface: #d6f2e3; --execution-border: #95d5b2; }
+html:root:not([data-mode="dark"]) .today-page .timeline-event.execution-partial { --execution-surface: #d7f1f7; --execution-border: #729eac; }
+html:root:not([data-mode="dark"]) .today-page .timeline-event.execution-blocked { --execution-surface: #ffedbf; --execution-border: #e8c66b; }
+html:root:not([data-mode="dark"]) .today-page .timeline-event.execution-cancelled { --execution-surface: #e4e9f0; --execution-border: #bac5d3; }
+html:root:not([data-mode="dark"]) .today-page .timeline-event.execution-not_started { --execution-surface: #ffedbf; --execution-border: #e8c66b; }
+html:root:not([data-mode="dark"]) :is(.week-timeline-event, .week-timeline-legend > span) { --week-bg: #d6f2fa; --week-edge: #8acddd; }
+html:root:not([data-mode="dark"]) :is(.week-timeline-event, .week-timeline-legend > span).tone-completed { --week-bg: #d6f2e3; --week-edge: #95d5b2; }
+html:root:not([data-mode="dark"]) :is(.week-timeline-event, .week-timeline-legend > span).tone-partial { --week-bg: #d7f1f7; --week-edge: #729eac; }
+html:root:not([data-mode="dark"]) :is(.week-timeline-event, .week-timeline-legend > span):is(.tone-blocked, .tone-not-started) { --week-bg: #ffedbf; --week-edge: #e8c66b; }
+html:root:not([data-mode="dark"]) :is(.week-timeline-event, .week-timeline-legend > span):is(.tone-cancelled, .tone-fixed) { --week-bg: #e4e9f0; --week-edge: #bac5d3; }
+html:root:not([data-mode="dark"]) :is(.week-timeline-event, .week-timeline-legend > span).tone-recurring { --week-bg: #d3efec; --week-edge: #8fcec6; }
+
 html:root .timeline-event-check.done::before { border-color: var(--color-green-solid); background: var(--color-green-solid); }
 html:root :is(.timeline-nonworking, .time-rail-break) { color: var(--color-gray-ink); border-color: var(--color-gray-edge); background-color: var(--color-gray-bg); }
 html:root .timeline-nonworking { background-image: repeating-linear-gradient(135deg, transparent 0 7px, var(--color-gray-edge) 7px 8px); }
@@ -346,6 +397,9 @@ html:root :is(.selection-create-track, .selection-range) { color: var(--color-se
 html:root .feedback-toast { --toast-surface: var(--color-blue-bg); --toast-edge: var(--color-blue-edge); --toast-ink: var(--color-blue-ink); --toast-secondary: var(--color-blue-ink); --notice-dot: var(--color-blue-ink); }
 html:root .feedback-toast.success { --toast-surface: var(--color-green-bg); --toast-edge: var(--color-green-edge); --toast-ink: var(--color-green-ink); --toast-secondary: var(--color-green-ink); --notice-dot: var(--color-green-ink); }
 html:root .feedback-toast.error { --toast-surface: var(--color-red-bg); --toast-edge: var(--color-red-edge); --toast-ink: var(--color-red-ink); --toast-secondary: var(--color-red-ink); --notice-dot: var(--color-red-ink); }
+html:root:not([data-mode="dark"]) .feedback-toast { --toast-surface: #dceaff; --toast-edge: #9fc2ff; }
+html:root:not([data-mode="dark"]) .feedback-toast.success { --toast-surface: #d6f2e3; --toast-edge: #95d5b2; }
+html:root:not([data-mode="dark"]) .feedback-toast.error { --toast-surface: #ffdde2; --toast-edge: #efa2b0; }
 html:root .feedback-confirm { --confirm-tone: var(--color-blue-ink); --confirm-border: var(--color-blue-edge); --confirm-surface: var(--color-blue-bg); }
 html:root .feedback-confirm.caution { --confirm-tone: var(--color-amber-ink); --confirm-border: var(--color-amber-edge); --confirm-surface: var(--color-amber-bg); }
 html:root .feedback-confirm.danger { --confirm-tone: var(--color-red-ink); --confirm-border: var(--color-red-edge); --confirm-surface: var(--color-red-bg); }
@@ -423,3 +477,20 @@ html:root .today-page .today-month-sheet .month-grid > button.today .solar-day-n
 html:root .apple-date-grid button.selected { color: #ffffff; background: var(--color-primary); }
 html:root .schedule-picker-calendar .apple-date-grid button.today::after,
 html:root .apple-date-grid button.today::after { background: var(--today-red); }
+
+/* Active legacy controls retain their ink and geometry, but no longer carry separate tints. */
+html:root:not([data-mode="dark"]) :is(.task-list-tags > span:not([data-tag-color]), .task-tag-chip:not([data-tag-color]), .task-tag-option:has(input:checked), .recurring-daily-tag, .recurring-info-icon, .recurring-weekday-btn.is-active, .recurring-type-card.is-active .recurring-type-icon.is-recurring, .recurring-outcome-picker button[aria-pressed="true"], .holiday-coverage.missing, .work-state, .apple-schedule-error, .task-action-discard:hover:not(:disabled), .task-action-save-draft:hover:not(:disabled), .task-action-save-draft.is-saving) {
+  background: color-mix(in srgb, currentColor 5%, white);
+  border-color: color-mix(in srgb, currentColor 20%, white);
+}
+html:root:not([data-mode="dark"]) .recurring-daily-tag { border-radius: 5px; }
+html:root:not([data-mode="dark"]) .recurring-type-card.is-active {
+  background: color-mix(in srgb, #6d28d9 5%, white);
+  border-color: color-mix(in srgb, #6d28d9 20%, white);
+}
+html:root:not([data-mode="dark"]) :is(.schedule-boundary-field.time.is-invalid, .schedule-picker-rows .schedule-time-control.is-invalid) .schedule-boundary-time-control {
+  background: var(--color-red-bg);
+  border-color: var(--color-red-edge);
+}
+/* Disabled primary actions are neutral controls, not semantic content blocks. */
+html:root:not([data-mode="dark"]) .schedule-picker-confirm:disabled { background: #e4e9f0; }

@@ -2120,7 +2120,7 @@ function TaskDetailContent({ task, metadata, children, busy, onNewTask, onBack }
   return <>
     <TaskPageHeader task={task} onBack={onBack} busy={busy} />
     <section className="terminal-task-detail ordinary-task-detail" aria-label={task.status === "deleted" ? "回收站任务详情" : "任务只读详情"}>
-    <header><h2>{task.title}</h2><TaskTagList tags={task.tags} expanded /></header>
+      <header><h2 title={task.title}>{task.title}</h2><TaskTagList tags={task.tags} expanded /></header>
     <dl className="task-detail-facts" aria-label="任务基本信息">
       <div><dt><Icon name="calendar" size={14} />最早开始</dt><dd>{boundary(task.earliest_start_date, task.earliest_start_time)}</dd></div>
       <div><dt><Icon name="clock" size={14} />截止时间</dt><dd>{boundary(task.due_date, task.due_time)}</dd></div>
@@ -2268,7 +2268,7 @@ function RecurringItemDetails({ item, busy, onEdit, onPause, onResume, onEnd, on
   return <>
     <TaskPageHeader task={item} busy={busy} onBack={onBack} />
     <section className="terminal-task-detail ordinary-task-detail" aria-label="重复事项只读详情">
-      <header><h2>{item.title}</h2><TaskTagList tags={item.tags} expanded /></header>
+      <header><h2 title={item.title}>{item.title}</h2><TaskTagList tags={item.tags} expanded /></header>
       <dl className="task-detail-facts" aria-label="重复事项基本信息">
         <div><dt><Icon name="restore" size={14} />重复规则</dt><dd><SeparatedCopy text={recurringScheduleLabel(item)} /></dd></div>
         <div><dt><Icon name="calendar" size={14} />有效日期</dt><dd>{item.starts_on} 至 {item.ends_on ?? "长期"}</dd></div>
@@ -2294,7 +2294,7 @@ function DeletedRecurringItemDetails({ item, children, busy = false, onBack }: {
   return <>
     <TaskPageHeader task={item} busy={busy} onBack={onBack} />
     <section className="terminal-task-detail ordinary-task-detail recycled-task-detail" aria-label="回收站重复事项详情">
-    <header><h2>{item.title}</h2><TaskTagList tags={item.tags} expanded /></header>
+    <header><h2 title={item.title}>{item.title}</h2><TaskTagList tags={item.tags} expanded /></header>
     <dl className="task-detail-facts" aria-label="重复事项基本信息">
       <div><dt><Icon name="restore" size={14} />重复规则</dt><dd><SeparatedCopy text={recurringScheduleLabel(item)} /></dd></div>
       <div><dt><Icon name="calendar" size={14} />有效日期</dt><dd>{item.starts_on} 至 {item.ends_on ?? "长期"}</dd></div>
@@ -2315,7 +2315,7 @@ function EndedRecurringItemDetails({ item, busy, onTrash, onBack }: {
   return <>
     <TaskPageHeader task={item} busy={busy} onBack={onBack} />
     <section className="terminal-task-detail ordinary-task-detail" aria-label="已结束重复事项详情">
-    <header><h2>{item.title}</h2><TaskTagList tags={item.tags} expanded /></header>
+    <header><h2 title={item.title}>{item.title}</h2><TaskTagList tags={item.tags} expanded /></header>
     <p className="terminal-task-help">该事项不会再出现，过去的记录仍会保留。现在可以将它移入回收站。</p>
     <dl className="task-detail-facts">
       <div><dt>重复规则</dt><dd><SeparatedCopy text={recurringScheduleLabel(item)} /></dd></div>
@@ -2367,7 +2367,7 @@ function TaskCompletionDialog({ task, note, busy, error, onNoteChange, onCancel,
   return <div className="dialog-backdrop task-completion-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
     <ConfirmationDialog role="dialog" aria-modal="true" aria-labelledby="task-completion-heading task-completion-title" initialFocus="textarea:not(:disabled)" busy={busy} onCancel={onCancel}>
       <form onSubmit={(event) => { event.preventDefault(); if (!busy) onConfirm(); }}>
-        <header className="task-completion-header"><p className="task-completion-heading" id="task-completion-heading">{task.earliest_start_date && task.due_date && task.earliest_start_date < task.due_date ? "完成整个任务" : "完成任务"}</p><h2 id="task-completion-title">{task.title}</h2></header>
+        <header className="task-completion-header"><p className="task-completion-heading" id="task-completion-heading">{task.earliest_start_date && task.due_date && task.earliest_start_date < task.due_date ? "完成整个任务" : "完成任务"}</p><h2 id="task-completion-title" title={task.title}>{task.title}</h2></header>
         <div className="task-completion-body">
           <label className="task-completion-note"><span><span>备注 <small>选填</small></span><span className="task-completion-count" aria-hidden="true">{note.length} / 500</span></span><textarea autoFocus value={note} maxLength={500} disabled={busy} placeholder="记录完成情况…" onChange={(event) => onNoteChange(event.target.value)} /></label>
           {error && <p className="task-completion-error" role="alert">{error}</p>}
@@ -3783,11 +3783,11 @@ function TaskWorkspace({
                   <div className="create-type-switch" role="radiogroup" aria-label="创建类型" data-autosaving={draftSaving && !busy}>
                     <button type="button" role="radio" disabled={busy || draftSaving} aria-checked={createItemType === "task"} onClick={() => requestCreateItemType("task")}>
                       <Icon name="tasks" size={16} />
-                      <span><strong>普通任务</strong><small>创建后自动安排，跨日按每日投入分配</small></span>
+                      <span><strong>普通任务</strong></span>
                     </button>
                     <button type="button" role="radio" disabled={busy || draftSaving} aria-checked={createItemType === "recurring"} onClick={() => requestCreateItemType("recurring")}>
                       <Icon name="restore" size={16} />
-                      <span><strong>重复事项</strong><small>按规则展示，无需勾选</small></span>
+                      <span><strong>重复事项</strong></span>
                     </button>
                   </div>
                 )}
@@ -6893,7 +6893,10 @@ export default function App() {
   const completedPlannedTaskCount = summaryTaskBlocks.filter((block) => (block.review?.outcome ?? block.execution_status) === "completed").length;
   const plannedMinutes = summaryTaskBlocks.reduce((total, block) => total + Math.round((new Date(block.ends_at).getTime() - new Date(block.starts_at).getTime()) / 60000), 0);
   const planProgress = plannedTaskCount ? Math.round(completedPlannedTaskCount / plannedTaskCount * 100) : 100;
-  const recurringItemCount = recurringOccurrences.filter((item) => item.occurrence_date === selectedDate).length;
+  const summaryRecurringOccurrences = recurringOccurrences.filter((item) => item.occurrence_date === selectedDate);
+  const recurringItemCount = summaryRecurringOccurrences.length;
+  const completedRecurringItemCount = summaryRecurringOccurrences.filter((item) => item.outcome === "completed").length;
+  const recurringProgress = recurringItemCount ? Math.round(completedRecurringItemCount / recurringItemCount * 100) : 100;
 
   useLayoutEffect(() => {
     const previousPage = previousPageRef.current;
@@ -7259,7 +7262,9 @@ export default function App() {
           <div className="sidebar-plan-row"><span>任务计划</span><strong>{completedPlannedTaskCount} / {plannedTaskCount}</strong></div>
           <div className="sidebar-plan-track" role="progressbar" aria-label="任务计划完成进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={planProgress}><span style={{ width: `${planProgress}%` }} /></div>
           <div className="sidebar-plan-meta"><span>{plannedMinutes} 分钟已安排</span><span>完成{planProgress}%</span></div>
-          <div className="sidebar-repeat-row"><span>重复事项</span><strong>{recurringItemCount} 项</strong></div>
+          <div className="sidebar-repeat-row"><span>重复事项</span><strong>{completedRecurringItemCount} / {recurringItemCount}</strong></div>
+          <div className="sidebar-plan-track" role="progressbar" aria-label="重复事项完成进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={recurringProgress} aria-valuetext={`已完成 ${completedRecurringItemCount} 次，共 ${recurringItemCount} 次`}><span style={{ width: `${recurringProgress}%` }} /></div>
+          <div className="sidebar-plan-meta"><span>本次已完成</span><span>完成{recurringProgress}%</span></div>
         </section>
         {(tasksLoading || tasksError) && <span className={`database-state${tasksError ? " unavailable" : ""}`} role="status"><i />{tasksLoading ? "正在载入本地数据" : "本地数据暂时不可用"}</span>}
       </footer>

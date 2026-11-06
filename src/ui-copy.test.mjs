@@ -236,7 +236,7 @@ test("recycle cleanup stays beside permanent deletion and task headings omit eve
   const content = appSource.slice(appSource.indexOf("function TaskDetailContent("), appSource.indexOf("function DeletedTaskDetails("));
   const heading = content.match(/<section[^>]*ordinary-task-detail[\s\S]*?<header>[\s\S]*?<\/header>/)?.[0];
   assert.ok(heading);
-  assert.match(heading, /<h2>\{task.title\}<\/h2>/);
+  assert.match(heading, /<h2 title=\{task.title\}>\{task.title\}<\/h2>/);
   assert.doesNotMatch(heading, /<time\b|task\.(?:completed_at|deleted_at|updated_at)|完成时间|移入时间|事件时间/);
   assert.match(content, /<dt><Icon name="clock" size=\{14\} \/>截止时间/);
   assert.match(content, /task\.priority && <div><dt><Icon name="deadline" size=\{14\} \/>优先级/);

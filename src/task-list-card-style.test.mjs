@@ -16,6 +16,14 @@ function declarations(selector) {
   assert.ok(Object.keys(values).length, `Missing selector: ${selector}`);
   return values;
 }
+function approvedDeclarations(ending) {
+  const values = {};
+  postcss.parse(readFileSync(new URL("./task-comfort.css", import.meta.url), "utf8")).walkRules(rule => {
+    if (rule.selector.endsWith(ending)) rule.walkDecls(decl => { values[decl.prop] = decl.value; });
+  });
+  assert.ok(Object.keys(values).length, ending);
+  return values;
+}
 
 test("compact cards use list-scoped spacing, rounded borders and distinct selection", () => {
   const row = declarations(`${list} .ledger-row.task-capsule-row`);
@@ -24,11 +32,11 @@ test("compact cards use list-scoped spacing, rounded borders and distinct select
   assert.equal(row.border, "1px solid var(--task-card-border)");
   assert.equal(row["border-radius"], "14px");
   assert.equal(row.background, "var(--task-card-bg)");
-  assert.equal(declarations(`${list} .task-capsule-content`).padding, "10px 10px 8px");
+  assert.equal(approvedDeclarations(".task-capsule-content").padding, "12px");
   const selected = declarations(`${list} .ledger-row.task-capsule-row.selected`);
   assert.equal(selected["border-color"], "var(--task-card-selected-border)");
   assert.equal(selected.background, "var(--task-card-selected-bg)");
-  assert.notEqual(selected["box-shadow"], "none");
+  assert.equal(approvedDeclarations(".ledger-row.task-capsule-row:is(.selected, :hover)")["box-shadow"], "none");
 });
 
 test("every card palette token is local to the list and has a dark value", () => {
@@ -47,14 +55,14 @@ test("every card palette token is local to the list and has a dark value", () =>
   });
 });
 
-test("single-line titles reserve room for metadata, not quick actions", () => {
-  const heading = declarations(`${list} .task-capsule-heading`);
-  assert.equal(heading["flex-wrap"], "nowrap");
+test("single-line titles get a full row and metadata stays below, not beside quick actions", () => {
+  const heading = approvedDeclarations(".task-capsule-heading");
+  assert.equal(heading["flex-wrap"], "wrap");
   assert.equal(heading["padding-right"], undefined);
   const title = declarations(".task-capsule-heading > strong");
   assert.equal(title["text-overflow"], "ellipsis");
   assert.equal(title["white-space"], "nowrap");
-  assert.equal(declarations(`${list} .task-capsule-heading-meta`)["max-width"], "62%");
+  assert.equal(approvedDeclarations(".task-capsule-heading-meta")["max-width"], "100%");
   assert.equal(declarations(`${list} .task-capsule-heading > strong`)["font-size"], "15px");
   assert.match(app, /sourceType === "ai_assistant" && <span/);
   assert.doesNotMatch(app, /aria-label=\{sourceType === "ai_assistant" \? "AI 创建" : "手动创建"/);

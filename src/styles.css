@@ -2137,8 +2137,10 @@ html[data-mode="dark"] .task-skeleton-card::after { background: linear-gradient(
   background: var(--jx-surface, #f8fafc);
 }
 .recurring-weekday-btn.is-active {
-  border: 2px solid #7c3aed !important;
-  background: #f5f3ff !important;
+  border-width: 2px !important;
+  border-style: solid !important;
+  border-color: #7c3aed;
+  background: #f5f3ff;
   color: #6d28d9 !important;
   font-weight: 700 !important;
   box-shadow: 0 1px 2px rgba(124, 58, 237, 0.08);
@@ -2388,8 +2390,10 @@ html[data-mode="dark"] .task-skeleton-card::after { background: linear-gradient(
   background: #f9fafb;
 }
 .recurring-type-card.is-active {
-  border: 2px solid #7c3aed !important;
-  background: #faf8ff !important;
+  border-width: 2px !important;
+  border-style: solid !important;
+  border-color: #7c3aed;
+  background: #faf8ff;
   box-shadow: 0 1px 3px rgba(124, 58, 237, 0.08);
 }
 .recurring-type-icon {
@@ -6443,9 +6447,9 @@ html[data-mode="dark"] .task-compact-body .apple-schedule-values button.is-activ
   box-shadow: none;
 }
 .recurring-editor-surface .recurring-weekday-btn.is-active {
-  border-color: var(--repeat-accent) !important;
+  border-color: var(--repeat-accent);
   color: var(--repeat-accent) !important;
-  background: var(--repeat-selected) !important;
+  background: var(--repeat-selected);
 }
 .recurring-editor-surface .recurring-monthly-info { align-items: flex-start; color: var(--jx-ink-soft); line-height: 1.6; }
 .recurring-editor-surface .recurring-info-icon { margin-top: 1px; color: var(--repeat-accent); background: var(--repeat-selected); }
@@ -7033,7 +7037,7 @@ html[data-mode="dark"] .sidebar-summary-card { --state-plan: #bdc9ff; }
 .sidebar-plan-track > span { display: block; height: 100%; border-radius: inherit; background: var(--jx-ink); }
 .sidebar-plan-meta { color: var(--jx-muted); font-size: 10px; }
 .sidebar-repeat-row { margin-top: 9px; padding-top: 7px; border-top: 1px solid var(--jx-edge-soft); }
-.sidebar-repeat-row strong { color: var(--jx-ink) !important; font: 600 11px/1.4 var(--jx-font-sans); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sidebar-repeat-row strong { color: var(--jx-ink) !important; font: 600 11px/1.4 var(--jx-font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 @media (min-width:861px) {
   .sidebar-collapsed .next-sidebar .next-create { display: flex; width: 40px; height: 44px; min-height: 44px; padding: 0; justify-content: center; }
   .sidebar-collapsed .next-sidebar nav { --sidebar-nav-height: 44px; --sidebar-nav-step: 52px; width: 100%; }

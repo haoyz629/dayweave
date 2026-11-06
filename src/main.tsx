@@ -4,6 +4,7 @@ import App from "./App";
 import "./styles.css";
 import "./color-system.css";
 import "./app-titlebar.css";
+import "./task-comfort.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

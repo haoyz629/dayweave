@@ -95,6 +95,14 @@ function editor({ saved = true } = {}) {
 
 async function save(state) { return state.persistCurrentTaskDraft(false, true); }
 
+test("creation type choices show only their concise names", () => {
+  const markup = source.text.match(/<div className="create-type-switch"[\s\S]*?<\/div>/)?.[0];
+  assert.ok(markup);
+  assert.match(markup, /<strong>普通任务<\/strong>/);
+  assert.match(markup, /<strong>重复事项<\/strong>/);
+  assert.doesNotMatch(markup, /<small>/);
+});
+
 test("switches and autosaves preserve one capsule and its original draft id", async () => {
   for (const saved of [true, false]) {
     const { state, db } = editor({ saved });

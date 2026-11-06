@@ -1,0 +1,200 @@
+/* Approved task-page A: light-only, shared across categories and lifecycle states.
+   Keep calendar, navigation, semantic ink and editable control behavior unchanged. */
+html:root:not([data-mode="dark"]) .next-workspace .tasks-workspace {
+  background: #f4f5f7;
+  --color-canvas: #f4f5f7;
+  --color-edge: #dce1e8;
+}
+html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger {
+  --task-workspace-bg: #f4f5f7;
+  --task-workspace-divider: #dce1e8;
+}
+html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list {
+  --task-card-border: #dce1e8;
+  --task-card-hover-border: #bac7db;
+  --task-card-selected-border: #9aafd1;
+  --task-card-bg: #fff;
+  --task-card-hover-bg: #f9fafc;
+  --task-card-selected-bg: #edf2fa;
+  --task-card-title: #253247;
+  --task-card-selected-title: #234c8a;
+  --task-card-note: #58667a;
+  --task-card-muted: #5e6b7d;
+  --task-card-divider: #e8ebf0;
+  --task-card-deadline: #58667a;
+  --task-card-icon: #65758b;
+}
+html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list .task-capsule-content { padding: 12px; }
+html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list .task-capsule-heading { flex-wrap: wrap; gap: 8px; }
+html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list .task-capsule-heading > strong {
+  flex: 1 1 100%;
+  width: 100%;
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list .task-capsule-heading-meta { max-width: 100%; width: 100%; gap: 4px; }
+html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list .task-capsule-notes { margin-top: 8px; font-size: 14px; line-height: 20px; }
+html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list .task-capsule-footer { margin-top: 8px; padding-top: 8px; gap: 8px; font-size: 12px; line-height: 20px; }
+html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list .task-capsule-heading .priority-badge { height: 24px; min-height: 24px; font-size: 12px; font-weight: 400; line-height: 22px; }
+html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list .ledger-row.task-capsule-row,
+html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list .ledger-row.task-capsule-row:is(.selected, :hover) { box-shadow: none; }
+
+/* All read-only ordinary, recurring and recycled details share this surface. */
+html:root:not([data-mode="dark"]) .tasks-workspace .task-inspector:has(.ordinary-task-detail) {
+  --task-detail-ink: #29374a;
+  --task-detail-title: #253247;
+  --task-detail-muted: #626f81;
+  --task-detail-label: #626f81;
+  --task-detail-secondary: #58667a;
+  --task-detail-time: #626f81;
+  --task-detail-line: #dce1e8;
+  --task-detail-soft-line: #e8ebf0;
+}
+html:root:not([data-mode="dark"]) .tasks-workspace :is(.task-queue-header, .task-tag-filter) { --jx-edge: #dce1e8; --jx-edge-soft: #dce1e8; }
+html:root:not([data-mode="dark"]) .tasks-workspace .task-list-tags > span { font-size: 12px; font-weight: 400; line-height: 18px; }
+html:root:not([data-mode="dark"]) .tasks-workspace .task-capsule-status { font-size: 12px; font-weight: 400; }
+html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail { font-size: 14px; }
+html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail > header h2 {
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+}
+html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail > header .task-list-tags > span {
+  max-width: min(100%, 180px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+}
+html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail :is(.task-detail-note, .task-detail-url) { font-size: 14px; line-height: 24px; }
+html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail :is(.task-detail-facts dt, .task-detail-unit, .priority-badge, .task-detail-history-count, .task-detail-event-top time) { font-size: 12px; }
+html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail :is(.task-detail-section-heading, .task-detail-history > summary, .task-detail-event-top) { font-size: 14px; font-weight: 500; }
+html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail .task-detail-actions button { font-size: 12px; font-weight: 500; }
+html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail .task-detail-timeline { background: white; }
+html:root:not([data-mode="dark"]) .tasks-workspace .task-page-header .terminal-task-status { font-weight: 500; }
+html:root:not([data-mode="dark"]) .tasks-workspace .task-tag-filter > label { font-size: 12px; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(button, a, input, select):focus-visible { outline: 2px solid #3168dc; outline-offset: 2px; }
+
+/* Creation, saved drafts and both editors: same quiet type, no input clamping. */
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-compact-body :is(.task-title-input, .recurring-title-field .recurring-modal-input) {
+  color: #253247;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs :is(input, textarea) {
+  color: #29374a;
+  font-size: 14px;
+  line-height: 24px;
+}
+html:root:not([data-mode="dark"]) .task-completion-backdrop .task-completion-header h2 {
+  font-weight: 500;
+  letter-spacing: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+}
+
+/* Approved form polish: ordinary/recurring creation and editing stay in one rhythm. */
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) { animation: none; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-compact-body {
+  justify-content: flex-start;
+  gap: 16px;
+  padding: 24px;
+}
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) :is(.task-content-region .task-content-fields, .task-planning-section, .task-notes-region .task-content-fields, .recurring-editor-surface .recurring-card, .recurring-editor-surface .recurring-optional-notes.is-expanded .recurring-notes-panel) { padding: 16px; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-title-heading-row { flex-wrap: nowrap; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-title-heading-row > .task-title-input { flex-basis: 0; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-title-controls {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  width: auto;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-title-controls .priority-select-control { margin-left: 0; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-compact-body :is(.task-title-input, .recurring-title-field .recurring-modal-input) {
+  height: 36px;
+  min-height: 36px;
+  line-height: 24px;
+}
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-planning-section {
+  flex: none;
+  max-height: none;
+}
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-planning-section .apple-schedule-editor > header { margin-bottom: 16px; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .apple-schedule-rows { justify-content: flex-start; gap: 12px; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .recurring-editor-surface { gap: 16px; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .recurring-editor-surface .recurring-repeat-rules-card { flex: none; gap: 16px; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) :is(.apple-schedule-compact-title, .recurring-modal-section-title) { font-size: 14px; font-weight: 500; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) :is(.recurring-inline-label, .recurring-validity-label, .apple-schedule-label) { font-size: 13px; font-weight: 500; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) :is(.recurring-inline-preview, .task-draft-save-state) { font-size: 12px; font-weight: 400; line-height: 20px; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) :is(.task-notes-region, .recurring-optional-notes.is-expanded) {
+  flex: 1 0 180px;
+  height: auto;
+  min-height: 180px;
+}
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs {
+  grid-template-columns: 16px 32px minmax(0, 1fr);
+  grid-template-rows: 28px 1px minmax(80px, 1fr);
+  column-gap: 8px;
+  row-gap: 12px;
+}
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs > label.sr-only {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  clip: auto;
+  clip-path: none;
+  grid-column: 2;
+  align-self: start;
+  color: #58667a;
+  font-size: 12px;
+  line-height: 24px;
+  font-weight: 400;
+}
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs > label:first-of-type { grid-row: 1; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs > label:last-of-type { grid-row: 3; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs > :is(input, textarea) { grid-column: 3; width: 100%; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs > input { height: 28px; }
+html:root:not([data-mode="dark"]) .tasks-workspace #new-task-form .recurring-optional-notes.is-expanded .task-notes-inputs > input { width: calc(100% - 48px); }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs > svg { margin-top: 4px; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) > .task-compact-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 24px;
+}
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) :is(.task-compact-lifecycle, .task-compact-primary-actions) { flex-wrap: wrap; gap: 8px; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-compact-primary-actions { margin-left: auto; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-compact-actions button {
+  min-height: 36px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: color 160ms cubic-bezier(.22, 1, .36, 1), background-color 160ms cubic-bezier(.22, 1, .36, 1), border-color 160ms cubic-bezier(.22, 1, .36, 1);
+}
+@container inspector (max-width: 560px) {
+  html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-compact-body { padding: 16px; }
+  html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) > .task-compact-actions { padding: 12px 16px; }
+}
+@container inspector (max-width: 440px) {
+  html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) > .task-compact-actions { flex-direction: column-reverse; align-items: stretch; }
+  html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-compact-primary-actions { width: 100%; justify-content: flex-end; }
+}

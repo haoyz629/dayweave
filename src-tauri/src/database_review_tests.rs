@@ -26,7 +26,7 @@ fn review(block_id: &str, minutes: Option<i64>) -> ReviewEntryInput {
 }
 
 fn capture(block_id: &str) -> ExecutionCaptureInput {
-    ExecutionCaptureInput { plan_block_id: block_id.into(), outcome: ReviewOutcome::Partial, note: Some("original capture".into()) }
+    ExecutionCaptureInput { plan_block_id: block_id.into(), outcome: Some(ReviewOutcome::Partial), note: Some("original capture".into()) }
 }
 
 fn occurrence(database: &mut Database, date: &str) -> String {
@@ -38,7 +38,7 @@ fn occurrence(database: &mut Database, date: &str) -> String {
 }
 
 fn repeat_review(outcome: &str, notes: Option<&str>) -> RecurringOccurrenceReviewInput {
-    RecurringOccurrenceReviewInput { outcome: outcome.into(), notes: notes.map(str::to_owned) }
+    RecurringOccurrenceReviewInput { outcome: Some(outcome.into()), notes: notes.map(str::to_owned) }
 }
 
 fn undo(database: &Database) -> UndoEntryDto { database.latest_undo().unwrap().unwrap() }
@@ -429,7 +429,7 @@ fn capture_safe_undo_restores_previous_lightweight_facts_and_refuses_final_revie
     let selected = block(&database,&id,TODAY);
     database.save_execution_capture(TODAY,capture(&selected)).unwrap();
     let original = serde_json::to_value(execution_snapshot(&database.connection,&selected).unwrap()).unwrap();
-    database.save_execution_capture(TODAY,ExecutionCaptureInput { plan_block_id:selected.clone(),outcome:ReviewOutcome::Completed,note:Some("new note".into()) }).unwrap();
+    database.save_execution_capture(TODAY,ExecutionCaptureInput { plan_block_id:selected.clone(),outcome:Some(ReviewOutcome::Completed),note:Some("new note".into()) }).unwrap();
     let latest = undo(&database);
     assert_eq!(latest.action_kind,"execution_captured");
     database.apply_undo(&latest.id).unwrap();
@@ -443,7 +443,7 @@ fn capture_safe_undo_restores_previous_lightweight_facts_and_refuses_final_revie
 }
 
 #[test]
-fn draft_validation_rejects_invalid_json_and_deleted_recurring_targets_without_writes() {
+fn draft_validation_rejects_invalid_json_but_keeps_deleted_recurring_targets_writable() {
     let _clock = TestToday::new(TODAY);
     let mut database = Database::in_memory().unwrap();
     let id = occurrence(&mut database,TODAY);
@@ -456,9 +456,8 @@ fn draft_validation_rejects_invalid_json_and_deleted_recurring_targets_without_w
     let item_id = load_occurrence(&database.connection,&id).unwrap().recurring_item_id;
     database.set_recurring_item_status(&item_id,"ended").unwrap();
     database.soft_delete_recurring_item(&item_id,true).unwrap();
-    assert!(database.save_review_form_draft(TODAY,"recurring",&id,"{}",1).is_err());
-    assert!(database.save_recurring_occurrence_review(&id,repeat_review("completed",None)).is_err());
-    assert!(database.list_review_form_drafts(TODAY).unwrap().is_empty());
+    assert!(database.save_review_form_draft(TODAY,"recurring",&id,"{}",1).is_ok());
+    assert!(database.save_recurring_occurrence_review(&id,repeat_review("completed",None)).is_ok());
 }
 
 #[test]
@@ -502,7 +501,7 @@ fn historical_light_result_syncs_task_preserves_actuals_and_rejects_cancellation
     database.save_execution_capture("2026-10-15", capture(&id)).unwrap();
     let before = database.get_task(&task_id).unwrap();
     database.save_execution_capture("2026-10-15", ExecutionCaptureInput {
-        plan_block_id: id.clone(), outcome: ReviewOutcome::Completed, note: None,
+        plan_block_id: id.clone(), outcome: Some(ReviewOutcome::Completed), note: None,
     }).unwrap();
     assert_eq!(execution_snapshot(&database.connection, &id).unwrap().execution_status, "completed");
     assert_eq!(database.get_task(&task_id).unwrap().status, "done");
@@ -530,7 +529,7 @@ fn historical_light_result_syncs_task_preserves_actuals_and_rejects_cancellation
     let today_block = block(&database, &task_id, TODAY);
     database.save_execution_capture(TODAY, capture(&today_block)).unwrap();
     database.save_execution_capture(TODAY, ExecutionCaptureInput {
-        plan_block_id: today_block.clone(), outcome: ReviewOutcome::Completed, note: None,
+        plan_block_id: today_block.clone(), outcome: Some(ReviewOutcome::Completed), note: None,
     }).unwrap();
     assert_eq!(execution_snapshot(&database.connection, &today_block).unwrap().execution_status, "completed");
 }

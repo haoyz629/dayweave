@@ -7483,3 +7483,42 @@ html[data-mode="dark"] .schedule-picker-boundaries .schedule-boundary-row.is-act
   .timeline-event.recurring-event .timeline-task-body, .timeline-event.recurring-event.is-short .timeline-task-body { padding-right: 24px; }
 }
 .timeline-floating-panel > :is(.recurring-occurrence-result, .execution-capture-footer)[hidden] { display: none; }
+
+/* Approved compact record: only completed, read-only block dialogs. */
+html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) { width: min(396px, calc(100vw - 24px)); border-radius: 16px; }
+html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) > header { padding: 20px 16px 0 24px; border-bottom: 0; align-items: flex-start; }
+html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) > header > button { flex-shrink: 0; width: 44px; height: 44px; margin-top: -10px; border-radius: 8px; }
+html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) .execution-dialog-heading { display: grid; min-width: 0; align-items: start; justify-items: start; gap: 9px; }
+html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) .execution-dialog-heading > strong { font-size: 20px; line-height: 1.45; overflow-wrap: anywhere; }
+html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) .execution-status-badge { padding: 0; border: 0; border-radius: 0; color: var(--color-green-ink); background: transparent; font-size: 13px; font-weight: 600; }
+html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) .execution-status-badge::before { content: "✓"; margin-right: 6px; }
+html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) .execution-status-badge::after { content: "只读记录"; margin-left: 10px; padding-left: 10px; border-left: 1px solid #dce4ed; color: #62718a; font-size: 12px; font-weight: 400; }
+html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) .execution-plan-time { margin: 22px 24px 20px; padding: 0; border: 0; border-radius: 0; background: transparent; gap: 12px; }
+html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) .execution-plan-fact { min-width: 0; }
+html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) .execution-plan-fact > span { color: #62718a; font-size: 12px; }
+html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) .execution-time-value { min-height: 30px; padding: 0; gap: 6px; }
+html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) .execution-time-value strong { font-size: 17px; line-height: 1.5; }
+html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) .execution-plan-actions { flex-shrink: 0; }
+html:root .timeline-floating-panel.task-block-editor .completed-record-details { margin: 0 24px 20px; padding-top: 15px; border-top: 1px solid var(--color-edge); }
+html:root .timeline-floating-panel.task-block-editor .completed-record-notes > span,
+html:root .timeline-floating-panel.task-block-editor .completed-record-facts dt { color: #62718a; font-size: 12px; line-height: 1.5; }
+html:root .timeline-floating-panel.task-block-editor .completed-record-notes p { margin: 7px 0 0; color: #42516a; font-size: 14px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+html:root .timeline-floating-panel.task-block-editor .completed-record-facts { display: grid; gap: 10px; margin: 14px 0 0; }
+html:root .timeline-floating-panel.task-block-editor .completed-record-facts > div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; }
+html:root .timeline-floating-panel.task-block-editor .completed-record-facts dd { margin: 0; color: #42516a; font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+html:root .timeline-floating-panel.task-block-editor .completed-record-recycled { margin: 0 24px 16px; color: #62718a; font-size: 12px; line-height: 1.6; }
+html:root .timeline-floating-panel.task-block-editor .completed-record-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; padding: 14px 20px; border-top: 1px solid var(--color-edge); background: #fafbfd; }
+html:root .timeline-floating-panel.task-block-editor .completed-record-footer > span { color: #62718a; font-size: 12px; line-height: 1.5; }
+html:root .timeline-floating-panel.task-block-editor .completed-record-footer .quiet-button { flex-shrink: 0; min-width: 72px; min-height: 44px; margin: 0; padding: 0 15px; border: 1px solid #dce4ed; border-radius: 9px; color: #203352; background: #fff; font-size: 14px; }
+html:root .timeline-floating-panel.task-block-editor .completed-record-footer .quiet-button:hover:not(:disabled) { background: #f1f5f9; }
+@media (max-width: 520px) {
+  html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) > header { padding-left: 19px; padding-right: 10px; }
+  html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) .execution-dialog-heading > strong { font-size: 19px; }
+  html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) .execution-plan-time { margin-left: 19px; margin-right: 19px; gap: 6px; }
+  html:root .timeline-floating-panel.task-block-editor:has(.completed-record:not([hidden])) .execution-time-value strong { font-size: 16px; }
+  html:root .timeline-floating-panel.task-block-editor .completed-record-details,
+  html:root .timeline-floating-panel.task-block-editor .completed-record-recycled { margin-left: 19px; margin-right: 19px; }
+  html:root .timeline-floating-panel.task-block-editor .completed-record-footer { padding-left: 16px; padding-right: 16px; gap: 6px; }
+  html:root .timeline-floating-panel.task-block-editor .completed-record-footer .quiet-button { min-width: 60px; padding: 0 12px; }
+}
+html:root .timeline-floating-panel.task-block-editor .completed-record-footer > span { flex: 1 1 auto; min-width: 0; }

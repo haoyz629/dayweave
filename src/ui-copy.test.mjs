@@ -317,7 +317,7 @@ test("result notes stay visible and editable without reasons or followup schedul
   assert.match(appSource, /<label className="floating-execution-note"/);
   assert.doesNotMatch(appSource, /draft\.result !== null && <label className="floating-execution-note"/);
   assert.doesNotMatch(appSource, /execution-add-note|incompleteReasonOptions|未完成原因|TaskNextActionFields/);
-  assert.match(appSource, /disabled=\{savingExecution \|\| busy \|\| loading \|\| Boolean\(quickCompletingBlockId\) \|\| !executionDraft\.outcome\}/);
+  assert.match(appSource, /disabled=\{savingExecution \|\| busy \|\| loading \|\| Boolean\(quickCompletingBlockId\) \|\| !executionDraftChanged\(selectedBlock, executionDraft, selectedTask\) \|\| \(!executionDraft\.outcome && !executionDraft\.note\.trim\(\)\)\}/);
 });
 
 

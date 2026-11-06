@@ -16,7 +16,7 @@ fn occurrence(db: &mut Database, item: &str, date: &str) -> RecurringOccurrenceD
 
 fn save(db: &mut Database, id: &str, outcome: &str, notes: Option<&str>) -> RecurringOccurrenceDto {
     db.save_recurring_occurrence_review(id, RecurringOccurrenceReviewInput {
-        outcome: outcome.into(), notes: notes.map(str::to_owned),
+        outcome: Some(outcome.into()), notes: notes.map(str::to_owned),
     }).unwrap()
 }
 
@@ -196,7 +196,7 @@ fn recurring_execution_permissions_and_rejected_requests_leave_all_facts_unchang
     for (date, allowed) in [("2026-10-09", false), ("2026-10-10", true), ("2026-10-15", true), (TODAY, true), ("2026-10-17", false)] {
         let target = occurrence(&mut db, &item.id, date);
         let before = facts(&db, &target.id);
-        let input = || RecurringOccurrenceReviewInput { outcome: "completed".into(), notes: None };
+        let input = || RecurringOccurrenceReviewInput { outcome: Some("completed".into()), notes: None };
         assert_eq!(db.save_recurring_occurrence_review(&target.id, input()).is_ok(), allowed);
         if !allowed { assert_eq!(facts(&db, &target.id), before); }
         let before = facts(&db, &target.id);
@@ -210,8 +210,8 @@ fn recurring_execution_permissions_and_rejected_requests_leave_all_facts_unchang
     }
     let current = occurrence(&mut db, &item.id, TODAY);
     let before = facts(&db, &current.id);
-    for input in [RecurringOccurrenceReviewInput { outcome: "invalid".into(), notes: None },
-        RecurringOccurrenceReviewInput { outcome: "partial".into(), notes: Some("x".repeat(2001)) }] {
+    for input in [RecurringOccurrenceReviewInput { outcome: Some("invalid".into()), notes: None },
+        RecurringOccurrenceReviewInput { outcome: Some("partial".into()), notes: Some("x".repeat(2001)) }] {
         assert!(db.save_recurring_occurrence_review(&current.id, input).is_err());
         assert_eq!(facts(&db, &current.id), before);
     }
@@ -219,11 +219,10 @@ fn recurring_execution_permissions_and_rejected_requests_leave_all_facts_unchang
     db.set_recurring_item_status(&item.id, "ended").unwrap();
     db.soft_delete_recurring_item(&item.id, true).unwrap();
     let before = facts(&db, &current.id);
-    let draft = drafts(&db, &current.id);
-    assert!(db.save_recurring_occurrence_review(&current.id, RecurringOccurrenceReviewInput { outcome: "completed".into(), notes: None }).is_err());
-    assert!(db.clear_recurring_occurrence_review(&current.id).is_err());
-    assert_eq!(facts(&db, &current.id), before);
-    assert_eq!(drafts(&db, &current.id), draft);
+    // Recycled recurring items keep today's occurrence recordable and cancellable.
+    assert!(db.save_recurring_occurrence_review(&current.id, RecurringOccurrenceReviewInput { outcome: Some("completed".into()), notes: Some("recycled note".into()) }).is_ok());
+    assert!(db.clear_recurring_occurrence_review(&current.id).is_ok());
+    assert_ne!(facts(&db, &current.id), before);
 }
 
 #[test]
@@ -246,7 +245,7 @@ fn recurring_execution_event_and_draft_failures_roll_back_save_and_clear_atomica
             let undo = db.latest_undo().unwrap().map(|e| e.id);
             db.connection.execute_batch(trigger).unwrap();
             let result = if clear { db.clear_recurring_occurrence_review(&current.id) } else {
-                db.save_recurring_occurrence_review(&current.id, RecurringOccurrenceReviewInput { outcome: "completed".into(), notes: None })
+                db.save_recurring_occurrence_review(&current.id, RecurringOccurrenceReviewInput { outcome: Some("completed".into()), notes: None })
             };
             assert!(result.is_err(), "{failure}, clear={clear}");
             assert_eq!(facts(&db, &current.id), before);

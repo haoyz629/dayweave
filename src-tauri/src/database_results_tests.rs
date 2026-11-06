@@ -63,7 +63,7 @@ fn whole_task_note_window_and_same_day_reopen_rules_reject_atomically() {
             let result = match action {
                 "complete" => db.complete_task_with_note(&id, Some(&block), Some("修改完成备注".into())).map(|_| ()),
                 "resolve" => db.resolve_task_execution(DATE, resolution(&db,&id,&block,ReviewOutcome::NotStarted)).map(|_| ()),
-                "capture" => db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id:block.clone(), outcome:ReviewOutcome::NotStarted, note:None }),
+                "capture" => db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id:block.clone(), outcome:Some(ReviewOutcome::NotStarted), note:None }),
                 "clear" => db.clear_execution_capture(DATE, &block),
                 "review" => db.save_review_entry(DATE, review(&block)).map(|_| ()),
                 "reopen" => db.reopen_manual_task(&id, "2099-01-01").map(|_| ()),
@@ -157,7 +157,7 @@ fn repeated_reopen_complete_restore_and_timestamp_edits_never_extend_context() {
     db.connection.execute("UPDATE plan_blocks SET ends_at = '2026-10-18T23:59:00+08:00' WHERE id = ?1",[&block]).unwrap();
     assert!(db.reopen_manual_task(&id,"2026-10-17").is_err());
     assert!(db.complete_task(&id,None).is_err());
-    db.save_execution_capture(DATE,ExecutionCaptureInput { plan_block_id:block,outcome:ReviewOutcome::Completed,note:None }).unwrap();
+    db.save_execution_capture(DATE,ExecutionCaptureInput { plan_block_id:block,outcome:Some(ReviewOutcome::Completed),note:None }).unwrap();
     assert_eq!(db.get_task(&id).unwrap().result_ends_at.as_deref(),Some(END));
 }
 
@@ -337,14 +337,14 @@ fn cleared_capture_keeps_original_date_even_when_block_is_rescheduled() {
     let (id, block) = {
         let _clock = TestNow::new("2026-10-16T23:40:00+08:00");
         let (id, block) = fixture(&mut db);
-        db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id:block.clone(), outcome:ReviewOutcome::Completed, note:None }).unwrap();
+        db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id:block.clone(), outcome:Some(ReviewOutcome::Completed), note:None }).unwrap();
         db.clear_execution_capture(DATE,&block).unwrap();
         (id,block)
     };
     let _clock = TestNow::new("2026-10-17T12:00:00+08:00");
     db.connection.execute("UPDATE daily_plans SET plan_date = '2026-10-17'",[]).unwrap();
     db.connection.execute("UPDATE plan_blocks SET starts_at = '2026-10-17T23:00:00+08:00', ends_at = '2026-10-17T23:30:00+08:00' WHERE id = ?1",[&block]).unwrap();
-    assert!(db.save_execution_capture("2026-10-17", ExecutionCaptureInput { plan_block_id:block.clone(),outcome:ReviewOutcome::Completed,note:None }).is_err());
+    assert!(db.save_execution_capture("2026-10-17", ExecutionCaptureInput { plan_block_id:block.clone(),outcome:Some(ReviewOutcome::Completed),note:None }).is_err());
     assert!(db.complete_task(&id,Some(&block)).is_err());
 }
 
@@ -420,7 +420,7 @@ fn historical_backfill_is_not_the_completion_candidate_when_today_has_an_executi
     let mut db = Database::in_memory().unwrap();
     let (id, old) = fixture(&mut db);
     let current = add_block(&db, &id, "2026-10-17", "2026-10-17T23:30:00+08:00");
-    db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id:old.clone(), outcome:ReviewOutcome::NotStarted, note:Some("历史补录".into()) }).unwrap();
+    db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id:old.clone(), outcome:Some(ReviewOutcome::NotStarted), note:Some("历史补录".into()) }).unwrap();
     let metadata = db.get_task_metadata(&id).unwrap();
     assert_eq!(metadata.latest_execution.unwrap().plan_date, DATE);
     assert_eq!(metadata.completion_date.as_deref(), Some("2026-10-17"));
@@ -478,7 +478,7 @@ fn clearing_incomplete_restores_pending_without_changing_schedule_workload_or_ot
         if outcome == ReviewOutcome::NotStarted {
             db.resolve_task_execution(DATE, resolution(&db, &id, &block, outcome)).unwrap();
         } else {
-            db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id: block.clone(), outcome, note: Some("结果备注".into()) }).unwrap();
+            db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id: block.clone(), outcome: Some(outcome), note: Some("结果备注".into()) }).unwrap();
         }
         assert!(db.get_task(&id).unwrap().execution_locked);
         let stale = resolution(&db, &id, &block, ReviewOutcome::NotStarted);
@@ -554,7 +554,7 @@ fn clearing_incomplete_rejects_wrong_date_deleted_reviewed_and_empty_records_ato
 
 fn correct_result(db: &mut Database, action: &str, date: &str, task: &str, block: &str, outcome: ReviewOutcome, note: Option<String>) -> AppResult<()> {
     match action {
-        "capture" => db.save_execution_capture(date, ExecutionCaptureInput { plan_block_id: block.into(), outcome, note }),
+        "capture" => db.save_execution_capture(date, ExecutionCaptureInput { plan_block_id: block.into(), outcome: Some(outcome), note }),
         "resolve" => {
             let mut input = resolution(db, task, block, outcome);
             input.note = note;
@@ -843,11 +843,11 @@ fn incomplete_classification_uses_latest_execution_not_backfill_order_and_does_n
     let mut db = Database::in_memory().unwrap();
     let (id, old) = fixture(&mut db);
     let recent = add_block(&db, &id, "2026-10-17", "2026-10-17T23:30:00+08:00");
-    db.save_execution_capture("2026-10-17", ExecutionCaptureInput { plan_block_id: recent.clone(), outcome: ReviewOutcome::Completed, note: None }).unwrap();
+    db.save_execution_capture("2026-10-17", ExecutionCaptureInput { plan_block_id: recent.clone(), outcome: Some(ReviewOutcome::Completed), note: None }).unwrap();
     db.resolve_task_execution(DATE, resolution(&db, &id, &old, ReviewOutcome::NotStarted)).unwrap();
     assert_incomplete_classification(&mut db, &id, false);
     for outcome in [ReviewOutcome::NotStarted, ReviewOutcome::Partial, ReviewOutcome::Blocked, ReviewOutcome::Cancelled] {
-        db.save_execution_capture("2026-10-17", ExecutionCaptureInput { plan_block_id: recent.clone(), outcome, note: None }).unwrap();
+        db.save_execution_capture("2026-10-17", ExecutionCaptureInput { plan_block_id: recent.clone(), outcome: Some(outcome), note: None }).unwrap();
         assert_incomplete_classification(&mut db, &id, true);
     }
     let new_id = db.create_manual_task("独立任务").unwrap();
@@ -962,11 +962,11 @@ fn historical_sync_preserves_later_no_block_completion_and_handles_legacy_missin
     let _clock = TestNow::new("2026-10-18T12:00:00+08:00");
     let old = add_block(&db, &id, DATE, END);
     let before = task_side_effects(&db, &id, &old);
-    db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id: old.clone(), outcome: ReviewOutcome::NotStarted, note: None }).unwrap();
+    db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id: old.clone(), outcome: Some(ReviewOutcome::NotStarted), note: None }).unwrap();
     assert_eq!(task_side_effects(&db, &id, &old), before);
     let (legacy, block) = fixture(&mut db);
     db.connection.execute("UPDATE tasks SET status = 'done', remaining_workload_minutes = 0 WHERE id = ?1", [&legacy]).unwrap();
-    db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id: block, outcome: ReviewOutcome::NotStarted, note: None }).unwrap();
+    db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id: block, outcome: Some(ReviewOutcome::NotStarted), note: None }).unwrap();
     assert_eq!(db.get_task(&legacy).unwrap().remaining_workload_minutes, Some(0));
     assert_eq!(db.get_task(&legacy).unwrap().status, "done");
     assert_incomplete_classification(&mut db, &legacy, false);
@@ -984,9 +984,32 @@ fn historical_sync_protects_legacy_explicit_completion_without_durable_snapshot(
     };
     let _clock = TestNow::new("2026-10-18T12:00:00+08:00");
     let before = result_facts(&db, &id);
-    assert!(db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id: block, outcome: ReviewOutcome::NotStarted, note: None }).is_err());
+    assert!(db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id: block, outcome: Some(ReviewOutcome::NotStarted), note: None }).is_err());
     assert_eq!(result_facts(&db, &id), before);
     assert_eq!(db.get_task(&id).unwrap().remaining_workload_minutes, Some(0));
     assert_eq!(db.get_task(&id).unwrap().status, "done");
     assert_incomplete_classification(&mut db, &id, false);
+}
+
+#[test]
+fn note_only_capture_keeps_current_outcome_and_records_an_execution_event() {
+    let _clock = TestNow::new("2026-10-16T12:00:00+08:00");
+    let mut db = Database::in_memory().unwrap();
+    let (id, block) = fixture(&mut db);
+    let status_before = execution_snapshot(&db.connection, &block).unwrap().execution_status;
+    assert_eq!(status_before, "planned");
+
+    // A note-only save keeps the planned status while persisting the note as an execution fact.
+    db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id: block.clone(), outcome: None, note: Some("随手记一句".into()) }).unwrap();
+    let snapshot = execution_snapshot(&db.connection, &block).unwrap();
+    assert_eq!(snapshot.execution_status, "planned", "note-only must not change the outcome");
+    assert_eq!(snapshot.execution_note.as_deref(), Some("随手记一句"));
+    assert!(snapshot.execution_captured_at.is_some(), "note-only must record an execution timestamp");
+
+    let history = db.get_task_metadata(&id).unwrap().history;
+    assert!(history.iter().any(|event| event.kind == "note" && event.status.is_none() && event.note.as_deref() == Some("随手记一句")), "note-only history must name the note action, not an incomplete outcome");
+    db.save_execution_capture(DATE, ExecutionCaptureInput { plan_block_id: block.clone(), outcome: Some(ReviewOutcome::Completed), note: Some("完成备注".into()) }).unwrap();
+    let history = db.get_task_metadata(&id).unwrap().history;
+    assert!(history.iter().any(|event| event.kind == "note" && event.status.is_none() && event.note.as_deref() == Some("随手记一句")), "archiving must retain the note action");
+    assert!(history.iter().any(|event| event.kind == "execution" && event.status.as_deref() == Some("done")), "completion must remain a result action");
 }

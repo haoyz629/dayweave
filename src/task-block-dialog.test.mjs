@@ -13,7 +13,7 @@ const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true
 const declarations = [];
 let dialog;
 function collect(node) {
-  if (ts.isFunctionDeclaration(node) && ["Icon", "ExecutionOutcomePicker", "ExecutionCaptureFields"].includes(node.name?.text)) declarations.push(node.getText(source));
+  if (ts.isFunctionDeclaration(node) && ["Icon", "ExecutionOutcomePicker", "ExecutionCaptureFields", "executionDraftChanged", "CompletedBlockRecord"].includes(node.name?.text)) declarations.push(node.getText(source));
   if (ts.isConditionalExpression(node) && node.condition.getText(source) === "selectedBlock" && node.whenTrue.getText(source).includes('className="execution-dialog-heading"')) dialog = node.whenTrue.getText(source);
   ts.forEachChild(node, collect);
 }
@@ -43,6 +43,7 @@ export function createDialogHarness({ status = "executing", expired = false, del
     executionResultOptions: [["completed", "完成"], ["not_completed", "未完成"]],
     savingExecution: false, quickCompletingBlockId: null, savingDraggedBlock: false, timelineDrag: null, preview: null,
     busy, loading: false, executionMessage: "", selectedDate: date, today,
+    recycledCompletionNote: "", setRecycledCompletionNote(value) { state.recycledCompletionNote = value; },
     reviewOutcomeCopy: { completed: "完成", not_started: "未完成" }, taskNextActionLabels: {},
     timeRangeLabel: (start, end) => `${start.slice(11, 16)} - ${end.slice(11, 16)}`,
     closeTimelinePanel() { calls.push(["close"]); },
@@ -111,8 +112,8 @@ test("footer buttons retain reopen and independent new-task behavior", () => {
 test("historical completed results cannot be cancelled or changed to incomplete", () => {
   const completed = createDialogHarness({ status: "completed", expired: true });
   completed.state.selectedBlock.execution_note = "创建历史任务自动完成";
-  assert.equal(button(completed, "execution-reopen-task").props.disabled, true);
-  assert.equal(button(completed, "execution-reopen-task").props.title, HISTORY_COMPLETION_LOCKED_MESSAGE);
+  assert.equal(button(completed, "execution-reopen-task"), undefined);
+  assert.match(completed.markup(), /完成记录只读，不可修改/);
   assert.equal(button(completed, "primary-action"), undefined);
   assert.equal(completed.elements().some(node => node.props["data-outcome"]), false);
   assert.match(completed.markup(), /创建历史任务自动完成/);
@@ -339,5 +340,47 @@ test("only editable plan times show the pencil affordance", () => {
     const current = createDialogHarness(options);
     assert.doesNotMatch(current.markup(), /execution-time-edit-icon/);
     assert.equal(button(current, "execution-time-value"), undefined);
+  }
+});
+
+test("compact completed records cover ordinary/cross-day, manual/intelligent and recycled blocks", () => {
+  for (const crossDay of [false, true]) for (const source of ["manual", "intelligent"]) for (const deleted of [false, true]) {
+    const current = createDialogHarness({ status: "completed", expired: true, crossDay, deleted });
+    current.state.selectedBlock.source = source;
+    current.state.selectedBlock.execution_note = "保留原始随手记\n第二行";
+    const html = current.markup();
+    assert.equal((html.match(/class="completed-record"/g) ?? []).length, 1);
+    assert.equal((html.match(/status-completed/g) ?? []).length, 1);
+    assert.equal(current.elements().filter(node => node.type === "footer").length, 1);
+    assert.match(html, /保留原始随手记\n第二行/);
+    assert.match(html, />关闭</);
+    assert.doesNotMatch(html, /floating-capture-fact|floating-facts|execution-reopen-task|>保存<|>取消<|<textarea/);
+    assert.equal(html.includes("任务已移入回收站"), deleted);
+    assert.deepEqual(current.calls, [], "render never persists a record");
+    button(current, "execution-open-task").props.onClick();
+    button(current, "quiet-button").props.onClick();
+    assert.deepEqual(current.calls, [["open", "task", "block"], ["close"]]);
+  }
+});
+
+test("compact legacy review keeps all genuine fields, zero minutes and distinct notes", () => {
+  const current = createDialogHarness({ status: "completed", expired: true, crossDay: true });
+  current.state.taskNextActionLabels = { schedule: "继续安排" };
+  current.state.selectedBlock.execution_note = "执行随手记";
+  current.state.selectedBlock.review = { outcome: "completed", notes: "回顾备注", actual_minutes: 0, remaining_workload_minutes: 25, followup_action: "schedule", defer_reason: "旧版原因" };
+  for (const fact of ["执行随手记", "回顾备注", "0 分钟", "25 分钟", "继续安排", "旧版原因"]) assert.ok(current.markup().includes(fact), fact);
+  current.state.selectedBlock.execution_note = "回顾备注";
+  assert.equal((current.markup().match(/回顾备注/g) ?? []).length, 1, "same saved note is not duplicated");
+  current.state.selectedBlock.execution_note = null;
+  current.state.selectedBlock.review = { outcome: "completed", notes: null, actual_minutes: null, remaining_workload_minutes: null };
+  assert.doesNotMatch(current.markup(), /completed-record-details|实际耗时|剩余工作量/);
+});
+
+test("readonly compact record close and navigation respect in-flight operations", () => {
+  for (const busyState of [{ savingExecution: true }, { quickCompletingBlockId: "block" }]) {
+    const current = createDialogHarness({ status: "completed", expired: true });
+    Object.assign(current.state, busyState);
+    assert.equal(button(current, "quiet-button").props.disabled, true);
+    assert.equal(button(current, "execution-open-task").props.disabled, true);
   }
 });

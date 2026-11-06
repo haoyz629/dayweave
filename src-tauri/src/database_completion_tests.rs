@@ -33,7 +33,7 @@ fn request(db: &Database, task: &str, block: &str, outcome: ReviewOutcome) -> Ta
 fn write(db: &mut Database, api: &str, date: &str, task: &str, block: &str, outcome: ReviewOutcome) -> AppResult<()> {
     match api {
         "resolve" => db.resolve_task_execution(date, request(db,task,block,outcome)).map(|_| ()),
-        "capture" => db.save_execution_capture(date, ExecutionCaptureInput { plan_block_id: block.into(), outcome, note: Some("block note".into()) }),
+        "capture" => db.save_execution_capture(date, ExecutionCaptureInput { plan_block_id: block.into(), outcome: Some(outcome), note: Some("block note".into()) }),
         "review" => db.save_review_entry(date, ReviewEntryInput { plan_block_id: block.into(), outcome,
             actual_minutes: None, defer_reason: None, notes: Some("block note".into()), remaining_workload_minutes: None }).map(|_| ()),
         _ => unreachable!(),

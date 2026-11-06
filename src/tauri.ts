@@ -153,7 +153,7 @@ export type TaskHistoryEvent = {
   id: string;
   occurred_at: string | null;
   plan_date: string | null;
-  kind: "created" | "execution" | "status" | "automatic_status" | "soft_deleted" | "restored" | "cleared" | "cleared_incomplete" | "reopened";
+  kind: "created" | "execution" | "note" | "status" | "automatic_status" | "soft_deleted" | "restored" | "cleared" | "cleared_incomplete" | "reopened";
   status: TaskStatus | "not_completed" | null;
   note: string | null;
   review_note: string | null;
@@ -269,7 +269,7 @@ export type PlanBlock = {
 
 export type ExecutionCaptureInput = {
   plan_block_id: string;
-  outcome: ReviewOutcome;
+  outcome: ReviewOutcome | null;
   note: string | null;
 };
 
@@ -459,7 +459,7 @@ export function updateRecurringOccurrence(occurrenceId: string, input: Recurring
 
 export function saveRecurringOccurrenceReview(
   occurrenceId: string,
-  input: { outcome: RecurringOccurrenceOutcome; notes: string | null }
+  input: { outcome: RecurringOccurrenceOutcome | null; notes: string | null }
 ) {
   return invokeDesktop<RecurringOccurrence>("save_recurring_occurrence_review", { occurrenceId, input });
 }

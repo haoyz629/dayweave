@@ -7,6 +7,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { recurringClockRange, recurringRangeInput } from "./recurring-schedule.ts";
 import { compactBlockDuration } from "./task-block-display.ts";
+import { normalizeClockInput } from "./time-range-control.ts";
 
 const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -130,7 +131,8 @@ test("recurring result and time pages share the ordinary shells but never show t
   assert.equal(vm.runInNewContext(compile(`(${layerClass});`), state), "timeline-floating-layer is-time-editor");
   for (const editable of [true, false]) for (const editingTime of editable ? [true, false] : [false]) {
     const context = { React, useState: React.useState, useEffect: React.useEffect, selectedRecurringOccurrence: { ...item, title: "重复任务", outcome: "completed", review_notes: "本次备注" }, recurringTimeEdit: editingTime ? { date: "2026-11-03", time: "09:00", duration: 120, error: "" } : null, today: "2026-11-03", savingRecurringChange: false, pendingRecurringChange: null, Icon: () => null, CopySeparator: () => null, closeTimelinePanel() {}, returnToRecurringOccurrenceDetails() {}, adjustRecurringOccurrenceTime() {}, openTimelineRecurringItem() {}, saveRecurringTimeEdit() {}, saveRecurringResult() {}, canEditRecurringOccurrence: () => editable, canRecordRecurringOccurrence: () => editable, recurringTimeRange: () => "09:00–11:00", RecurringBlockTimeEditor: () => null, setRecurringTimeEdit() {}, quickCompletingBlockId: null, busy: false, loading: false, savingExecution: false, preview: null };
-    load(["RecurringOccurrenceResult"], context);
+    context.normalizeClockInput = normalizeClockInput;
+    load(["CompletedBlockRecord", "RecurringOccurrenceResult", "recurringTimeEditChanged"], context);
     const html = renderToStaticMarkup(vm.runInContext(compile(`(${recurringPanel});`), context));
     assert.doesNotMatch(html, /execution-remove-today/);
     if (editingTime) {
@@ -149,10 +151,12 @@ test("recurring result and time pages share the ordinary shells but never show t
       if (editable) {
         assert.match(html, /aria-label="调整计划时间：09:00–11:00"/);
         assert.equal((html.match(/class="execution-capture-footer"/g) ?? []).length, 1);
-        assert.match(html, /保存结果/);
+        assert.match(html, />保存</);
       } else {
-        assert.doesNotMatch(html, /aria-label="调整计划时间|保存结果/);
-        assert.match(html, /历史已有结果及超出补录范围的记录保持只读/);
+        assert.doesNotMatch(html, /aria-label="调整计划时间|>保存</);
+        assert.match(html, /class="completed-record"/);
+        assert.equal((html.match(/class="execution-capture-footer completed-record-footer"/g) ?? []).length, 1);
+        assert.doesNotMatch(html, /未来日期暂不可记录|尚无执行记录/);
       }
     }
   }

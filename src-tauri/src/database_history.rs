@@ -31,8 +31,8 @@ pub(super) fn current_events(connection: &Connection, task_id: &str) -> AppResul
         let outcome: String = row.get(4)?;
         Ok(TaskHistoryEventDto {
             id: format!("block:{}", row.get::<_, String>(0)?), occurred_at,
-            plan_date: row.get(1)?, kind: "execution".into(),
-            status: Some(if outcome == "completed" { "done" } else { "not_completed" }.into()),
+            plan_date: row.get(1)?, kind: if outcome == "planned" { "note" } else { "execution" }.into(),
+            status: if outcome == "planned" { None } else { Some(if outcome == "completed" { "done" } else { "not_completed" }.into()) },
             note: row.get(5)?, review_note: row.get(6)?,
         })
     })?.collect::<Result<Vec<_>, _>>()?;
@@ -172,7 +172,7 @@ mod tests {
 
     fn capture(db: &mut Database, block: &str, date: &str, note: &str) {
         db.save_execution_capture(date, ExecutionCaptureInput { plan_block_id: block.into(),
-            outcome: ReviewOutcome::Partial, note: Some(note.into()) }).unwrap();
+            outcome: Some(ReviewOutcome::Partial), note: Some(note.into()) }).unwrap();
     }
 
     fn review(block: &str, note: &str) -> ReviewEntryInput {
@@ -220,7 +220,7 @@ mod tests {
         let id = db.create_manual_task("automatic status history").unwrap();
         let block = add_block(&db, &id, TODAY);
         db.save_execution_capture(TODAY, ExecutionCaptureInput { plan_block_id: block.clone(),
-            outcome: ReviewOutcome::Completed, note: Some("用户的完成备注".into()) }).unwrap();
+            outcome: Some(ReviewOutcome::Completed), note: Some("用户的完成备注".into()) }).unwrap();
         assert_eq!(db.get_task(&id).unwrap().status, "done");
         let events = db.get_task_metadata(&id).unwrap().history;
         let automatic = events.iter().find(|event| event.kind == "automatic_status").unwrap();
@@ -349,7 +349,7 @@ mod tests {
         let history = db.get_task_metadata(&id).unwrap().history;
         assert!(history.iter().any(|event| event.kind == "reopened" && event.status.as_deref() == Some("scheduled")));
         db.save_execution_capture(TODAY, ExecutionCaptureInput { plan_block_id: block.clone(),
-            outcome: ReviewOutcome::Completed, note: None }).unwrap();
+            outcome: Some(ReviewOutcome::Completed), note: None }).unwrap();
         db.clear_execution_capture(TODAY, &block).unwrap();
         let history = db.get_task_metadata(&id).unwrap().history;
         assert!(history.iter().any(|event| event.kind == "cleared" && event.plan_date.as_deref() == Some(TODAY)));
@@ -387,7 +387,7 @@ mod tests {
         db.connection.execute_batch("CREATE TRIGGER fail_history BEFORE INSERT ON task_changes
             WHEN NEW.change_kind = 'history_snapshot' BEGIN SELECT RAISE(ABORT,'history write failed'); END;").unwrap();
         assert!(db.save_execution_capture(TODAY, ExecutionCaptureInput { plan_block_id: block.clone(),
-            outcome: ReviewOutcome::Blocked, note: Some("rejected".into()) }).is_err());
+            outcome: Some(ReviewOutcome::Blocked), note: Some("rejected".into()) }).is_err());
         assert_eq!(before, fact_fingerprint(&db.connection, "task_completion", &id).unwrap());
         db.connection.execute_batch("DROP TRIGGER fail_history").unwrap();
         db.connection.execute("UPDATE plan_blocks SET execution_note = NULL, execution_captured_at = NULL WHERE id = ?1", [&block]).unwrap();

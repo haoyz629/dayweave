@@ -40,7 +40,7 @@ fn recycled_block(db: &Database, plan: &str, task: &str, date: &str, hour: &str)
 }
 
 fn capture(block: &str) -> ExecutionCaptureInput {
-    ExecutionCaptureInput { plan_block_id: block.into(), outcome: ReviewOutcome::Completed, note: Some("完成备注".into()) }
+    ExecutionCaptureInput { plan_block_id: block.into(), outcome: Some(ReviewOutcome::Completed), note: Some("完成备注".into()) }
 }
 
 fn task_row(db: &Database, task: &str) -> Vec<Vec<String>> {
@@ -134,7 +134,7 @@ fn recycled_completion_rejects_any_outcome_but_completed() {
     let block = recycled_block(&db, &confirmed_plan(&db, RECYCLED_DAY), &task, RECYCLED_DAY, "09");
     for outcome in [ReviewOutcome::Partial, ReviewOutcome::NotStarted, ReviewOutcome::Cancelled, ReviewOutcome::Blocked] {
         let mut input = capture(&block);
-        input.outcome = outcome;
+        input.outcome = Some(outcome);
         let err = db.save_execution_capture(RECYCLED_DAY, input).unwrap_err();
         assert!(err.to_string().contains("回收站任务只能记录已有安排的完成结果"), "{:?}", outcome);
     }

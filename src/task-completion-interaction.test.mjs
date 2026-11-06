@@ -14,7 +14,7 @@ const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const handlers = new Map();
 const renderExpressions = new Map();
-const names = ["quickCompleteTimelineBlock", "saveSelectedBlockExecution", "CompletedTaskDetails", "reopen", "requestTaskChange", "applyTaskChange", "openIndependentDraft"];
+const names = ["executionDraftChanged", "quickCompleteTimelineBlock", "saveSelectedBlockExecution", "CompletedTaskDetails", "reopen", "requestTaskChange", "applyTaskChange", "openIndependentDraft"];
 let checkbox, dialogReopen;
 function collect(node) {
   if (ts.isFunctionDeclaration(node) && names.includes(node.name?.text)) handlers.set(node.name.text, node.getText(source));
@@ -536,5 +536,19 @@ test("dialog transitions to completed still offer undo using the effective revie
     assert.equal(current.calls[0][2].outcome, "completed");
     assert.equal(current.calls.find(([type]) => type === "toast")[4], "undo-2");
     assert.equal(reads, 2);
+  }
+});
+
+test("unchanged ordinary results never write or refresh even if the handler is called directly", async () => {
+  for (const saved of ["planned", "completed", "not_started", "partial", "blocked", "cancelled"]) for (const reviewed of [false, true]) {
+    if (reviewed && saved === "planned") continue;
+    const end = `${today}T10:00:00+08:00`;
+    const task = { ...baseTask, status: "scheduled", result_date: today, result_ends_at: end };
+    const block = { ...baseBlock, task_status: "scheduled", execution_status: reviewed ? "planned" : saved, review: reviewed ? { outcome: saved, notes: "原备注" } : null, execution_note: "原备注", result_date: today, ends_at: end };
+    const current = harness({ task, block, selectedDate: today, now: `${today}T12:00:00+08:00` });
+    current.state.executionDraft = { result: saved === "planned" ? null : saved === "completed" ? "completed" : "not_completed", outcome: saved === "planned" ? null : saved === "completed" ? "completed" : "not_started", note: " 原备注 " };
+    await current.state.saveSelectedBlockExecution();
+    assert.deepEqual(current.calls, [], `${saved}/${reviewed}`);
+    assert.equal(current.state.savingExecution, false);
   }
 });

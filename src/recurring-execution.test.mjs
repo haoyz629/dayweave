@@ -83,7 +83,7 @@ test("recurring permission mirrors existing historical first-write, future and r
   h.state.recurringItems[0].status = "ended";
   assert.equal(h.state.canRecordRecurringOccurrence(occurrence), true, "today remains recordable after ending, as in the backend");
   h.state.recurringItems[0].deleted_at = "2026-10-29";
-  assert.equal(h.state.canRecordRecurringOccurrence(occurrence), false);
+  assert.equal(h.state.canRecordRecurringOccurrence(occurrence), true, "recycled recurring items remain recordable");
 });
 
 test("same-day distinct IDs and multiple dates save only that occurrence and refresh its own date", async () => {
@@ -164,7 +164,7 @@ test("timed and untimed checks preserve notes, stop click propagation and never 
     tree.props.onClick({ stopPropagation() {} });
     assert.equal(calls[0][0].id, item.id);
     assert.equal(calls[0][1], completed ? null : "completed");
-    assert.equal(calls[0][2], "原备注");
+    assert.equal(calls[0][2], completed ? null : "原备注");
   }
 });
 
@@ -174,6 +174,14 @@ test("result editor keeps saved state separate, accepts optional notes, and clea
   const h = mount("RecurringOccurrenceResult", props);
   assert.deepEqual(React.Children.toArray(h.render().props.children).map(node => node.type), ["section", "footer"], "footer stays a direct panel child so the existing capture-footer styling applies");
   const save = () => elements(h.render(), node => node.props.className === "primary-action")[0];
+  assert.equal(save().props.disabled, true);
+  save().props.onClick();
+  assert.deepEqual(writes, []);
+  const initialToggle = () => elements(h.render(), node => node.props["data-outcome"] === "completed")[0];
+  initialToggle().props.onClick();
+  assert.equal(save().props.disabled, false);
+  initialToggle().props.onClick();
+  assert.equal(save().props.disabled, true);
   assert.doesNotMatch(renderToStaticMarkup(h.render()), /<svg/);
   const toggle = () => elements(h.render(), node => node.props["data-outcome"] === "completed")[0];
   toggle().props.onClick();
@@ -191,10 +199,37 @@ test("result editor keeps saved state separate, accepts optional notes, and clea
   h.render({ ...props, occurrence: { ...occurrence, outcome: "completed", review_notes: "慢跑 30 分钟" } });
   assert.equal(save().props.disabled, true);
   toggle().props.onClick(); save().props.onClick();
-  assert.deepEqual(writes.at(-1), [null, null]);
+  assert.deepEqual(writes.at(-1), [null, "慢跑 30 分钟"], "note-only save keeps the note without an outcome");
   const readonly = h.render({ ...props, writable: false });
-  assert.equal(elements(readonly, node => node.type === "textarea" || node.type === "button").length, 0);
+  assert.equal(elements(readonly, node => node.type === "textarea" || node.props.className === "primary-action").length, 0);
+  assert.equal(elements(readonly, node => node.props.className === "quiet-button").length, 1);
   assert.doesNotMatch(renderToStaticMarkup(readonly), /整体完成|整个任务/);
+});
+
+test("recurring result saves require a meaningful change and respect busy state", () => {
+  for (const outcome of [null, "completed", "partial", "not_started"]) {
+    const writes = [];
+    const props = { occurrence: { ...occurrence, outcome, review_notes: " 原备注 " }, writable: true, disabled: false, onCancel() {}, async onSave(...args) { writes.push(args); } };
+    const h = mount("RecurringOccurrenceResult", props);
+    const save = () => elements(h.render(), node => node.props.className === "primary-action")[0];
+    const note = () => elements(h.render(), node => node.type === "textarea")[0];
+    assert.equal(save().props.disabled, true);
+    note().props.onChange({ target: { value: "原备注" } });
+    assert.equal(save().props.disabled, true);
+    save().props.onClick();
+    assert.deepEqual(writes, []);
+    note().props.onChange({ target: { value: "新备注" } });
+    assert.equal(save().props.disabled, false);
+    h.render({ ...props, disabled: true });
+    assert.equal(save().props.disabled, true);
+    save().props.onClick();
+    assert.deepEqual(writes, []);
+    h.render(props);
+    note().props.onChange({ target: { value: "  原备注  " } });
+    assert.equal(save().props.disabled, true);
+    save().props.onClick();
+    assert.deepEqual(writes, []);
+  }
 });
 
 test("execution history groups occurrence dates, preserves repeated events and distinguishes same-day blocks", async () => {
@@ -354,4 +389,13 @@ test("trash and restore reload selected recurring history while ended status sta
     assert.match(renderToStaticMarkup(tree), kind === "soft_deleted" ? /已移入回收站/ : /已从回收站恢复（保持已结束）/);
   }
   assert.equal(calls.length, 3);
+});
+
+test("note-only recurring history names the note action, not cancellation", async () => {
+  const h = mount("RecurringExecutionHistory", { itemId: "series-1", createdAt: "2026-10-01T00:00:00+08:00" }, { async listRecurringExecutionHistory() { return [{ ...occurrence, kind: "execution", id: "note-event", outcome: null, notes: "一条随手记", occurred_at: "2026-10-29T11:00:00+08:00" }]; } });
+  h.render(); await tick();
+  const html = renderToStaticMarkup(h.render());
+  assert.match(html, /<strong>随手记<\/strong>/);
+  assert.match(html, /一条随手记/);
+  assert.doesNotMatch(html, /已取消本次结果|本次未完成/);
 });

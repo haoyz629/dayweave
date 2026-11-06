@@ -119,7 +119,7 @@ test("closing details restores task focus without immediately reopening its hove
     const frames = [];
     const state = {
       savingExecution, recurringResultSavingRef: { current: recurringSaving }, selection: { kind: "block", id: "task" }, tooltip: null,
-      setSelection(value) { state.selection = value; }, setPlanDraftTimeEdit() {}, setRecurringTimeEdit() {},
+      setSelection(value) { state.selection = value; }, setPlanDraftTimeEdit() {}, setRecurringTimeEdit() {}, setRecycledCompletionNote() {},
       timelineSelectionAnchorRef: { current: {} }, timelineScrollRef: { current: null },
       timelineSelectionTriggerRef: { current: { isConnected: true, focus() { state.focused = true; state.tooltip = { title: "reopened by focus" }; } } },
       window: { requestAnimationFrame(fn) { frames.push(fn); } }, hideTimelineTooltip() { state.tooltip = null; }

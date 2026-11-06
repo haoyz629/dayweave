@@ -144,7 +144,7 @@ fn historical_creation_completion_cannot_be_cleared_or_changed_through_any_resul
                 ends_at: None, remaining_workload_minutes: None,
             }).map(|_| ()),
             "capture" => db.save_execution_capture(PAST, ExecutionCaptureInput {
-                plan_block_id: block.id.clone(), outcome: ReviewOutcome::NotStarted, note: None,
+                plan_block_id: block.id.clone(), outcome: Some(ReviewOutcome::NotStarted), note: None,
             }),
             "review" => db.save_review_entry(PAST, ReviewEntryInput {
                 plan_block_id: block.id.clone(), outcome: ReviewOutcome::NotStarted, actual_minutes: None,

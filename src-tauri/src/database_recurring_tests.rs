@@ -45,7 +45,7 @@ fn recurring_this_edit_freezes_all_schedule_fields_and_preserves_review() {
     let item = db.create_recurring_item(input("original")).unwrap();
     let past = occurrence(&mut db,"2026-10-15");
     let today = occurrence(&mut db,"2026-10-16");
-    let reviewed = db.save_recurring_occurrence_review(&today.id, RecurringOccurrenceReviewInput { outcome: "partial".into(), notes: Some("review stays".into()) }).unwrap();
+    let reviewed = db.save_recurring_occurrence_review(&today.id, RecurringOccurrenceReviewInput { outcome: Some("partial".into()), notes: Some("review stays".into()) }).unwrap();
     let mut edit = input("one only"); edit.notes = None; edit.display_time = Some("11:00".into()); edit.display_duration_minutes = Some(45);
     edit.tags = vec!["new tag".into()];
     let returned = db.update_recurring_occurrence(&today.id,edit,"2026-10-16","this").unwrap();
@@ -306,7 +306,7 @@ fn recurring_future_edit_keeps_review_facts_and_freezes_after_shanghai_midnight(
     let mut db = Database::in_memory().unwrap();
     let item = db.create_recurring_item(input("original")).unwrap();
     let today = occurrence(&mut db,"2026-10-16");
-    let reviewed = db.save_recurring_occurrence_review(&today.id,RecurringOccurrenceReviewInput { outcome: "completed".into(),notes: Some("keep result".into()) }).unwrap();
+    let reviewed = db.save_recurring_occurrence_review(&today.id,RecurringOccurrenceReviewInput { outcome: Some("completed".into()),notes: Some("keep result".into()) }).unwrap();
     let mut edit = input("future title"); edit.display_time = Some("13:00".into());
     db.update_recurring_occurrence(&today.id,edit.clone(),"2026-10-16","future").unwrap();
     let changed = occurrence(&mut db,"2026-10-16");
@@ -370,7 +370,7 @@ fn recurring_occurrence_rule_metadata_uses_its_version_not_the_latest_item() {
     let range = db.list_recurring_occurrences_range("2026-10-16","2026-10-18").unwrap();
     assert!(range.iter().all(|o| o.schedule_rule.as_ref() == Some(&original)));
     let reviewed = db.save_recurring_occurrence_review(&target.id,RecurringOccurrenceReviewInput {
-        outcome: "partial".into(), notes: Some("keep review".into()),
+        outcome: Some("partial".into()), notes: Some("keep review".into()),
     }).unwrap();
     assert_eq!(reviewed.schedule_rule,Some(original.clone()));
     let mut single = target.schedule_rule.clone().unwrap(); single.title = "single title".into();

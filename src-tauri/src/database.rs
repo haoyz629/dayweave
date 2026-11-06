@@ -206,7 +206,7 @@ pub struct RecurringOccurrenceDto {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecurringOccurrenceReviewInput {
-    pub outcome: String,
+    pub outcome: Option<String>,
     pub notes: Option<String>,
 }
 
@@ -667,7 +667,7 @@ pub struct PlanBlockDto {
 #[serde(deny_unknown_fields)]
 pub struct ExecutionCaptureInput {
     pub plan_block_id: String,
-    pub outcome: ReviewOutcome,
+    pub outcome: Option<ReviewOutcome>,
     pub note: Option<String>,
 }
 
@@ -833,7 +833,7 @@ fn validate_review_target(connection: &Connection, date: &str, kind: &str, id: &
             params![id, date], |row| row.get(0))?,
         "recurring" => connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM recurring_occurrences o JOIN recurring_items i ON i.id = o.recurring_item_id
-             WHERE o.id = ?1 AND o.occurrence_date = ?2 AND i.deleted_at IS NULL AND (?3 OR o.outcome IS NULL))",
+             WHERE o.id = ?1 AND o.occurrence_date = ?2 AND (?3 OR o.outcome IS NULL))",
             params![id, date, today], |row| row.get(0))?,
         _ => return Err(AppError::Schema("无效的记录条目类型".into())),
     };
@@ -1458,8 +1458,10 @@ impl Database {
         occurrence_id: &str,
         input: RecurringOccurrenceReviewInput,
     ) -> AppResult<RecurringOccurrenceDto> {
-        if !matches!(input.outcome.as_str(), "completed" | "partial" | "not_completed") {
-            return Err(AppError::Schema("重复事项结果必须为完成、部分完成或未完成".into()));
+        if let Some(outcome) = input.outcome.as_deref() {
+            if !matches!(outcome, "completed" | "partial" | "not_completed") {
+                return Err(AppError::Schema("重复事项结果必须为完成、部分完成或未完成".into()));
+            }
         }
         let notes = normalize_review_text(input.notes, 2000, "复盘备注")?;
         let transaction = self.connection.transaction()?;
@@ -1468,7 +1470,9 @@ impl Database {
         ).optional()?.ok_or_else(|| AppError::NotFound(format!("重复事项发生记录 {occurrence_id}")))?;
         validate_review_target(&transaction, &occurrence_date, "recurring", occurrence_id)?;
         let before = load_occurrence(&transaction, occurrence_id)?;
-        if before.outcome.as_deref() == Some(input.outcome.as_str()) && before.review_notes == notes {
+        // A note-only save keeps the current outcome and appends a neutral execution record.
+        let target_outcome = input.outcome.clone().or_else(|| before.outcome.clone());
+        if before.outcome == target_outcome && before.review_notes == notes {
             clear_review_draft(&transaction, &occurrence_date, "recurring", occurrence_id)?;
             transaction.commit()?;
             return Ok(before);
@@ -1478,7 +1482,7 @@ impl Database {
             "UPDATE recurring_occurrences
              SET outcome = ?2, review_notes = ?3, reviewed_at = ?4, updated_at = ?4, is_exception = 1
              WHERE id = ?1",
-            params![occurrence_id, input.outcome, notes, timestamp],
+            params![occurrence_id, target_outcome, notes, timestamp],
         )?;
         database_recurring_execution::record(&transaction, occurrence_id, &timestamp)?;
         let occurrence = load_occurrence(&transaction, occurrence_id)?;
@@ -3663,11 +3667,24 @@ impl Database {
             return Err(AppError::Domain("执行日期必须与执行块所属日期一致".into()));
         }
         let in_window = database_results::allow_capture(&transaction, capture_date, &input.plan_block_id)?;
-        database_results::require_block_outcome_change(&transaction, &input.plan_block_id, input.outcome.as_str())?;
+        // A missing outcome means note-only: keep the current result and only update the note.
+        let note_only = input.outcome.is_none();
+        let outcome_str = if let Some(outcome) = input.outcome {
+            outcome.as_str().to_string()
+        } else {
+            transaction.query_row(
+                "SELECT COALESCE((SELECT outcome FROM review_entries WHERE plan_block_id = pb.id), pb.execution_status)
+                 FROM plan_blocks pb WHERE pb.id = ?1",
+                [&input.plan_block_id], |row| row.get::<_, String>(0),
+            )?
+        };
+        if !note_only {
+            database_results::require_block_outcome_change(&transaction, &input.plan_block_id, &outcome_str)?;
+        }
         let task_id: String = transaction.query_row("SELECT task_id FROM plan_blocks WHERE id = ?1", [&input.plan_block_id], |row| row.get(0))?;
         let task = load_task_dto_in_transaction(&transaction, &task_id)?;
         if database_results::save_recycled_completion(&transaction, &task, capture_date,
-            &input.plan_block_id, input.outcome.as_str(), input.note.as_deref())? {
+            &input.plan_block_id, &outcome_str, input.note.as_deref())? {
             transaction.commit()?;
             return Ok(());
         }
@@ -3676,7 +3693,7 @@ impl Database {
         database_results::freeze_block(&transaction, &input.plan_block_id)?;
         if has_review {
             transaction.execute("UPDATE review_entries SET outcome = ?2, notes = ?3 WHERE plan_block_id = ?1",
-                params![input.plan_block_id, input.outcome.as_str(), input.note])?;
+                params![input.plan_block_id, &outcome_str, input.note])?;
         }
         let timestamp = now();
         transaction.execute(
@@ -3684,7 +3701,7 @@ impl Database {
              SET execution_status = ?2, execution_note = ?3, execution_captured_at = ?4,
                  review_required = CASE WHEN ?5 THEN review_required ELSE 1 END, updated_at = ?4
              WHERE id = ?1",
-            params![input.plan_block_id, input.outcome.as_str(), input.note, timestamp, has_review],
+            params![input.plan_block_id, &outcome_str, input.note, timestamp, has_review],
         )?;
         if in_window {
             preserve_review_supplement_after_capture(&transaction, capture_date, &input.plan_block_id, before.execution_note.as_deref())?;
@@ -3692,7 +3709,7 @@ impl Database {
             clear_review_draft(&transaction, capture_date, "task", &input.plan_block_id)?;
         }
         database_execution::sync_block_result(&transaction, &input.plan_block_id)?;
-        if in_window && !has_review && task_status != "done" {
+        if in_window && !has_review && !note_only && task_status != "done" {
             let payload = FactUndo { task: None, block: Some(before), occurrence: None, review: None,
                 after_facts: fact_fingerprint(&transaction, "execution_capture", &task_id)? };
             record_undo_entry(&transaction, "execution_captured", "execution_capture", &task_id, &serde_json::to_string(&payload)?, None)?;
@@ -6461,7 +6478,7 @@ mod tests {
         let first = database.include_plan_task(include_input(&task, &date, "09:00", "10:00")).unwrap();
         let undo = database.latest_undo().unwrap().unwrap();
         database.save_execution_capture(&date, ExecutionCaptureInput { plan_block_id: first.task_blocks[0].id.clone(),
-            outcome: ReviewOutcome::Partial, note: Some("已有执行记录".into()) }).unwrap();
+            outcome: Some(ReviewOutcome::Partial), note: Some("已有执行记录".into()) }).unwrap();
         assert!(database.apply_undo(&undo.id).is_err());
         assert!(database.remove_plan_block(remove_input(&date, &first.task_blocks[0])).is_err());
         let current = database.get_task(&task.id).unwrap();
@@ -6478,7 +6495,7 @@ mod tests {
         assert!(database.apply_undo(&undo_remove.id).is_err());
         let single = create_direct_task(&mut database, "锁定安排", &date);
         let block = database.get_day_schedule(&date).unwrap().task_blocks.into_iter().find(|b| b.task_id == single.id).unwrap();
-        database.save_execution_capture(&date, ExecutionCaptureInput { plan_block_id: block.id.clone(), outcome: ReviewOutcome::Completed, note: None }).unwrap();
+        database.save_execution_capture(&date, ExecutionCaptureInput { plan_block_id: block.id.clone(), outcome: Some(ReviewOutcome::Completed), note: None }).unwrap();
         assert!(database.remove_plan_block(remove_input(&date, &block)).is_err());
         let locked = database.get_task(&single.id).unwrap();
         assert!(database.include_plan_task(include_input(&locked, &date, "09:00", "10:00")).is_err());
@@ -6529,7 +6546,7 @@ mod tests {
                 draft_kind: "update".into(), target_task_id: Some(task.id.clone()), input: manual_draft("禁止跨日绕过锁定", Some(&date)),
             }], "{}").unwrap();
             let old_plan = database.start_manual_plan_draft(&date).unwrap();
-            database.save_execution_capture(&date, ExecutionCaptureInput {plan_block_id:block.id.clone(), outcome, note:None}).unwrap();
+            database.save_execution_capture(&date, ExecutionCaptureInput {plan_block_id:block.id.clone(), outcome:Some(outcome), note:None}).unwrap();
             let before = serde_json::to_value(database.get_task(&task.id).unwrap()).unwrap();
             assert_eq!(before["execution_locked"], true);
             assert!(database.list_tasks(false, None).unwrap().iter().find(|item| item.id == task.id).unwrap().execution_locked);
@@ -6682,7 +6699,7 @@ mod tests {
         let future = database.get_day_schedule(&next).unwrap().task_blocks.remove(0);
         {
             let _clock = TestToday::new(&next);
-            database.save_execution_capture(&next, ExecutionCaptureInput { plan_block_id:future.id.clone(), outcome:ReviewOutcome::Partial, note:Some("已有执行".into()) }).unwrap();
+            database.save_execution_capture(&next, ExecutionCaptureInput { plan_block_id:future.id.clone(), outcome:Some(ReviewOutcome::Partial), note:Some("已有执行".into()) }).unwrap();
         }
         let captured = serde_json::to_value(database.get_day_schedule(&next).unwrap().task_blocks.remove(0)).unwrap();
         let before = database.get_task(&task.id).unwrap();
@@ -6728,7 +6745,7 @@ mod tests {
         database.update_plan_block_time(input.clone()).unwrap();
         assert!(database.update_plan_block_time(input).is_err(), "第二次请求不能覆盖已变化的时间");
         let saved = database.get_day_schedule(&date).unwrap().task_blocks.remove(0);
-        database.save_execution_capture(&date, ExecutionCaptureInput {plan_block_id:saved.id.clone(), outcome:ReviewOutcome::Completed, note:None}).unwrap();
+        database.save_execution_capture(&date, ExecutionCaptureInput {plan_block_id:saved.id.clone(), outcome:Some(ReviewOutcome::Completed), note:None}).unwrap();
         let locked = serde_json::to_value(database.get_task(&task.id).unwrap()).unwrap();
         assert!(database.update_plan_block_time(PlanBlockTimeUpdate {
             plan_date:date.clone(), block_id:saved.id.clone(), expected_starts_at:saved.starts_at, expected_ends_at:saved.ends_at,
@@ -6995,7 +7012,7 @@ mod tests {
         let schedule = database.confirm_rule_based_plan(preview).unwrap();
         let block = &schedule.task_blocks[0];
         let undo = database.latest_undo().unwrap().unwrap();
-        database.save_execution_capture(&date, ExecutionCaptureInput { plan_block_id: block.id.clone(), outcome: ReviewOutcome::Completed, note: None }).unwrap();
+        database.save_execution_capture(&date, ExecutionCaptureInput { plan_block_id: block.id.clone(), outcome: Some(ReviewOutcome::Completed), note: None }).unwrap();
         assert!(database.apply_undo(&undo.id).is_err());
         assert!(save_direct_task_time(&mut database, &task.id, &format!("{date}T14:00:00+08:00"), &format!("{date}T15:00:00+08:00")).is_err());
         assert!(database.get_task(&task.id).unwrap().execution_locked);
@@ -8307,7 +8324,7 @@ mod tests {
         let clock = TestToday::new("2026-08-14");
         database.save_execution_capture("2026-08-14", ExecutionCaptureInput {
             plan_block_id: completed_block_id.clone(),
-            outcome: ReviewOutcome::Completed,
+            outcome: Some(ReviewOutcome::Completed),
             note: None,
         }).unwrap();
         drop(clock);
@@ -8342,7 +8359,7 @@ mod tests {
         let clock = TestToday::new("2026-08-14");
         database.save_execution_capture("2026-08-14", ExecutionCaptureInput {
             plan_block_id: adjusted_block.id.clone(),
-            outcome: ReviewOutcome::Completed,
+            outcome: Some(ReviewOutcome::Completed),
             note: None,
         }).unwrap();
         drop(clock);
@@ -8402,7 +8419,7 @@ mod tests {
         let locked_block = confirmed.task_blocks[0].clone();
         let clock = TestToday::new("2026-09-04");
         database.save_execution_capture("2026-09-04", ExecutionCaptureInput {
-            plan_block_id: locked_block.id.clone(), outcome: ReviewOutcome::Completed, note: None,
+            plan_block_id: locked_block.id.clone(), outcome: Some(ReviewOutcome::Completed), note: None,
         }).unwrap();
         drop(clock);
 
@@ -9041,7 +9058,7 @@ mod tests {
 
         let _clock = TestToday::new("2026-08-14");
         database.save_execution_capture("2026-08-14", ExecutionCaptureInput {
-            plan_block_id: block_id.clone(), outcome: ReviewOutcome::Completed,
+            plan_block_id: block_id.clone(), outcome: Some(ReviewOutcome::Completed),
             note: Some("先记下一句".into()),
         }).unwrap();
         let captured = database.get_day_schedule("2026-08-14").unwrap();
@@ -9061,7 +9078,7 @@ mod tests {
         assert!(!cleared.task_blocks[0].review_required);
 
         database.save_execution_capture("2026-08-14", ExecutionCaptureInput {
-            plan_block_id: block_id.clone(), outcome: ReviewOutcome::Partial,
+            plan_block_id: block_id.clone(), outcome: Some(ReviewOutcome::Partial),
             note: Some("复盘前修正为部分完成".into()),
         }).unwrap();
         let corrected = database.get_day_schedule("2026-08-14").unwrap();
@@ -9074,7 +9091,7 @@ mod tests {
         }).unwrap();
         assert!(database.clear_execution_capture("2026-08-14", &block_id).is_err(), "未完成的最终复盘仍不可清除");
         assert!(database.save_execution_capture("2026-08-14", ExecutionCaptureInput {
-            plan_block_id: block_id.clone(), outcome: ReviewOutcome::Completed, note: None,
+            plan_block_id: block_id.clone(), outcome: Some(ReviewOutcome::Completed), note: None,
         }).is_ok(), "窗口内只修正结果，保留独立复盘详情");
         let reviewed_task = database.get_task(&task_id).unwrap();
         assert_eq!(reviewed_task.actual_minutes, 40);
@@ -9126,7 +9143,7 @@ mod tests {
         assert_eq!(database.count("plan_blocks").unwrap(), 0);
         let saved = database.save_recurring_occurrence_review(
             &occurrences[0].id,
-            RecurringOccurrenceReviewInput { outcome: "partial".into(), notes: Some("完成了一半".into()) },
+            RecurringOccurrenceReviewInput { outcome: Some("partial".into()), notes: Some("完成了一半".into()) },
         ).unwrap();
         assert_eq!(saved.outcome.as_deref(), Some("partial"));
         assert_eq!(saved.review_notes.as_deref(), Some("完成了一半"));
@@ -9203,7 +9220,7 @@ mod tests {
         let item = database.create_recurring_item(recurring_item("暂停后收尾", &today)).unwrap();
         let occurrence = database.list_recurring_occurrences(&today).unwrap()[0].clone();
         let saved = database.save_recurring_occurrence_review(&occurrence.id, RecurringOccurrenceReviewInput {
-            outcome: "completed".into(), notes: Some("已经执行的记录".into()),
+            outcome: Some("completed".into()), notes: Some("已经执行的记录".into()),
         }).unwrap();
         database.set_recurring_item_status(&item.id, "paused").unwrap();
         let events_before = database.list_recurring_execution_history(&item.id).unwrap();
@@ -9409,7 +9426,7 @@ mod tests {
         let unsafe_undo = database.latest_undo().unwrap().unwrap();
         let _clock = TestToday::new("2026-09-01");
         database.save_execution_capture("2026-09-01", ExecutionCaptureInput {
-            plan_block_id: confirmed.task_blocks[0].id.clone(), outcome: ReviewOutcome::Completed, note: None,
+            plan_block_id: confirmed.task_blocks[0].id.clone(), outcome: Some(ReviewOutcome::Completed), note: None,
         }).unwrap();
         assert!(database.apply_undo(&unsafe_undo.id).is_err(), "已有执行事实后必须拒绝撤销计划");
         assert_eq!(database.get_day_schedule("2026-09-01").unwrap().plan_id, confirmed.plan_id);

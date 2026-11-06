@@ -202,7 +202,7 @@ fn auto_scheduled_cross_day_only_completes_after_all_daily_blocks_and_execution_
         let _day = TestNow::new(&format!("{date}T18:00:00+08:00"));
         let block = db.get_day_schedule(date).unwrap().task_blocks.remove(0);
         db.save_execution_capture(date, ExecutionCaptureInput {
-            plan_block_id: block.id, outcome: ReviewOutcome::Completed, note: None,
+            plan_block_id: block.id, outcome: Some(ReviewOutcome::Completed), note: None,
         }).unwrap();
         assert_eq!(db.get_task(&task.id).unwrap().status == "done", date == LAST);
         assert!(db.apply_undo(&undo.id).is_err(), "执行后不能撤销创建");

@@ -6892,11 +6892,13 @@ export default function App() {
   const plannedTaskCount = summaryTaskBlocks.length;
   const completedPlannedTaskCount = summaryTaskBlocks.filter((block) => (block.review?.outcome ?? block.execution_status) === "completed").length;
   const plannedMinutes = summaryTaskBlocks.reduce((total, block) => total + Math.round((new Date(block.ends_at).getTime() - new Date(block.starts_at).getTime()) / 60000), 0);
-  const planProgress = plannedTaskCount ? Math.round(completedPlannedTaskCount / plannedTaskCount * 100) : 100;
   const summaryRecurringOccurrences = recurringOccurrences.filter((item) => item.occurrence_date === selectedDate);
+  const summaryMinutes = plannedMinutes + summaryRecurringOccurrences.reduce((total, item) => total + (item.display_duration_minutes ?? 0), 0);
   const recurringItemCount = summaryRecurringOccurrences.length;
   const completedRecurringItemCount = summaryRecurringOccurrences.filter((item) => item.outcome === "completed").length;
-  const recurringProgress = recurringItemCount ? Math.round(completedRecurringItemCount / recurringItemCount * 100) : 100;
+  const summaryArrangementCount = plannedTaskCount + recurringItemCount;
+  const completedArrangementCount = completedPlannedTaskCount + completedRecurringItemCount;
+  const summaryProgress = summaryArrangementCount ? Math.round(completedArrangementCount / summaryArrangementCount * 100) : 0;
 
   useLayoutEffect(() => {
     const previousPage = previousPageRef.current;
@@ -7258,13 +7260,14 @@ export default function App() {
         {navigation.map((item) => <button key={item.label} type="button" className={active === item.label ? "active" : ""} aria-current={active === item.label ? "page" : undefined} aria-label={item.label} aria-describedby={sidebarCollapsed ? `sidebar-tip-${item.icon}` : undefined} onClick={() => requestNavigation({ active: item.label })}><span className="nav-icon-tile" aria-hidden="true"><span className="nav-asset-icon" style={{ "--nav-icon": `url("${item.asset}")` } as CSSProperties} /></span><span className="nav-copy"><strong>{item.label}</strong></span><span className="sidebar-tooltip" id={`sidebar-tip-${item.icon}`} role="tooltip" aria-hidden="true"><strong>{item.label}</strong><small>{item.description}</small></span></button>)}
       </nav>
       <footer>
-        <section className="sidebar-summary-card" aria-label="计划统计">
-          <div className="sidebar-plan-row"><span>任务计划</span><strong>{completedPlannedTaskCount} / {plannedTaskCount}</strong></div>
-          <div className="sidebar-plan-track" role="progressbar" aria-label="任务计划完成进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={planProgress}><span style={{ width: `${planProgress}%` }} /></div>
-          <div className="sidebar-plan-meta"><span>{plannedMinutes} 分钟已安排</span><span>完成{planProgress}%</span></div>
-          <div className="sidebar-repeat-row"><span>重复事项</span><strong>{completedRecurringItemCount} / {recurringItemCount}</strong></div>
-          <div className="sidebar-plan-track" role="progressbar" aria-label="重复事项完成进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={recurringProgress} aria-valuetext={`已完成 ${completedRecurringItemCount} 次，共 ${recurringItemCount} 次`}><span style={{ width: `${recurringProgress}%` }} /></div>
-          <div className="sidebar-plan-meta"><span>本次已完成</span><span>完成{recurringProgress}%</span></div>
+        <section className="sidebar-summary-card" aria-label="当日进度">
+          <header className="sidebar-summary-heading"><h2>当日进度</h2><time dateTime={selectedDate} title={selectedDate}>{Number(selectedDate.slice(5, 7))}月{Number(selectedDate.slice(8, 10))}日</time></header>
+          {summaryArrangementCount > 0 ? <div className="sidebar-summary-body">
+            <div className="sidebar-summary-reading"><div className="sidebar-summary-fraction"><strong className="sidebar-summary-total">{completedArrangementCount}<span>/{summaryArrangementCount}</span></strong><span>已完成</span></div><span className="sidebar-summary-percent">{summaryProgress}%</span></div>
+            <div className="sidebar-plan-track" role="progressbar" aria-label="当日安排完成进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={summaryProgress} aria-valuetext={`已完成 ${completedArrangementCount} 次，共 ${summaryArrangementCount} 次`}><span style={{ width: `${summaryProgress}%` }} /></div>
+            <dl className="sidebar-summary-breakdown"><div><dt>普通安排</dt><dd>{completedPlannedTaskCount}/{plannedTaskCount}</dd></div><div><dt>重复事项</dt><dd>{completedRecurringItemCount}/{recurringItemCount}</dd></div></dl>
+            <div className="sidebar-summary-duration"><span>安排时长</span><span>{summaryMinutes} 分钟</span></div>
+          </div> : <p className="sidebar-summary-empty">暂无安排</p>}
         </section>
         {(tasksLoading || tasksError) && <span className={`database-state${tasksError ? " unavailable" : ""}`} role="status"><i />{tasksLoading ? "正在载入本地数据" : "本地数据暂时不可用"}</span>}
       </footer>

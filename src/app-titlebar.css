@@ -15,8 +15,8 @@
 .app-titlebar .product-brand-name { margin: 0; color: var(--color-ink); font: 650 15px/18px var(--jx-font-sans); white-space: nowrap; }
 .app-titlebar .product-brand-copy { margin: 2px 0 0; color: var(--color-muted); font: 400 12px/16px var(--jx-font-sans); white-space: nowrap; }
 .app-view-slot { position: absolute; left: calc(50% + 62px); top: 11px; transform: translateX(-50%); }
-.app-titlebar .timeline-view-switch { width: 204px; height: 34px; justify-content: center; padding: 3px; border: 1px solid var(--color-edge); border-radius: 8px; background: var(--color-panel); }
-.app-titlebar .timeline-view-switch button { width: 64px; min-height: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; color: var(--color-muted); background: transparent; font: 500 12px/26px var(--jx-font-sans); }
+.app-titlebar .timeline-view-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; box-sizing: border-box; width: 204px; height: 34px; padding: 3px; border: 1px solid var(--color-edge); border-radius: 8px; background: var(--color-panel); }
+.app-titlebar .timeline-view-switch button { width: 100%; min-width: 0; min-height: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; color: var(--color-muted); background: transparent; font: 500 12px/26px var(--jx-font-sans); }
 .app-titlebar .timeline-view-switch button:hover { color: var(--color-ink); background: var(--color-hover); }
 .app-titlebar .timeline-view-switch button.is-active { color: var(--color-selected-ink); background: var(--color-selected-bg); box-shadow: none; font-weight: 600; }
 .app-titlebar-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
@@ -64,7 +64,7 @@ html:root .desktop-app .today-page .timeline-heading-plan-status .confirmed-plan
   .app-titlebar { gap: 6px; padding-inline: 8px; }
   .app-titlebar .product-brand-text { display: none; }
   .app-view-slot { left: 45%; }
-  .app-titlebar .timeline-view-switch button { width: 54px; }
+  .app-titlebar .timeline-view-switch { width: 170px; }
   .app-titlebar-actions { gap: 5px; }
   .app-window-controls { gap: 0; }
   .app-window-controls button { width: 26px; }

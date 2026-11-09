@@ -12,6 +12,25 @@ function Assert-True($Condition, [string]$Message) {
 
 function Get-Process { param($Name, $ErrorAction) }
 function Stop-Process { throw 'Tests must never stop a process.' }
+Add-Type -TypeDefinition @'
+using System;
+public static class DayweavePackagingIntegrity {
+    public static Func<string, uint> Query;
+    public static uint Read(string path) { return Query(path); }
+}
+'@
+[DayweavePackagingIntegrity]::Query = [Func[string,uint32]] {
+    param([string]$LiteralPath)
+    $mockState.IntegrityPaths.Add($LiteralPath)
+    if ($mockState.Scenario -eq 'integrity-read-failure') { throw 'Access is denied.' }
+    if ($mockState.Scenario -eq 'untrusted' -and $LiteralPath -eq $fixture) { return 0 }
+    $low = ($mockState.Scenario -eq 'low-executable' -and $LiteralPath -like '*dayweave.exe') -or
+        ($mockState.Scenario -eq 'low-installer' -and $LiteralPath -eq $fixture) -or
+        ($mockState.Scenario -eq 'bundle-replaces-executable-low' -and $mockState.IntegrityPaths.Count -eq 2)
+    if ($low) { return 4096 }
+    if ($mockState.Scenario -eq 'high') { return 12288 }
+    return 8192
+}
 function New-Object {
     param([string]$TypeName)
     if ($TypeName -eq 'Diagnostics.ProcessStartInfo') {
@@ -60,12 +79,19 @@ try {
         @{ Name = 'build-failure'; Configuration = 'Debug'; Error = '*build failed*23*'; Calls = 1 },
         @{ Name = 'bundle-failure'; Configuration = 'Debug'; Error = '*bundling failed*23*'; Calls = 2 },
         @{ Name = 'missing'; Configuration = 'Debug'; Error = '*no NSIS setup executable*'; Calls = 2 },
-        @{ Name = 'stale'; Configuration = 'Debug'; Error = '*predates this build*'; Calls = 2 }
+        @{ Name = 'stale'; Configuration = 'Debug'; Error = '*predates this build*'; Calls = 2 },
+        @{ Name = 'high'; Configuration = 'Debug'; Error = $null; Calls = 2 },
+        @{ Name = 'low-executable'; Configuration = 'Debug'; Error = '*Low integrity artifact*'; Calls = 1 },
+        @{ Name = 'low-installer'; Configuration = 'Debug'; Error = '*Low integrity artifact*'; Calls = 2 },
+        @{ Name = 'untrusted'; Configuration = 'Debug'; Error = '*Low integrity artifact*'; Calls = 2 },
+        @{ Name = 'bundle-replaces-executable-low'; Configuration = 'Debug'; Error = '*Low integrity artifact*'; Calls = 2 },
+        @{ Name = 'integrity-read-failure'; Configuration = 'Debug'; Error = '*Cannot verify artifact integrity*'; Calls = 1 }
     )) {
         $mockState.Scenario = $case.Name
         $mockState.Calls = [Collections.Generic.List[object]]::new()
         $mockState.Processes = [Collections.Generic.List[object]]::new()
         $mockState.BundleDirectory = $null
+        $mockState.IntegrityPaths = [Collections.Generic.List[string]]::new()
         $previousPath = $env:PATH
         $previousLocation = (Get-Location).Path
         $caught = $null
@@ -113,6 +139,8 @@ try {
             Assert-True ($result.sha256 -eq (Get-FileHash $fixture -Algorithm SHA256).Hash) 'real SHA-256'
             Assert-True ($result.bytes -eq (Get-Item $fixture).Length) 'exact byte size'
             Assert-True ($result.configuration -eq $case.Configuration) 'result configuration'
+            Assert-True ($result.integrity.executable -eq 'not-low' -and $result.integrity.installer -eq 'not-low') 'both integrity checks included in result'
+            Assert-True ($mockState.IntegrityPaths.Count -eq 3) 'check executable before and after bundling, then installer'
             Assert-True ($mockState.BundleDirectory -like "*\target\$($case.Configuration.ToLowerInvariant())\bundle\nsis") 'correct bundle directory'
             foreach ($field in @('buildSeconds', 'bundleSeconds', 'verificationSeconds', 'totalSeconds')) {
                 Assert-True ($null -ne $result.timings.$field -and $result.timings.$field -ge 0) "timing $field"
@@ -120,7 +148,7 @@ try {
         }
         Write-Host "PASS: $($case.Name)"
     }
-    Write-Host 'All 6 packaging regression tests passed (mock commands only).'
+    Write-Host 'All 12 packaging regression tests passed (mock commands only).'
 }
 finally {
     Remove-Item -LiteralPath $fixture -Force

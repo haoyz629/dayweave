@@ -119,13 +119,13 @@ test("brand renders the week beside its name and keeps both subtitle languages",
   assert.doesNotMatch(renderToStaticMarkup(context.ProductBrand()), /product-brand-week/);
 });
 
-test("calendar view switch centers its fixed-width buttons inside the existing frame", () => {
+test("calendar view switch fills three equal columns with uniform frame insets", () => {
   const css = read("./app-titlebar.css");
   const frame = css.match(/^\.app-titlebar \.timeline-view-switch \{([^}]+)\}/m)?.[1];
   assert.ok(frame);
-  assert.match(frame, /justify-content: center;/);
-  assert.match(frame, /width: 204px;/);
-  assert.match(frame, /height: 34px;/);
-  assert.match(css, /\.app-titlebar \.timeline-view-switch button \{ width: 64px;/);
-  assert.match(css, /@media \(max-width: 600px\)[\s\S]*\.app-titlebar \.timeline-view-switch button \{ width: 54px;/);
+  assert.match(frame, /display: grid; grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
+  assert.match(frame, /gap: 3px;/);
+  assert.match(frame, /box-sizing: border-box; width: 204px; height: 34px; padding: 3px; border: 1px/);
+  assert.match(css, /\.app-titlebar \.timeline-view-switch button \{ width: 100%; min-width: 0; min-height: 26px; height: 26px;/);
+  assert.match(css, /@media \(max-width: 600px\)[\s\S]*\.app-titlebar \.timeline-view-switch \{ width: 170px; \}/);
 });

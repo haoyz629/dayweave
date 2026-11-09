@@ -11,7 +11,7 @@ const handlers = new Map(), summaries = new Map();
 let poolButton, detailCompletionButton, editableCompletionButton;
 function collect(node) {
   if (ts.isFunctionDeclaration(node) && ["transition", "reopen", "taskCommitted"].includes(node.name?.text)) handlers.set(node.name.text, node.getText(source));
-  if (ts.isVariableDeclaration(node) && ["summaryTaskBlocks", "plannedTaskCount", "completedPlannedTaskCount", "plannedMinutes", "planProgress"].includes(node.name.getText(source))) summaries.set(node.name.getText(source), node.initializer.getText(source));
+  if (ts.isVariableDeclaration(node) && ["summaryTaskBlocks", "plannedTaskCount", "completedPlannedTaskCount", "plannedMinutes", "summaryRecurringOccurrences", "recurringItemCount", "completedRecurringItemCount", "summaryArrangementCount", "completedArrangementCount", "summaryProgress"].includes(node.name.getText(source))) summaries.set(node.name.getText(source), node.initializer.getText(source));
   if (ts.isJsxElement(node) && node.openingElement.tagName.getText(source) === "button") {
     const attribute = node.openingElement.attributes.properties.find(attr => attr.name?.getText(source) === "className");
     if (attribute?.initializer?.getText(source) === '"waiting-pool-add"') poolButton = node.getText(source);
@@ -88,12 +88,12 @@ test("committed historical tasks refresh the selected schedule and statistics fo
   assert.equal(state.tasks[0].status, "done");
   assert.deepEqual(calls, [["2026-10-21", false]]);
   for (const execution_status of ["completed", "planned"]) {
-    const context = vm.createContext({ visibleTaskScheduleBlocks, selectedDate: "2026-10-21", today: "2026-11-01", daySchedule: { task_blocks: [{ task_status: execution_status === "completed" ? "done" : "scheduled", execution_status, starts_at: "2026-10-21T09:00:00+08:00", ends_at: "2026-10-21T09:30:00+08:00", review: null }] } });
+    const context = vm.createContext({ visibleTaskScheduleBlocks, recurringOccurrences: [], selectedDate: "2026-10-21", today: "2026-11-01", daySchedule: { task_blocks: [{ task_status: execution_status === "completed" ? "done" : "scheduled", execution_status, starts_at: "2026-10-21T09:00:00+08:00", ends_at: "2026-10-21T09:30:00+08:00", review: null }] } });
     for (const [name, expression] of summaries) vm.runInContext(compile(`this.${name} = ${expression};`), context);
     assert.equal(context.plannedTaskCount, 1);
     assert.equal(context.completedPlannedTaskCount, execution_status === "completed" ? 1 : 0);
     assert.equal(context.plannedMinutes, 30);
-    assert.equal(context.planProgress, execution_status === "completed" ? 100 : 0);
+    assert.equal(context.summaryProgress, execution_status === "completed" ? 100 : 0);
   }
 });
 

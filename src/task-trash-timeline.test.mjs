@@ -11,7 +11,7 @@ const handlers = new Map();
 const summaries = new Map();
 function collect(node) {
   if (ts.isFunctionDeclaration(node) && ["moveToTrash", "taskCommitted", "restore"].includes(node.name?.text)) handlers.set(node.name.text, node.getText(source));
-  if (ts.isVariableDeclaration(node) && ["summaryTaskBlocks", "plannedTaskCount", "completedPlannedTaskCount", "plannedMinutes", "planProgress"].includes(node.name.getText(source))) summaries.set(node.name.getText(source), node.initializer.getText(source));
+  if (ts.isVariableDeclaration(node) && ["summaryTaskBlocks", "plannedTaskCount", "completedPlannedTaskCount", "plannedMinutes"].includes(node.name.getText(source))) summaries.set(node.name.getText(source), node.initializer.getText(source));
   ts.forEachChild(node, collect);
 }
 collect(source);

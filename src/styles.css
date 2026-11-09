@@ -7028,16 +7028,45 @@ html[data-mode="dark"] .next-sidebar nav button:not(.active):is(:hover,:focus-vi
 html[data-mode="dark"] .next-sidebar nav button em { color: #c6d7ff; background: #293b60; border-color: #465b81; }
 .next-sidebar footer { padding: 0; border: 0; }
 .next-sidebar footer > .database-state { margin-top: 8px; }
-.next-sidebar .sidebar-summary-card { padding: 10px; border: 1px solid var(--jx-edge-soft); border-radius: 8px; background: var(--jx-raised); color: var(--jx-ink-soft); font: 400 11px/1.4 var(--jx-font-sans); }
-.sidebar-plan-row, .sidebar-plan-meta, .sidebar-repeat-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.sidebar-summary-card span { color: inherit; }
-.sidebar-summary-card .sidebar-plan-row strong { color: var(--state-plan) !important; font: 600 11px/1.4 var(--jx-font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.next-sidebar .sidebar-summary-card { padding: 12px; border: 1px solid var(--jx-edge); border-radius: 8px; background: var(--jx-raised); color: var(--jx-ink); font: 400 12px/1.5 var(--jx-font-sans); }
+.sidebar-summary-card .sidebar-summary-heading, .sidebar-summary-card .sidebar-summary-reading, .sidebar-summary-card .sidebar-summary-duration { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sidebar-summary-card .sidebar-summary-heading h2 { margin: 0; color: var(--jx-ink); font: 500 13px/20px var(--jx-font-sans); letter-spacing: 0; }
+.sidebar-summary-card .sidebar-summary-heading time { color: var(--jx-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sidebar-summary-card .sidebar-summary-reading { align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin-top: 12px; }
+.sidebar-summary-card .sidebar-summary-fraction { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; color: var(--jx-muted); }
+.sidebar-summary-card .sidebar-summary-total { color: var(--jx-ink); font: 500 28px/36px var(--jx-font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sidebar-summary-card .sidebar-summary-total > span { color: var(--jx-muted); font-size: 16px; font-weight: 400; }
+.sidebar-summary-card .sidebar-summary-percent { color: var(--jx-muted); font-family: var(--jx-font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sidebar-summary-card .sidebar-summary-breakdown { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin: 0; }
+.sidebar-summary-card .sidebar-summary-breakdown dt { color: var(--jx-muted); }
+.sidebar-summary-card .sidebar-summary-breakdown dd { margin: 4px 0 0; color: var(--jx-ink); font: 400 13px/1.5 var(--jx-font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sidebar-summary-card .sidebar-summary-duration { flex-wrap: wrap; gap: 4px 8px; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--color-gray-bg); color: var(--jx-muted); }
+.sidebar-summary-card .sidebar-summary-duration > span:last-child { color: var(--jx-ink); font-family: var(--jx-font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sidebar-summary-card .sidebar-summary-empty { margin: 12px 0 0; color: var(--jx-muted); font: 400 14px/20px var(--jx-font-sans); }
 html[data-mode="dark"] .sidebar-summary-card { --state-plan: #bdc9ff; }
-.sidebar-plan-track { height: 5px; margin: 5px 0 7px; overflow: hidden; border-radius: 3px; background: var(--jx-edge-soft); }
+.sidebar-plan-track { height: 4px; margin: 12px 0; overflow: hidden; border-radius: 4px; background: var(--jx-edge-soft); }
 .sidebar-plan-track > span { display: block; height: 100%; border-radius: inherit; background: var(--jx-ink); }
-.sidebar-plan-meta { color: var(--jx-muted); font-size: 10px; }
-.sidebar-repeat-row { margin-top: 9px; padding-top: 7px; border-top: 1px solid var(--jx-edge-soft); }
-.sidebar-repeat-row strong { color: var(--jx-ink) !important; font: 600 11px/1.4 var(--jx-font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Approved summary: A statistics with B's header and empty state, light mode only. */
+.sidebar-summary-body { display: contents; }
+html:root:not([data-mode="dark"]) .next-sidebar .sidebar-summary-card { --summary-divider: #d9e1ec; padding: 0; overflow: hidden; border-radius: 12px; font: 400 12px/1.5 'Segoe UI', 'Microsoft YaHei', sans-serif; font-variant-numeric: tabular-nums; }
+html:root:not([data-mode="dark"]) .sidebar-summary-card .sidebar-summary-heading { padding: 12px 16px; border-bottom: 1px solid var(--summary-divider); background: var(--jx-surface); }
+html:root:not([data-mode="dark"]) .sidebar-summary-card .sidebar-summary-heading h2 { font-family: inherit; font-size: 14px; line-height: 21px; }
+html:root:not([data-mode="dark"]) .sidebar-summary-card .sidebar-summary-heading time { font-size: 12px; }
+html:root:not([data-mode="dark"]) .sidebar-summary-card .sidebar-summary-body { display: block; padding: 16px; }
+html:root:not([data-mode="dark"]) .sidebar-summary-card .sidebar-summary-reading { margin-top: 0; gap: 8px; }
+html:root:not([data-mode="dark"]) .sidebar-summary-card .sidebar-summary-fraction { flex-wrap: nowrap; }
+html:root:not([data-mode="dark"]) .sidebar-summary-card .sidebar-summary-total { font: 500 32px/36px 'Segoe UI', 'Microsoft YaHei', sans-serif; }
+html:root:not([data-mode="dark"]) .sidebar-summary-card .sidebar-summary-total > span { margin-left: 4px; }
+html:root:not([data-mode="dark"]) .sidebar-summary-card .sidebar-summary-percent { color: var(--color-green-ink); font-family: inherit; }
+html:root:not([data-mode="dark"]) .sidebar-summary-card .sidebar-plan-track { margin: 12px 0 0; background: var(--color-gray-bg); }
+html:root:not([data-mode="dark"]) .sidebar-summary-card .sidebar-summary-breakdown { grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 16px 0 0; }
+html:root:not([data-mode="dark"]) .sidebar-summary-card .sidebar-summary-breakdown > div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+html:root:not([data-mode="dark"]) .sidebar-summary-card .sidebar-summary-breakdown dd { margin: 0; font-family: inherit; font-size: 12px; font-weight: 500; line-height: 18px; }
+html:root:not([data-mode="dark"]) .sidebar-summary-card .sidebar-summary-duration { align-items: baseline; padding-top: 12px; border-top-color: var(--summary-divider); }
+html:root:not([data-mode="dark"]) .sidebar-summary-card .sidebar-summary-duration > span:last-child { font-family: inherit; font-weight: 500; }
+html:root:not([data-mode="dark"]) .sidebar-summary-card .sidebar-summary-empty { margin: 0; padding: 20px 16px; font: 400 14px/21px 'Segoe UI', 'Microsoft YaHei', sans-serif; }
+
 @media (min-width:861px) {
   .sidebar-collapsed .next-sidebar .next-create { display: flex; width: 40px; height: 44px; min-height: 44px; padding: 0; justify-content: center; }
   .sidebar-collapsed .next-sidebar nav { --sidebar-nav-height: 44px; --sidebar-nav-step: 52px; width: 100%; }

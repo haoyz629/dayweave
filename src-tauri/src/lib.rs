@@ -513,6 +513,10 @@ fn app_logo(mode: &str) -> Result<tauri::image::Image<'static>, String> {
     Ok(tauri::image::Image::new(rgba, 128, 128))
 }
 
+fn tray_logo() -> tauri::image::Image<'static> {
+    tauri::image::Image::new(include_bytes!("../icons/tray.rgba"), 32, 32)
+}
+
 #[tauri::command]
 fn set_app_window_title(window: tauri::WebviewWindow, title: String) -> Result<(), String> {
     window.set_title(&title).map_err(|error| error.to_string())
@@ -534,7 +538,7 @@ fn set_app_logo_mode(app: AppHandle, mode: String) -> Result<(), String> {
         }
     }
     if let Some(tray) = app.tray_by_id("main-tray") {
-        tray.set_icon(Some(icon)).map_err(|error| error.to_string())?;
+        tray.set_icon(Some(tray_logo())).map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -543,7 +547,8 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "显示今序 · Dayweave", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
-    let mut builder = TrayIconBuilder::with_id("main-tray")
+    let builder = TrayIconBuilder::with_id("main-tray")
+        .icon(tray_logo())
         .menu(&menu)
         .tooltip("今序 · Dayweave")
         .show_menu_on_left_click(false)
@@ -557,7 +562,6 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
                 show_main_window(tray.app_handle());
             }
         });
-    if let Some(icon) = app.default_window_icon().cloned() { builder = builder.icon(icon); }
     builder.build(app)?;
     Ok(())
 }

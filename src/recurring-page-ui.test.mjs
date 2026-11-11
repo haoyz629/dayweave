@@ -117,7 +117,8 @@ test("end confirmation can cancel without writing and persists only an ended sta
   assert.equal(h.state.pendingEndRecurringItem, null);
   assert.equal(h.state.writes.length, 0);
   h.state.pendingEndRecurringItem = item;
-  const confirm = nodes(h.renderDialog(), node => node.type === "button" && node.props.className === "dialog-discard")[0];
+  const confirm = nodes(h.renderDialog(), node => node.type === "button" && node.props.children === "结束重复")[0];
+  assert.equal(confirm.props.className, "dialog-save");
   confirm.props.onClick();
   // The JSX handler intentionally discards its Promise, so allow its two awaits to settle.
   await new Promise(resolve => setImmediate(resolve));

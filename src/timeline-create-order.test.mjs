@@ -16,7 +16,7 @@ for (const file of ["App.tsx", "timeline-task-create.tsx"]) {
     if (ts.isVariableDeclaration(node) && ["timelineItems", "timelineItemLanes"].includes(node.name.getText(source))) {
       initializers.set(node.name.getText(source), node.initializer.getText(source));
     }
-    if (file === "timeline-task-create.tsx" && ts.isJsxAttribute(node) && ["onPointerUp", "onKeyDown"].includes(node.name.getText(source))) {
+    if (file === "timeline-task-create.tsx" && ts.isJsxAttribute(node) && ["onPointerMove", "onPointerUp", "onKeyDown"].includes(node.name.getText(source))) {
       handlers.set(node.name.getText(source), node.initializer.expression.getText(source));
     }
     ts.forEachChild(node, collect);
@@ -25,10 +25,11 @@ for (const file of ["App.tsx", "timeline-task-create.tsx"]) {
 }
 assert.equal(declarations.length, 11, "execute the real layout and creation handlers");
 assert.equal(initializers.size, 2);
-assert.equal(handlers.size, 2);
+assert.equal(handlers.size, 3);
 const code = ts.transpileModule([
   ...declarations,
   `function currentLanes() { const timelineItems = ${initializers.get("timelineItems")}; return ${initializers.get("timelineItemLanes")}; }`,
+  `function move(event) { return (${handlers.get("onPointerMove")})(event); }`,
   `function release(event) { return (${handlers.get("onPointerUp")})(event); }`,
   `function keyboard(event) { return (${handlers.get("onKeyDown")})(event); }`
 ].join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -73,8 +74,13 @@ test("slide-to-create stays rightmost while selecting across a neighbour's start
   for (const y of [690, 660, 630, 600, 570, 540, 570, 600, 630, 660, 690]) {
     state.pointer.current.y = y;
     state.updateSelection();
-    assert.equal(state.timelineCreateRange.dragging, true);
-    assertRightmost(state);
+    if (y === 660) {
+      assert.equal(state.timelineCreateRange, null);
+      assert.equal(state.currentLanes()["create:selection"], undefined);
+    } else {
+      assert.equal(state.timelineCreateRange.dragging, true);
+      assertRightmost(state);
+    }
   }
 });
 
@@ -128,4 +134,84 @@ test("a real block drag still takes precedence over the slide-to-create preview"
   const lanes = state.currentLanes();
   assert.equal(lanes["create:selection"].column, 0);
   assert.equal(lanes["block:target"].column, 1);
+});
+
+test("sliding back into the anchor snap interval clears the preview and cancels on release", () => {
+  for (const destination of [570, 750]) {
+    for (const origin of [654, 660, 666]) {
+      const { state, track, event } = harness();
+      state.start(event(660));
+      state.move(event(destination));
+      assert.ok(state.timelineCreateRange);
+      state.move(event(origin));
+      assert.equal(state.timelineCreateRange, null);
+      assert.equal(state.rangeRef.current, null);
+      assert.equal(state.currentLanes()["block:target"].total, 1);
+      state.release(event(origin));
+      assert.equal(state.form, null);
+      assert.equal(state.pointer.current, null);
+      assert.equal(track.hasPointerCapture(1), false);
+    }
+  }
+});
+
+test("release uses its own coordinates even without a final pointer-move event", () => {
+  const { state, event } = harness();
+  state.start(event(660));
+  state.move(event(750));
+  state.release(event(660));
+  assert.equal(state.form, null);
+  assert.equal(state.timelineCreateRange, null);
+
+  state.start(event(660));
+  state.release(event(690));
+  assert.equal(state.form.start, "11:00");
+  assert.equal(state.form.end, "11:30");
+});
+
+test("selection can resume across the origin before releasing", () => {
+  const { state, event } = harness();
+  state.start(event(660));
+  state.move(event(750));
+  state.move(event(660));
+  assert.equal(state.timelineCreateRange, null);
+  state.move(event(570));
+  assertRightmost(state);
+  state.release(event(570));
+  assert.equal(state.form.start, "09:30");
+  assert.equal(state.form.end, "11:00");
+});
+
+test("clicks and sub-snap pointer jitter still create the existing fifteen-minute task", () => {
+  for (const y of [654, 660, 666]) {
+    const { state, event } = harness();
+    state.start(event(660));
+    state.move(event(y));
+    state.release(event(y));
+    assert.equal(state.form.start, "11:00");
+    assert.equal(state.form.end, "11:15");
+  }
+});
+
+test("return-to-origin cancellation also works at the day boundaries", () => {
+  for (const [anchor, destination] of [[0, 30], [1440, 1410]]) {
+    const { state, event } = harness();
+    state.start(event(anchor));
+    state.move(event(destination));
+    state.release(event(anchor));
+    assert.equal(state.timelineCreateRange, null);
+    assert.equal(state.form, null);
+  }
+});
+
+test("returning to the anchor after scrolling compares timeline time, not the initial screen coordinate", () => {
+  const { state, track, event } = harness();
+  state.start(event(660));
+  track.getBoundingClientRect = () => ({ top: -60 });
+  state.move(event(660));
+  assert.equal(state.timelineCreateRange.end, 720);
+  state.move(event(600));
+  assert.equal(state.timelineCreateRange, null);
+  state.release(event(600));
+  assert.equal(state.form, null);
 });

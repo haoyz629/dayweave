@@ -12,8 +12,11 @@ const css = readFileSync(new URL("./color-system.css", import.meta.url), "utf8")
 const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", app, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const facts = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "TimelineTaskFacts");
-const context = vm.createContext({ React, taskBlockTypeLabels, priorityCopy: { high: "高优先级", medium: "中优先级", low: "低优先级" } });
-vm.runInContext(ts.transpileModule(facts.getText(source), { compilerOptions: { jsx: ts.JsxEmit.React } }).outputText, context);
+const selector = readFileSync(new URL("./task-priority-selector.tsx", import.meta.url), "utf8");
+const selectorSource = ts.createSourceFile("task-priority-selector.tsx", selector, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const copy = selectorSource.statements.find(node => ts.isVariableStatement(node) && node.declarationList.declarations.some(declaration => declaration.name.getText(selectorSource) === "priorityCopy"));
+const context = vm.createContext({ React, taskBlockTypeLabels });
+vm.runInContext(ts.transpileModule(`${copy.getText(selectorSource).replace("export ", "")}\n${facts.getText(source)}`, { compilerOptions: { jsx: ts.JsxEmit.React } }).outputText, context);
 
 test("unset priorities render no timeline badge in full or compact blocks", () => {
   for (const priority of [null, undefined]) for (const inline of [false, true]) {
@@ -21,8 +24,11 @@ test("unset priorities render no timeline badge in full or compact blocks", () =
     assert.doesNotMatch(html, /priority-|未设|无优先级/);
     assert.match(html, /单日任务/);
   }
-  for (const priority of ["high", "medium", "low"]) {
-    assert.match(renderToStaticMarkup(context.TimelineTaskFacts({ type: "multi", priority })), new RegExp(`priority-${priority}`));
+  for (const [priority, label, short] of [["urgent", "P0 紧急", "P0"], ["high", "P1 高优先级", "P1"], ["medium", "P2 中优先级", "P2"], ["low", "P3 低优先级", "P3"]]) {
+    const html = renderToStaticMarkup(context.TimelineTaskFacts({ type: "multi", priority }));
+    assert.match(html, new RegExp(`priority-${priority}`));
+    assert.ok(html.includes(`timeline-fact-full">${label}</span>`));
+    assert.ok(html.includes(`timeline-fact-short">${short}</span>`));
   }
   assert.doesNotMatch(renderToStaticMarkup(context.TimelineTaskFacts({ type: "recurring", priority: "high" })), /priority-high/);
   assert.doesNotMatch(app, /未设优先级|无优先级/);
@@ -57,13 +63,13 @@ test("approved palettes retain readable role pairs and independent lake-blue pla
   assert.ok(readFileSync(new URL("./main.tsx", import.meta.url), "utf8").indexOf('./color-system.css') > readFileSync(new URL("./main.tsx", import.meta.url), "utf8").indexOf('./styles.css'));
 });
 
-test("priority editing defaults to medium and offers only three semantic levels", () => {
+test("priority editing defaults to P1 and offers four semantic levels", () => {
   const selector = readFileSync(new URL("./task-priority-selector.tsx", import.meta.url), "utf8");
-  assert.match(selector, /const priority = value \?\? "medium";/);
+  assert.match(selector, /const priority = value \?\? "high";/);
   assert.match(selector, /priority-dot priority-dot-\$\{priority\}/);
   assert.match(selector, /priority-dropdown-option priority-tone-\$\{opt\.tone\}/);
   assert.doesNotMatch(selector, /清除优先级|不设置优先级|unset: \{ label: "优先级" \}/);
-  for (const priority of ["high", "medium", "low"]) {
+  for (const priority of ["urgent", "high", "medium", "low"]) {
     assert.ok(css.includes(`.priority-dot-${priority} { background: var(--priority-${priority}-accent); }`));
     assert.ok(css.includes(`.priority-dropdown-option.priority-tone-${priority} { --priority-tone: var(--priority-${priority}); --priority-surface: var(--priority-${priority}-surface); }`));
   }
@@ -255,16 +261,25 @@ test("day and week blocks restore original light surfaces without reverting shar
     assert.deepEqual(values, { [surface]: light[`--color-${role}-bg`], [edge]: light[`--color-${role}-edge`] });
   }
   originalPair('.today-page .timeline-event:is(.plan-draft-block, .execution-block)', '--state-plan-surface', '--state-plan-border', 'plan');
-  originalPair('.today-page .timeline-event.recurring-event', '--state-recurring-surface', '--state-recurring-border', 'teal');
+  const recurring = rules.find(rule => rule.selector === 'html:root:not([data-mode="dark"]) .today-page .timeline-event.recurring-event');
+  assert.deepEqual(Object.fromEntries(recurring.nodes.map(node => [node.prop, node.value])), { '--state-recurring': 'var(--state-plan)', '--state-recurring-surface': light['--color-plan-bg'], '--state-recurring-border': light['--color-plan-edge'] });
+  for (const suffix of ['', ':hover']) {
+    const result = rules.find(rule => rule.selector === `html:root:not([data-mode="dark"]) .today-page .timeline-event.recurring-event:not(.execution-planned)${suffix}`);
+    const values = Object.fromEntries(result.nodes.map(node => [node.prop, node.value]));
+    assert.equal(values['border-color'], suffix ? 'var(--execution-color)' : 'var(--execution-border)');
+    assert.equal(values.background, 'var(--execution-surface)');
+    if (!suffix) assert.equal(values.color, 'var(--execution-color)');
+  }
   originalPair('.today-page .timeline-event.fixed-event', 'background', 'border-color', 'gray');
   for (const [outcome, role] of [['completed', 'green'], ['partial', 'cyan'], ['blocked', 'amber'], ['cancelled', 'gray'], ['not_started', 'amber']]) {
     originalPair(`.today-page .timeline-event.execution-${outcome}`, '--execution-surface', '--execution-border', role);
   }
   const week = ':is(.week-timeline-event, .week-timeline-legend > span)';
-  for (const [suffix, role] of [['', 'plan'], ['.tone-completed', 'green'], ['.tone-partial', 'cyan'], [':is(.tone-blocked, .tone-not-started)', 'amber'], [':is(.tone-cancelled, .tone-fixed)', 'gray'], ['.tone-recurring', 'teal']]) {
+  for (const [suffix, role] of [['', 'plan'], ['.tone-completed', 'green'], ['.tone-partial', 'cyan'], [':is(.tone-blocked, .tone-not-started)', 'amber'], [':is(.tone-cancelled, .tone-fixed)', 'gray']]) {
     originalPair(week + suffix, '--week-bg', '--week-edge', role);
   }
   assert.doesNotMatch(css, /--timeline-block-tone|14%, white|38%, white/);
+  assert.doesNotMatch(css, /week-timeline[^{}]*\.tone-recurring/);
 });
 
 test("toasts restore original light fills and edges without changing their ink or behavior", () => {
@@ -277,4 +292,28 @@ test("toasts restore original light fills and edges without changing their ink o
       '--toast-surface': light[`--color-${role}-bg`], '--toast-edge': light[`--color-${role}-edge`]
     });
   }
+});
+
+test("light nonworking time is a quiet fill without stripes or boundary borders", () => {
+  const rules = [];
+  postcss.parse(css).walkRules(rule => rules.push(rule));
+  const rule = rules.find(rule => rule.selector === 'html:root:not([data-mode="dark"]) .timeline-nonworking');
+  assert.ok(rule);
+  assert.deepEqual(Object.fromEntries(rule.nodes.map(node => [node.prop, node.value])), {
+    border: "0", "background-image": "none"
+  });
+  const shared = rules.find(rule => rule.selector === "html:root :is(.timeline-nonworking, .time-rail-break)");
+  assert.equal(shared.nodes.find(node => node.prop === "background-color")?.value, "var(--color-gray-bg)");
+  assert.ok(rules.indexOf(rule) > rules.findIndex(candidate => candidate.selector === "html:root .timeline-nonworking"));
+  const legacy = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  assert.match(legacy, /\.timeline-nonworking:focus-visible \{[^}]*outline: 2px solid/);
+});
+
+test("P0 reuses urgent red across badges, dropdowns and waiting-pool dots", () => {
+  for (const [suffix, role] of [["", "ink"], ["-accent", "solid"], ["-border", "edge"], ["-surface", "bg"]]) {
+    assert.ok(css.includes(`--priority-urgent${suffix}: var(--color-red-${role});`));
+  }
+  assert.ok(css.includes(':is(.priority-badge, .timeline-fact-priority).priority-urgent { color: var(--priority-urgent); border-color: var(--priority-urgent-border); background: var(--priority-urgent-surface); }'));
+  assert.ok(css.includes('.waiting-pool-dot.priority-urgent { background: var(--priority-urgent-accent); }'));
+  assert.ok(css.includes('.priority-select-control.priority-tone-urgent { --priority-tone: var(--priority-urgent); --priority-border: var(--priority-urgent-border); --priority-surface: var(--priority-urgent-surface); }'));
 });

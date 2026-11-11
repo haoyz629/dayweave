@@ -1,3 +1,12 @@
+import type { RecurringOccurrenceOutcome } from "./tauri";
+
+export function recurringBlockDisplay(outcome: RecurringOccurrenceOutcome | null) {
+  if (outcome === "completed") return { outcome: "completed", label: "本次已完成" } as const;
+  if (outcome === "partial") return { outcome: "partial", label: "本次部分完成" } as const;
+  if (outcome === "not_completed") return { outcome: "not_started", label: "本次未完成" } as const;
+  return { outcome: "planned", label: "已安排" } as const;
+}
+
 export type TaskBlockType = "single" | "multi" | "recurring";
 
 export const taskBlockTypeLabels = {

@@ -142,6 +142,10 @@ html:root {
   --priority-high-accent: var(--color-orange-solid);
   --priority-high-border: var(--color-orange-edge);
   --priority-high-surface: var(--color-orange-bg);
+  --priority-urgent: var(--color-red-ink);
+  --priority-urgent-accent: var(--color-red-solid);
+  --priority-urgent-border: var(--color-red-edge);
+  --priority-urgent-surface: var(--color-red-bg);
   /* Vivid red is reserved for the live clock and today's markers, not date selection. */
   --today-red: #ff3b30;
   --today-red-label: #3a1612;
@@ -307,14 +311,19 @@ html:root :is(.task-capsule-status, .task-compact-status, .terminal-task-status,
 html:root :is(.task-capsule-status, .task-compact-status, .terminal-task-status, .execution-status-badge):is(.status-not_completed, .status-paused) { --status-ink: var(--color-amber-ink); --status-edge: var(--color-amber-edge); --status-bg: var(--color-amber-bg); }
 html:root :is(.task-capsule-status, .task-compact-status, .terminal-task-status, .execution-status-badge):is(.status-deleted, .deleted) { --status-ink: var(--color-red-ink); --status-edge: var(--color-red-edge); --status-bg: var(--color-red-bg); }
 html:root :is(.next-workspace .task-ledger-list .task-capsule-status, .task-compact-status, .ordinary-task-detail .terminal-task-status, .terminal-task-status, .execution-status-badge) { color: var(--status-ink); border-color: var(--status-edge); background: var(--status-bg); }
+html:root :is(.priority-badge, .timeline-fact-priority).priority-urgent { color: var(--priority-urgent); border-color: var(--priority-urgent-border); background: var(--priority-urgent-surface); }
+html:root .waiting-pool-dot.priority-urgent { background: var(--priority-urgent-accent); }
+html:root .priority-select-control.priority-tone-urgent { --priority-tone: var(--priority-urgent); --priority-border: var(--priority-urgent-border); --priority-surface: var(--priority-urgent-surface); }
 html:root :is(.priority-badge, .timeline-fact-priority).priority-high { color: var(--priority-high); border-color: var(--priority-high-border); background: var(--priority-high-surface); }
 html:root :is(.priority-badge, .timeline-fact-priority).priority-medium { color: var(--priority-medium); border-color: var(--priority-medium-border); background: var(--priority-medium-surface); }
 html:root :is(.priority-badge, .timeline-fact-priority).priority-low { color: var(--priority-low); border-color: var(--priority-low-border); background: var(--priority-low-surface); }
 html:root .waiting-pool-dot.priority-medium { background: var(--priority-medium-accent); }
 html:root .priority-dropdown-option.is-selected { color: var(--priority-tone, var(--color-selected-ink)); background: var(--priority-surface, var(--color-selected-bg)); }
+html:root .priority-dropdown-option.priority-tone-urgent { --priority-tone: var(--priority-urgent); --priority-surface: var(--priority-urgent-surface); }
 html:root .priority-dropdown-option.priority-tone-high { --priority-tone: var(--priority-high); --priority-surface: var(--priority-high-surface); }
 html:root .priority-dropdown-option.priority-tone-medium { --priority-tone: var(--priority-medium); --priority-surface: var(--priority-medium-surface); }
 html:root .priority-dropdown-option.priority-tone-low { --priority-tone: var(--priority-low); --priority-surface: var(--priority-low-surface); }
+html:root .priority-dot-urgent { background: var(--priority-urgent-accent); }
 html:root .priority-dot-high { background: var(--priority-high-accent); }
 html:root .priority-dot-medium { background: var(--priority-medium-accent); }
 html:root .priority-dot-low { background: var(--priority-low-accent); }
@@ -333,7 +342,9 @@ html:root .timeline-event.execution-block:is(.captured, .reviewed):hover { borde
 
 /* Restore original block colors locally; badges keep the shared light palette. */
 html:root:not([data-mode="dark"]) .today-page .timeline-event:is(.plan-draft-block, .execution-block) { --state-plan-surface: #d6f2fa; --state-plan-border: #8acddd; }
-html:root:not([data-mode="dark"]) .today-page .timeline-event.recurring-event { --state-recurring-surface: #d3efec; --state-recurring-border: #8fcec6; }
+html:root:not([data-mode="dark"]) .today-page .timeline-event.recurring-event { --state-recurring: var(--state-plan); --state-recurring-surface: #d6f2fa; --state-recurring-border: #8acddd; }
+html:root:not([data-mode="dark"]) .today-page .timeline-event.recurring-event:not(.execution-planned) { color: var(--execution-color); border-color: var(--execution-border); background: var(--execution-surface); }
+html:root:not([data-mode="dark"]) .today-page .timeline-event.recurring-event:not(.execution-planned):hover { border-color: var(--execution-color); background: var(--execution-surface); }
 html:root:not([data-mode="dark"]) .today-page .timeline-event.fixed-event { background: #e4e9f0; border-color: #bac5d3; }
 html:root:not([data-mode="dark"]) .today-page .timeline-event.execution-completed { --execution-surface: #d6f2e3; --execution-border: #95d5b2; }
 html:root:not([data-mode="dark"]) .today-page .timeline-event.execution-partial { --execution-surface: #d7f1f7; --execution-border: #729eac; }
@@ -345,11 +356,11 @@ html:root:not([data-mode="dark"]) :is(.week-timeline-event, .week-timeline-legen
 html:root:not([data-mode="dark"]) :is(.week-timeline-event, .week-timeline-legend > span).tone-partial { --week-bg: #d7f1f7; --week-edge: #729eac; }
 html:root:not([data-mode="dark"]) :is(.week-timeline-event, .week-timeline-legend > span):is(.tone-blocked, .tone-not-started) { --week-bg: #ffedbf; --week-edge: #e8c66b; }
 html:root:not([data-mode="dark"]) :is(.week-timeline-event, .week-timeline-legend > span):is(.tone-cancelled, .tone-fixed) { --week-bg: #e4e9f0; --week-edge: #bac5d3; }
-html:root:not([data-mode="dark"]) :is(.week-timeline-event, .week-timeline-legend > span).tone-recurring { --week-bg: #d3efec; --week-edge: #8fcec6; }
 
 html:root .timeline-event-check.done::before { border-color: var(--color-green-solid); background: var(--color-green-solid); }
 html:root :is(.timeline-nonworking, .time-rail-break) { color: var(--color-gray-ink); border-color: var(--color-gray-edge); background-color: var(--color-gray-bg); }
 html:root .timeline-nonworking { background-image: repeating-linear-gradient(135deg, transparent 0 7px, var(--color-gray-edge) 7px 8px); }
+html:root:not([data-mode="dark"]) .timeline-nonworking { border: 0; background-image: none; }
 html:root .timeline-lanes .lane-item.task { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-panel); }
 html:root .timeline-lanes .lane-item.task:hover { border-color: var(--color-selected-edge); background: var(--color-hover); }
 html:root :is(.confirmed-plan-status, .today-page .is-timeline-view .confirmed-plan-status) { color: var(--color-plan-ink); border-color: var(--color-plan-edge); background: var(--color-plan-bg); }
@@ -458,6 +469,12 @@ html:root .next-workspace .today-page .timeline-week > button.selected:not(.toda
 html:root .next-workspace .today-page .timeline-week > button.weekend:not(.today) .timeline-week-date { color: var(--color-red-ink); }
 html:root .next-workspace .today-page .timeline-week > button.weekend:not(.selected) { background: color-mix(in srgb, var(--color-orange-bg) 60%, var(--color-panel)); }
 html:root .next-workspace .today-page .timeline-week > button.weekend:not(.selected):hover { background: color-mix(in srgb, var(--color-orange-bg) 80%, var(--color-panel)); }
+
+/* The full-week view only marks today; the incoming day selection has no blue highlight. */
+html:root:not([data-mode="dark"]) .next-workspace .today-page .week-timeline .week-timeline-dates > button .timeline-week-date { color: inherit; background: transparent; box-shadow: none; }
+html:root:not([data-mode="dark"]) .next-workspace .today-page .week-timeline .week-timeline-dates > button.today .timeline-week-date { color: var(--today-red-label); background: var(--today-red); }
+html:root:not([data-mode="dark"]) .next-workspace .today-page .week-timeline .week-timeline-dates > button.selected { color: var(--color-ink); border-color: transparent; background: transparent; box-shadow: none; }
+html:root:not([data-mode="dark"]) .next-workspace .today-page .week-timeline .week-timeline-dates > button.weekend.selected { background: color-mix(in srgb, var(--color-orange-bg) 60%, var(--color-panel)); }
 html:root .next-workspace .today-page .timeline-week > button.weekend .timeline-week-heading > small { padding: 0 7px; border-radius: 4px; color: var(--color-orange-ink); background: var(--color-orange-bg); font-weight: 700; }
 html:root .schedule-picker-range-panel .time-range-rail.block-editor .time-rail-surface { border-color: var(--color-edge); background: var(--color-group); }
 html:root .schedule-picker-range-panel > header span { color: var(--color-selected-ink); border-color: var(--color-selected-edge); background: var(--color-selected-bg); }

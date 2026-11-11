@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::sync::OnceLock;
 
 use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveTime, TimeZone, Timelike, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -11,6 +10,7 @@ use crate::{
     domain::{AiOperation, AiProposal, Priority, ReviewOutcome, TaskSource, TaskStatus, MIN_TASK_BLOCK_MINUTES},
     error::{AppError, AppResult},
 };
+use crate::holiday_calendar::{self, CalendarState, Snapshot as HolidaySnapshot, UpdateJob, Downloaded};
 
 #[path = "database_execution.rs"]
 mod database_execution;
@@ -26,6 +26,8 @@ mod database_results;
 #[path = "database_tags.rs"]
 mod database_tags;
 pub use database_tags::TaskTagDefinition;
+#[path = "database_priority.rs"]
+mod database_priority;
 
 #[path = "database_recurring.rs"]
 mod database_recurring;
@@ -35,6 +37,7 @@ pub use database_recurring_execution::RecurringExecutionEventDto;
 
 pub struct Database {
     connection: Connection,
+    holiday_calendar: CalendarState,
 }
 
 #[derive(Debug, Serialize)]
@@ -880,11 +883,24 @@ fn load_occurrence(connection: &Connection, id: &str) -> AppResult<RecurringOccu
 }
 
 impl Database {
+    pub fn get_holiday_calendar(&self) -> HolidaySnapshot {
+        self.holiday_calendar.snapshot.clone()
+    }
+
+    pub fn begin_holiday_update(&mut self, years: Vec<i32>, force: bool) -> AppResult<Option<UpdateJob>> {
+        self.holiday_calendar.begin(&self.connection, years, force, Utc::now())
+    }
+
+    pub fn finish_holiday_update(&mut self, result: AppResult<Downloaded>) -> HolidaySnapshot {
+        self.holiday_calendar.finish(&mut self.connection, result, Utc::now())
+    }
+
     pub fn open(path: impl AsRef<Path>) -> AppResult<Self> {
         let connection = Connection::open(path)?;
         connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
-        let mut database = Self { connection };
+        let mut database = Self { connection, holiday_calendar: CalendarState::bundled() };
         database.migrate()?;
+        database.holiday_calendar = CalendarState::load(&database.connection)?;
         Ok(database)
     }
 
@@ -892,8 +908,9 @@ impl Database {
     pub fn in_memory() -> AppResult<Self> {
         let connection = Connection::open_in_memory()?;
         connection.execute_batch("PRAGMA foreign_keys = ON;")?;
-        let mut database = Self { connection };
+        let mut database = Self { connection, holiday_calendar: CalendarState::bundled() };
         database.migrate()?;
+        database.holiday_calendar = CalendarState::load(&database.connection)?;
         Ok(database)
     }
 
@@ -911,6 +928,10 @@ impl Database {
         )?;
         for (version, sql) in MIGRATIONS {
             if *version <= current { continue; }
+            if *version == 32 {
+                database_priority::migrate(&mut self.connection, *version)?;
+                continue;
+            }
             let transaction = self.connection.transaction()?;
             let review_schema: Vec<(String, String)> = if *version == 22 {
                 let mut statement = transaction.prepare("SELECT name, sql FROM sqlite_master WHERE tbl_name = 'review_entries' AND type IN ('index','trigger') AND sql IS NOT NULL")?;
@@ -1679,7 +1700,7 @@ impl Database {
                 soft_delete_task(&transaction, future_task_id, "recurrence_superseded")?;
             }
             if let Some(recurrence) = &input.recurrence {
-                create_recurrence_series_with_parent(&transaction, task_id, recurrence, Some(&rule_id))?;
+                create_recurrence_series_with_parent(&transaction, task_id, recurrence, Some(&rule_id), &self.holiday_calendar.snapshot)?;
             }
         }
         let updated = load_task_dto_in_transaction(&transaction, task_id)?;
@@ -2353,7 +2374,7 @@ impl Database {
             "SELECT id, title, status, priority, due_date, due_time,
                     earliest_start_date, earliest_start_time, remaining_workload_minutes FROM tasks
              WHERE deleted_at IS NULL AND status IN ('open','scheduled')
-             ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 3 END,
+             ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
                       due_date IS NULL, due_date, updated_at DESC LIMIT ?1",
         )?;
         let rows = statement.query_map([limit], |row| Ok(AiTaskCandidateDto {
@@ -2681,7 +2702,7 @@ impl Database {
                AND task.due_at IS NOT NULL
                AND substr(task.earliest_start_at, 1, 10) <= ?2
                AND substr(task.due_at, 1, 10) >= ?2
-             ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 3 END,
+             ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
                       CASE WHEN due_at IS NULL THEN 1 ELSE 0 END, due_at, created_at",
         )?;
         let mut candidates = statement.query_map(params![ignored_plan_id, plan_date], |row| Ok(RuleCandidate {
@@ -3719,6 +3740,11 @@ impl Database {
     }
 
     pub fn clear_execution_capture(&mut self, capture_date: &str, plan_block_id: &str) -> AppResult<()> {
+        self.clear_execution_capture_with_note(capture_date, plan_block_id, None)
+    }
+
+    pub fn clear_execution_capture_with_note(&mut self, capture_date: &str, plan_block_id: &str, note: Option<String>) -> AppResult<()> {
+        let note = normalize_review_text(note, 500, "执行备注")?;
         let transaction = self.connection.transaction()?;
         let in_window = database_results::allow_capture(&transaction, capture_date, plan_block_id)?;
         database_results::require_block_outcome_change(&transaction, plan_block_id, "planned")?;
@@ -3748,6 +3774,10 @@ impl Database {
         }
         let timestamp = now();
         database_execution::clear_block_capture(&transaction, &task_id, capture_date, plan_block_id, has_review)?;
+        if let Some(note) = note {
+            transaction.execute("UPDATE plan_blocks SET execution_note = ?2, execution_captured_at = ?3, review_required = 1 WHERE id = ?1",
+                params![plan_block_id, note, timestamp])?;
+        }
         if in_window { transaction.execute("UPDATE tasks SET updated_at = ?2 WHERE id = ?1", params![task_id, timestamp])?; }
         database_history::record_cleared(&transaction, &task_id, capture_date, execution_status == "completed")?;
         if execution_status == "completed" {
@@ -4989,62 +5019,17 @@ fn load_recurring_item_in_transaction(transaction: &Transaction<'_>, item_id: &s
     ).optional()?.ok_or_else(|| AppError::NotFound(format!("重复事项 {item_id}")))
 }
 
-#[derive(Deserialize)]
-struct OfficialWorkdaySource {
-    from: String,
-    to: String,
-    holidays: Vec<OfficialHolidaySource>,
-    #[serde(rename = "makeupWorkdays")]
-    makeup_workdays: Vec<(String, String)>,
-}
-
-#[derive(Deserialize)]
-struct OfficialHolidaySource {
-    dates: Vec<String>,
-}
-
-struct OfficialWorkdayCalendar {
-    from: NaiveDate,
-    to: NaiveDate,
-    holidays: HashSet<NaiveDate>,
-    makeup_workdays: HashSet<NaiveDate>,
-}
-
-fn official_workday_calendar() -> &'static OfficialWorkdayCalendar {
-    static CALENDAR: OnceLock<OfficialWorkdayCalendar> = OnceLock::new();
-    CALENDAR.get_or_init(|| {
-        let source: OfficialWorkdaySource = serde_json::from_str(include_str!("../../src/official-workdays-2026.json"))
-            .expect("bundled official workday calendar must be valid");
-        OfficialWorkdayCalendar {
-            from: parse_plan_date(&source.from).expect("valid official calendar start"),
-            to: parse_plan_date(&source.to).expect("valid official calendar end"),
-            holidays: source.holidays.into_iter().flat_map(|group| group.dates)
-                .map(|day| parse_plan_date(&day).expect("valid official holiday date")).collect(),
-            makeup_workdays: source.makeup_workdays.into_iter()
-                .map(|(day, _)| parse_plan_date(&day).expect("valid official makeup date")).collect(),
-        }
-    })
-}
-
-fn official_workday_on(date: NaiveDate) -> Option<bool> {
-    let calendar = official_workday_calendar();
-    if date < calendar.from || date > calendar.to { return None; }
-    if calendar.holidays.contains(&date) { return Some(false); }
-    if calendar.makeup_workdays.contains(&date) { return Some(true); }
-    Some(date.weekday().number_from_monday() <= 5)
-}
-
-fn weekday_interval_matches(start: NaiveDate, date: NaiveDate, interval: i64) -> bool {
-    if interval < 1 || date < start || official_workday_on(start).is_none() || official_workday_on(date) != Some(true) {
+fn weekday_interval_matches(calendar: &HolidaySnapshot, start: NaiveDate, date: NaiveDate, interval: i64) -> bool {
+    if interval < 1 || !calendar.covers(start, date) || calendar.workday_on(date) != Some(true) {
         return false;
     }
     let workdays = (0..=(date - start).num_days())
-        .filter(|offset| official_workday_on(start + Duration::days(*offset)) == Some(true))
+        .filter(|offset| calendar.workday_on(start + Duration::days(*offset)) == Some(true))
         .count() as i64;
     (workdays - 1) % interval == 0
 }
 
-fn recurring_item_occurs_on(item: &RecurringItemDto, date: NaiveDate) -> AppResult<bool> {
+fn recurring_item_occurs_on(calendar: &HolidaySnapshot, item: &RecurringItemDto, date: NaiveDate) -> AppResult<bool> {
     let start = parse_plan_date(&item.starts_on)?;
     if date < start { return Ok(false); }
     if item.ends_on.as_deref().map(parse_plan_date).transpose()?.is_some_and(|end| date > end) {
@@ -5054,7 +5039,7 @@ fn recurring_item_occurs_on(item: &RecurringItemDto, date: NaiveDate) -> AppResu
     let weeks = days.div_euclid(7);
     let matches = match item.frequency.as_str() {
         "daily" => days % item.interval_value == 0,
-        "weekdays" => weekday_interval_matches(start, date, item.interval_value),
+        "weekdays" => weekday_interval_matches(calendar, start, date, item.interval_value),
         "weekly" => item.weekdays.contains(&date.weekday().number_from_monday()) && weeks % item.interval_value == 0,
         "monthly" => date.day() == item.month_day.unwrap_or(1)
             && ((date.year() - start.year()) as i64 * 12 + date.month() as i64 - start.month() as i64)
@@ -5099,6 +5084,7 @@ fn parse_priority(value: &str) -> AppResult<Priority> {
         "low" => Ok(Priority::Low),
         "medium" => Ok(Priority::Medium),
         "high" => Ok(Priority::High),
+        "urgent" => Ok(Priority::Urgent),
         _ => Err(AppError::Domain(format!("未知优先级：{value}"))),
     }
 }
@@ -5213,7 +5199,7 @@ struct RecurrenceTaskSeed {
     source_type: String,
 }
 
-fn recurrence_dates(input: &RecurrenceInput) -> AppResult<Vec<NaiveDate>> {
+fn recurrence_dates(input: &RecurrenceInput, calendar: &HolidaySnapshot) -> AppResult<Vec<NaiveDate>> {
     validate_recurrence(input)?;
     let start = parse_plan_date(&input.starts_on)?;
     let configured_end = input.ends_on.as_deref().map(parse_plan_date).transpose()?;
@@ -5226,7 +5212,7 @@ fn recurrence_dates(input: &RecurrenceInput) -> AppResult<Vec<NaiveDate>> {
         let weeks = days.div_euclid(7);
         let matches = match input.frequency.as_str() {
             "daily" => days % input.interval_value == 0,
-            "weekdays" => weekday_interval_matches(start, date, input.interval_value),
+            "weekdays" => weekday_interval_matches(calendar, start, date, input.interval_value),
             "weekly" => selected.contains(&date.weekday().number_from_monday()) && weeks % input.interval_value == 0,
             "monthly" => date.day() == input.month_day.unwrap_or(1)
                 && ((date.year() - start.year()) as i64 * 12 + date.month() as i64 - start.month() as i64) % input.interval_value == 0,
@@ -5253,8 +5239,9 @@ fn create_recurrence_series_with_parent(
     base_task_id: &str,
     input: &RecurrenceInput,
     parent_rule_id: Option<&str>,
+    calendar: &HolidaySnapshot,
 ) -> AppResult<String> {
-    let dates = recurrence_dates(input)?;
+    let dates = recurrence_dates(input, calendar)?;
     let anchor = parse_plan_date(&input.starts_on)?;
     let seed = transaction.query_row(
         "SELECT title, notes, priority, earliest_start_date, earliest_start_time,
@@ -6286,6 +6273,8 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (28, database_recurring_execution::MIGRATION),
     (29, database_recurring_execution::STATUS_TIMESTAMP_MIGRATION),
     (30, database_recurring_execution::LIFECYCLE_MIGRATION),
+    (31, holiday_calendar::MIGRATION),
+    (32, ""), // Priority CHECK constraints are rebuilt transactionally in Rust.
 ];
 
 #[cfg(test)]
@@ -7267,7 +7256,7 @@ mod tests {
             [now()],
         ).unwrap();
 
-        let mut database = Database { connection };
+        let mut database = Database { connection, holiday_calendar: CalendarState::bundled() };
         database.migrate().unwrap();
         let task = database.get_task("legacy-task").unwrap();
         assert_eq!(task.earliest_start_at.as_deref(), Some("2026-08-21T09:30:00+08:00"));
@@ -7316,7 +7305,7 @@ mod tests {
             [&timestamp],
         ).unwrap();
 
-        let mut database = Database { connection };
+        let mut database = Database { connection, holiday_calendar: CalendarState::bundled() };
         database.migrate().unwrap();
         for task_id in ["legacy-cancelled", "legacy-deleted-cancelled"] {
             let task = database.get_task(task_id).unwrap();
@@ -7375,7 +7364,7 @@ mod tests {
             [&timestamp],
         ).unwrap();
 
-        let mut database = Database { connection };
+        let mut database = Database { connection, holiday_calendar: CalendarState::bundled() };
         database.migrate().unwrap();
 
         let task = database.get_task("legacy-inbox").unwrap();
@@ -7621,8 +7610,8 @@ mod tests {
         assert_eq!(database.task_status(&task_id).unwrap(), "scheduled");
         assert_eq!(database.get_day_schedule("2026-08-14").unwrap().task_blocks[0].task_status, "scheduled");
         assert_eq!(database.count("plan_blocks").unwrap(), 1, "取消完成不得删除或重复创建原时间块");
-        assert_eq!(database.count("task_changes").unwrap(), changes_before_status_round_trip + 3,
-            "完成与恢复两个状态变化，以及取消完成前的结果快照都必须保留");
+         assert_eq!(database.count("task_changes").unwrap(), changes_before_status_round_trip + 4,
+             "完成与恢复两个状态变化、取消完成前的结果快照以及取消完成的历史事件都必须保留");
     }
 
     #[test]
@@ -7636,7 +7625,7 @@ mod tests {
         assert_eq!(committed.status, "open");
         assert_eq!(database.task_status(&task_id).unwrap(), "open");
         assert_eq!(database.count("plan_blocks").unwrap(), 0);
-        assert_eq!(database.count("task_changes").unwrap(), 3);
+         assert_eq!(database.count("task_changes").unwrap(), 4);
     }
 
     #[test]
@@ -7944,7 +7933,7 @@ mod tests {
             connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)", params![version, now()]).unwrap();
         }
         connection.execute("UPDATE availability_settings SET weekdays_json = '[2,4,6]', workday_start = '08:30' WHERE id = 1", []).unwrap();
-        let mut database = Database { connection };
+        let mut database = Database { connection, holiday_calendar: CalendarState::bundled() };
         database.migrate().unwrap();
         let settings = database.get_availability_settings().unwrap();
         assert!(settings.makeup_workdays_as_workdays);
@@ -9166,14 +9155,15 @@ mod tests {
             ("2026-10-12", true),
             ("2027-01-04", false),
         ] {
-            assert_eq!(recurring_item_occurs_on(&item, parse_plan_date(date).unwrap()).unwrap(), expected, "{date}");
+            assert_eq!(recurring_item_occurs_on(&database.get_holiday_calendar(), &item, parse_plan_date(date).unwrap()).unwrap(), expected, "{date}");
         }
 
         let holiday_start = parse_plan_date("2026-10-01").unwrap();
-        assert!(weekday_interval_matches(holiday_start, parse_plan_date("2026-10-08").unwrap(), 2));
-        assert!(!weekday_interval_matches(holiday_start, parse_plan_date("2026-10-09").unwrap(), 2));
-        assert!(weekday_interval_matches(holiday_start, parse_plan_date("2026-10-10").unwrap(), 2));
-        assert!(!weekday_interval_matches(parse_plan_date("2025-12-31").unwrap(), parse_plan_date("2026-01-04").unwrap(), 1));
+        let calendar = database.get_holiday_calendar();
+        assert!(weekday_interval_matches(&calendar, holiday_start, parse_plan_date("2026-10-08").unwrap(), 2));
+        assert!(!weekday_interval_matches(&calendar, holiday_start, parse_plan_date("2026-10-09").unwrap(), 2));
+        assert!(weekday_interval_matches(&calendar, holiday_start, parse_plan_date("2026-10-10").unwrap(), 2));
+        assert!(!weekday_interval_matches(&calendar, parse_plan_date("2025-12-31").unwrap(), parse_plan_date("2026-01-04").unwrap(), 1));
     }
 
     #[test]
@@ -9548,3 +9538,7 @@ mod recurring_execution_tests;
 #[cfg(test)]
 #[path = "database_recycled_execution_tests.rs"]
 mod recycled_execution_tests;
+
+#[cfg(test)]
+#[path = "holiday_calendar_database_tests.rs"]
+mod holiday_calendar_database_tests;

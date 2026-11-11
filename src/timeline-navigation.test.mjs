@@ -9,13 +9,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const functions = new Map();
-let centerEffect, monthWheelEffect;
+let centerEffect;
 function collect(node) {
-  if (ts.isFunctionDeclaration(node) && ["calendarCells", "returnToday", "selectCalendarDate", "openTimelineDate", "moveMonth", "handleMonthWheel", "pauseTimelineFollowing", "shanghaiClockParts", "shanghaiDateValue", "shiftDateValue", "weekDateValues", "requestDateSelection", "refreshSchedule"].includes(node.name?.text)) functions.set(node.name.text, node.getText(source));
+  if (ts.isFunctionDeclaration(node) && ["calendarCells", "returnToday", "selectCalendarDate", "openTimelineDate", "moveMonth", "pauseTimelineFollowing", "shanghaiClockParts", "shanghaiDateValue", "shiftDateValue", "weekDateValues", "requestDateSelection", "refreshSchedule"].includes(node.name?.text)) functions.set(node.name.text, node.getText(source));
   if (ts.isCallExpression(node) && node.expression.getText(source) === "useEffect") {
     const effect = node.arguments[0]?.getText(source);
     if (effect?.includes("const enteringDate = timelineEntryDateRef.current === selectedDate")) centerEffect = effect;
-    if (effect?.includes('sheet.addEventListener("wheel", handleMonthWheel')) monthWheelEffect = effect;
   }
   ts.forEachChild(node, collect);
 }
@@ -41,9 +40,6 @@ function harness(overrides = {}) {
     axisStart: 0, pixelsPerHour: 72, nowMinute: 15 * 60,
     timelineEntryDateRef: { current: null }, timelineCenteredDateRef: { current: "2026-10-21" },
     timelineScrollRef: { current: scroller },
-    monthSheetRef: { current: { scrollTop: 0, clientHeight: 500, scrollHeight: 500 } },
-    monthWheelGestureRef: { current: { delta: 0, lastAt: 0, flipped: false } },
-    setCalendarDateHint(value) { state.calendarDateHint = value; },
     Date: class extends Date { constructor(...args) { super(...(args.length ? args : ["2026-10-21T15:00:00+08:00"])); } },
     window: {
       requestAnimationFrame(fn) { frames.set(++frameId, fn); return frameId; },
@@ -62,8 +58,7 @@ function harness(overrides = {}) {
   const context = vm.createContext(state);
   for (const code of functions.values()) vm.runInContext(compile(code), context);
   const effect = vm.runInContext(compile(`(${centerEffect})`), context);
-  const wheelEffect = vm.runInContext(compile(`(${monthWheelEffect})`), context);
-  return { state, calls, scroller, effect, wheelEffect, flush() { const ready = [...frames.values()]; frames.clear(); ready.forEach(fn => fn()); } };
+  return { state, calls, scroller, effect, flush() { const ready = [...frames.values()]; frames.clear(); ready.forEach(fn => fn()); } };
 }
 
 test("month double-click and keyboard entry share the current-time positioning handler", () => {
@@ -231,104 +226,26 @@ test("midnight and late-night positions clamp to scroll bounds; rejected navigat
   assert.deepEqual(denied.calls, []);
 });
 
-function wheel(state, timeStamp, deltaY, extra = {}) {
-  const event = { timeStamp, deltaY, deltaX: 0, deltaMode: 0, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...extra };
-  state.handleMonthWheel(event);
-  return event;
-}
+test("month has no wheel pagination listener or misleading wheel hint", () => {
+  assert.doesNotMatch(text, /handleMonthWheel|monthWheelGestureRef|monthSheetRef|滚轮切换月份/);
+  assert.match(text, /<section className="month-sheet today-month-sheet" aria-label="月历">/);
+});
 
-test("month wheel navigation crosses year boundaries without selecting a date", () => {
-  const { state } = harness({ monthKey: "2026-12", calendarDateHint: { date: "2026-12-01" } });
-  assert.equal(wheel(state, 1000, 100).defaultPrevented, true);
+test("month buttons cross year boundaries without selecting a date", () => {
+  const { state } = harness({ monthKey: "2026-12" });
+  state.moveMonth(1);
   assert.equal(state.monthKey, "2027-01");
   assert.equal(state.selectedDate, "2026-10-21");
   assert.equal(state.monthSelectionPending, true);
-  assert.equal(state.calendarDateHint, null);
-  wheel(state, 2000, -100);
+  state.moveMonth(-1);
   assert.equal(state.monthKey, "2026-12");
   state.monthKey = "2027-01";
-  wheel(state, 3000, -100);
+  state.moveMonth(-1);
   assert.equal(state.monthKey, "2026-12");
   state.monthKey = "2026-11";
-  wheel(state, 4000, -100);
+  state.moveMonth(-1);
   assert.equal(state.monthKey, "2026-10");
   assert.equal(state.monthSelectionPending, false);
-});
-
-test("trackpad deltas accumulate but a continuous gesture including inertia flips only once", () => {
-  const { state } = harness();
-  wheel(state, 1000, 10);
-  wheel(state, 1050, 15);
-  assert.equal(state.monthKey, "2026-10");
-  wheel(state, 1100, 15);
-  assert.equal(state.monthKey, "2026-11");
-  for (let time = 1150; time < 3000; time += 50) assert.equal(wheel(state, time, 25).defaultPrevented, true);
-  assert.equal(state.monthKey, "2026-11");
-  wheel(state, 3300, 40);
-  assert.equal(state.monthKey, "2026-12");
-});
-
-test("wheel noise, stale deltas and direction changes do not trigger an accidental flip", () => {
-  const { state } = harness();
-  wheel(state, 1000, 30);
-  wheel(state, 1400, 20);
-  assert.equal(state.monthKey, "2026-10");
-  wheel(state, 1450, -30);
-  assert.equal(state.monthKey, "2026-10");
-  wheel(state, 1500, -10);
-  assert.equal(state.monthKey, "2026-09");
-});
-
-test("overflowing month content scrolls normally until the directional edge", () => {
-  const { state } = harness();
-  const sheet = state.monthSheetRef.current;
-  Object.assign(sheet, { scrollTop: 200, scrollHeight: 1000, clientHeight: 500 });
-  for (const delta of [-120, 120]) {
-    assert.equal(wheel(state, 1000, delta).defaultPrevented, false);
-    assert.equal(state.monthKey, "2026-10");
-  }
-  sheet.scrollTop = 500;
-  assert.equal(wheel(state, 2000, 120).defaultPrevented, true);
-  assert.equal(state.monthKey, "2026-11");
-  sheet.scrollTop = 0;
-  wheel(state, 3000, -120);
-  assert.equal(state.monthKey, "2026-10");
-});
-
-test("month wheel ignores zoom, modifier keys, horizontal scrolling and handled events", () => {
-  for (const extra of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { deltaX: 200 }, { deltaY: 0 }, { defaultPrevented: true }]) {
-    const { state } = harness();
-    wheel(state, 1000, 100, extra);
-    assert.equal(state.monthKey, "2026-10");
-    assert.equal(state.monthWheelGestureRef.current.lastAt, 0);
-  }
-});
-
-test("month wheel normalizes line and page delta units", () => {
-  for (const [deltaMode, deltaY] of [[1, 3], [2, 1]]) {
-    const { state } = harness();
-    wheel(state, 1000, deltaY, { deltaMode });
-    assert.equal(state.monthKey, "2026-11");
-  }
-});
-
-test("month wheel listener is non-passive, month-only and removed on cleanup", () => {
-  const listeners = new Map();
-  const sheet = {
-    addEventListener(type, handler, options) { assert.equal(type, "wheel"); assert.equal(options.passive, false); listeners.set(type, handler); },
-    removeEventListener(type, handler) { assert.equal(listeners.get(type), handler); listeners.delete(type); }
-  };
-  const { wheelEffect } = harness({ monthSheetRef: { current: sheet } });
-  const cleanup = wheelEffect();
-  assert.equal(listeners.size, 1);
-  cleanup();
-  assert.equal(listeners.size, 0);
-  for (const flags of [{ visible: false }, { todayView: "timeline" }, { monthSheetRef: { current: null } }]) {
-    const current = harness({ monthSheetRef: { current: sheet }, ...flags });
-    assert.equal(current.wheelEffect(), undefined);
-    assert.equal(listeners.size, 0);
-  }
-  assert.match(text, /<section ref=\{monthSheetRef\} className="month-sheet today-month-sheet"/);
 });
 
 test("day arrows cross weeks, months and years through the guarded selection entry without changing today", () => {

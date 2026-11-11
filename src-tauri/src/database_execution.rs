@@ -236,9 +236,14 @@ fn complete_result_in_transaction(transaction: &Transaction<'_>, task_id: &str, 
         let (_, date, end) = database_results::block_context(transaction, id)?;
         transaction.execute("UPDATE tasks SET result_date = ?2, result_ends_at = ?3, result_block_id = ?4 WHERE id = ?1",
             params![task_id, date, end, id])?;
-    } else {
-        database_results::completion_context(transaction, &before_task, block_id.as_deref())?;
-    }
+     } else {
+         database_results::completion_context(transaction, &before_task, block_id.as_deref())?;
+         if let Some(id) = &block_id {
+             let (_, date, end) = database_results::block_context(transaction, id)?;
+             transaction.execute("UPDATE tasks SET result_date = ?2, result_ends_at = ?3, result_block_id = ?4 WHERE id = ?1",
+                 params![task_id, date, end, id])?;
+         }
+     }
     database_history::preserve_current(transaction, task_id)?;
     if before_task.status == "done" {
         // Explicit completion promotes an automatic result without replacing its workload snapshot.
@@ -412,7 +417,9 @@ pub(super) fn reopen_in_transaction(transaction: &Transaction<'_>, task_id: &str
             clear_block_capture(transaction, task_id, &today, &id, has_review)?;
         }
     }
-    database_history::preserve_events(transaction, task_id, &history)?;
+ database_history::preserve_events(transaction, task_id, &history)?;
+ let reopen_date = current.result_date.as_deref().unwrap_or(&today);
+ database_history::record_cleared(transaction, task_id, reopen_date, true)?;
     if remaining == Some(0) {
         remaining = current.total_workload_minutes.or(current.estimated_minutes).filter(|minutes| *minutes > 0);
     }
@@ -445,8 +452,9 @@ pub(super) fn sync_block_result(transaction: &Transaction<'_>, block_id: &str) -
     sync_block_result_inner(transaction, block_id, false)
 }
 
-// Only clearing a completed day may override explicit cross-day completion. Do not
-// use reopen_in_transaction: its block snapshot can belong to a different date.
+// Only clearing the completion source block may override explicit task completion.
+// Do not replay its snapshot: execution/review facts may have changed independently.
+// Ordinary daily corrections still preserve explicit completion.
 pub(super) fn sync_cleared_completion(transaction: &Transaction<'_>, block_id: &str) -> AppResult<()> {
     sync_block_result_inner(transaction, block_id, true)
 }
@@ -457,9 +465,9 @@ fn sync_block_result_inner(transaction: &Transaction<'_>, block_id: &str, cleare
     if current.deleted_at.is_some() || !matches!(current.status.as_str(), "open" | "scheduled" | "done") { return Ok(()); }
     let automatic = is_automatic_completion(transaction, &task_id)?;
     let historical_recorded_at = database_results::historical_completion_recorded_at(transaction, &task_id)?;
-    let cross_day_clear = cleared_completion && current.earliest_start_date.as_ref()
-        .zip(current.due_date.as_ref()).is_some_and(|(start, due)| start < due);
-    if current.status == "done" && !automatic && !cross_day_clear {
+    let result_block_id: Option<String> = transaction.query_row("SELECT result_block_id FROM tasks WHERE id = ?1", [&task_id], |row| row.get(0))?;
+    let explicit_clear = cleared_completion && result_block_id.as_deref() == Some(block_id);
+    if current.status == "done" && !automatic && !explicit_clear {
         let saved: Option<String> = transaction.query_row("SELECT result_block_id FROM tasks WHERE id = ?1", [&task_id], |row| row.get(0))?;
         if historical_recorded_at.is_none() || saved.as_deref() != Some(block_id) { return Ok(()); }
     }
@@ -480,7 +488,7 @@ fn sync_block_result_inner(transaction: &Transaction<'_>, block_id: &str, cleare
                 params![task_id, start, due], |row| row.get::<_, bool>(0))?
         } else { false }
     } else { false };
-    let completed = count > 0 && incomplete == 0 && !unscheduled_date && !cross_day_clear;
+    let completed = count > 0 && incomplete == 0 && !unscheduled_date && !explicit_clear;
     if completed == (current.status == "done") { return Ok(()); }
     let (status, remaining) = if completed {
         ("done", Some(0))
@@ -489,7 +497,7 @@ fn sync_block_result_inner(transaction: &Transaction<'_>, block_id: &str, cleare
             [&task_id], |row| row.get(0)).optional()?;
         let json = match json {
             Some(json) => Some(json),
-            None if cross_day_clear => transaction.query_row("SELECT before_json FROM undo_entries
+            None if explicit_clear => transaction.query_row("SELECT before_json FROM undo_entries
                 WHERE target_type = 'task_completion' AND target_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 1",
                 [&task_id], |row| row.get(0)).optional()?,
             None => return Err(rusqlite::Error::QueryReturnedNoRows.into()),

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { HolidayCalendarSnapshot } from "./official-holiday-calendar";
 
 const desktopRuntimeMessage = "请在今序桌面应用中打开；网页预览无法使用保存在这台电脑上的数据。";
 
@@ -18,7 +19,7 @@ function invokeDesktop<T>(command: string, args?: Record<string, unknown>) {
 }
 
 export type TaskStatus = "open" | "scheduled" | "done" | "deleted";
-export type Priority = "low" | "medium" | "high";
+export type Priority = "urgent" | "high" | "medium" | "low";
 export type ReviewOutcome = "completed" | "partial" | "not_started" | "cancelled" | "blocked";
 export type RecurrenceFrequency = "daily" | "weekdays" | "weekly" | "monthly";
 export type RecurrenceInput = {
@@ -81,6 +82,7 @@ export type RecurringExecutionEvent = {
   display_time: string | null;
   display_duration_minutes: number | null;
   outcome: RecurringOccurrenceOutcome | null;
+  cancelled_outcome?: RecurringOccurrenceOutcome | null;
   notes: string | null;
   occurred_at: string;
 };
@@ -464,8 +466,8 @@ export function saveRecurringOccurrenceReview(
   return invokeDesktop<RecurringOccurrence>("save_recurring_occurrence_review", { occurrenceId, input });
 }
 
-export function clearRecurringOccurrenceReview(occurrenceId: string) {
-  return invokeDesktop<RecurringOccurrence>("clear_recurring_occurrence_review", { occurrenceId });
+export function clearRecurringOccurrenceReview(occurrenceId: string, notes: string | null = null) {
+  return invokeDesktop<RecurringOccurrence>("clear_recurring_occurrence_review", { occurrenceId, notes });
 }
 
 export function listRecurringExecutionHistory(itemId: string) {
@@ -712,8 +714,8 @@ export function resolveTaskExecution(captureDate: string, input: TaskExecutionRe
   return invokeDesktop<Task>("resolve_task_execution", { captureDate, input });
 }
 
-export function clearExecutionCapture(captureDate: string, planBlockId: string) {
-  return invokeDesktop<void>("clear_execution_capture", { captureDate, planBlockId });
+export function clearExecutionCapture(captureDate: string, planBlockId: string, note?: string) {
+  return invokeDesktop<void>("clear_execution_capture", { captureDate, planBlockId, ...(note === undefined ? {} : { note }) });
 }
 
 export function saveReviewEntry(reviewDate: string, input: ReviewEntryInput) {
@@ -756,4 +758,12 @@ export function applyConfirmedAiProposal(
       destructiveConfirmation
     }
   );
+}
+
+export function getHolidayCalendar() {
+  return invokeDesktop<HolidayCalendarSnapshot>("get_holiday_calendar");
+}
+
+export function checkHolidayUpdates(years: number[] = [], force = false) {
+  return invokeDesktop<HolidayCalendarSnapshot>("check_holiday_updates", { years, force });
 }

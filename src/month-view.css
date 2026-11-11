@@ -1,0 +1,32 @@
+/* Month overview fits the available window; date and count columns share each cell. */
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet { --month-rule: #dce3ec; padding: 8px 16px 12px; overflow: hidden; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .weekday-row { min-height: 28px; align-items: center; padding: 0 0 6px; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .weekday-row span { font-size: 12px; font-weight: 500; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .weekday-row span:nth-child(n+6) { color: var(--color-red-ink); background: transparent; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .month-grid { min-height: 0; border-color: var(--month-rule); border-radius: 8px; grid-auto-rows: minmax(0, 1fr); flex: 1 1 0; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .month-grid > button { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; padding: 8px; gap: 2px 4px; border-color: var(--month-rule); background: #fff; color: var(--color-ink); box-shadow: none; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .month-grid > button:is(:nth-child(7n+6),:nth-child(7n)):not(.selected) { background: #faf8f7; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .month-grid > button.outside:not(.selected) { background: #f4f6f9; color: var(--color-muted); }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .month-grid > button:hover:not(.selected) { background: #f0f4fa; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .month-grid > button.selected { background: #f0f5ff; box-shadow: inset 0 0 0 1px var(--color-selected-edge); }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .calendar-day-head { grid-column: 1; grid-row: 1; min-height: 42px; justify-content: flex-start; gap: 2px; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .day-number { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .solar-day-number { min-width: 24px; width: 24px; height: 24px; font-size: 16px; font-weight: 500; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .month-grid > button.outside .solar-day-number { width: auto; font-size: 16px; gap: 2px; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .calendar-month-prefix { font-size: 12px; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .lunar-day-number { font-size: 12px; line-height: 16px; color: var(--color-muted); }
+/* Keep the existing accessible label color rather than white-on-red. */
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .month-grid > button.today .solar-day-number { color: var(--today-red-label); background: var(--today-red); }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .calendar-labels { grid-column: 1; grid-row: 3; min-height: 0; overflow: hidden; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet :is(.calendar-label,.calendar-solar-term,.work-state) { font-size: 12px; line-height: 16px; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .calendar-indicators { display: flex; grid-column: 2; grid-row: 1 / -1; flex-direction: column; flex-wrap: nowrap; align-self: end; align-items: flex-end; justify-content: flex-end; margin-top: 0; gap: 3px; max-width: 100%; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .task-indicator { min-width: 0; height: 20px; padding: 0 4px; gap: 3px; border-radius: 4px; font-size: 12px; line-height: 18px; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .task-indicator > span { font-size: 12px; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .task-indicator svg { width: 12px; height: 12px; }
+html:root:not([data-mode="dark"]) .today-page .today-month-sheet .month-grid > button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -3px; }
+
+@media (max-width: 1000px), (max-height: 720px) {
+  html:root:not([data-mode="dark"]) .today-page .today-month-sheet { padding: 6px 10px 8px; }
+  html:root:not([data-mode="dark"]) .today-page .today-month-sheet .month-grid > button { padding: 5px; }
+  html:root:not([data-mode="dark"]) .today-page .today-month-sheet .calendar-day-head { gap: 0; }
+}

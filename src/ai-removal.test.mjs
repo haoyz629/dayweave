@@ -24,7 +24,7 @@ function renderSettings(availability, availabilityError = null) {
     useRef: React.useRef,
     Logo: () => null,
     TimeRangeRail: () => null,
-    OFFICIAL_HOLIDAY_COVERAGE: { from: "2026-01-01" }
+    HolidayCalendarSettings: () => null
   });
   vm.runInContext(code, context);
   return renderToStaticMarkup(React.createElement(context.SettingsPage, {

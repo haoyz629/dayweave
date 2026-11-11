@@ -17,10 +17,10 @@ import { ConfirmationDialog, Toast, ToastViewport } from "./feedback";
 import { Logo, logoUrl } from "./logo";
 import { AppTitlebar } from "./app-titlebar";
 import { CopySeparator, SeparatedCopy } from "./copy-separator";
-import { compactBlockDuration, taskBlockType, taskBlockTypeLabels, TaskBlockType } from "./task-block-display";
+import { compactBlockDuration, recurringBlockDisplay, taskBlockType, taskBlockTypeLabels, TaskBlockType } from "./task-block-display";
 import { TimelineTaskCreate, TimelineCreateRange } from "./timeline-task-create";
 import { TaskTimeRangeFields } from "./task-time-range-fields";
-import { TaskPrioritySelector } from "./task-priority-selector";
+import { priorityCopy, TaskPrioritySelector } from "./task-priority-selector";
 import { isTaskTimelineTooltip, TaskTimelineHoverCard, TimelineHoverCopyButton, TimelineTooltipContent, TimelineTooltipState } from "./timeline-hover-card";
 import { WeekTimeline } from "./week-timeline";
 import { TimelineWeekDateContent } from "./timeline-week-date-content";
@@ -108,7 +108,9 @@ import {
   updateRecurringTask,
   setUiSetting
 } from "./tauri";
-import { availabilityWorkdayOn, calendarDayInfo, lunarDayLabel, lunarDateLabel, solarTermProgressLabel, officialHolidayCoverageFor, OFFICIAL_HOLIDAY_COVERAGE } from "./calendar-data";
+import { availabilityWorkdayOn, calendarDayInfo, lunarDayLabel, lunarDateLabel, solarTermProgressLabel } from "./calendar-data";
+import { HolidayCalendarSettings, HolidayCoverageNotice } from "./holiday-calendar-status";
+import { useHolidayCalendarSync } from "./holiday-calendar-sync";
 import { recurringRuleOccursOn, taskAppearsOnDate } from "./calendar-task-placement";
 import { timelineDurationHeight, timelineLaneLayout as calculateTimelineLanes, TimelineLane } from "./timeline-lane-layout";
 import {
@@ -149,7 +151,7 @@ import { canCaptureTaskResult, normalizeTodayNavigation } from "./review-workflo
 import { executionResultForOutcome, taskExecutionResolution, timelineTaskCompletionAction, timelineTaskDialogState, taskResultEditable, resultWindowOpen, resultToday, taskNextActionLabels, ExecutionResult, ExecutionOutcome, visibleTaskScheduleBlocks, taskListStatus, TaskListStatus } from "./task-result";
 import { historicalTaskCreationError, isHistoricalResultDate, historicalBlockCompletionLocked, historicalTaskCompletionLocked, HISTORY_COMPLETION_LOCKED_MESSAGE, HISTORICAL_TASK_CREATION_NOTE } from "./task-result";
 import { independentTaskDraft } from "./task-followup";
-import { TaskTagEditor, TaskTagList } from "./task-tag-editor";
+import { TaskTagEditor, TaskTagFilter, TaskTagList } from "./task-tag-editor";
 import { matchesTag, matchesTaggedSearch, uniqueTags } from "./task-tags";
 
 type IconName =
@@ -225,7 +227,6 @@ const COMPACT_TASK_BLOCK_THRESHOLD_MINUTES = 30;
 const statusCopy: Record<TaskListStatus, string> = {
   open: "待处理", scheduled: "已安排", not_completed: "未完成", done: "已完成", deleted: "回收站"
 };
-const priorityCopy = { low: "低优先级", medium: "中优先级", high: "高优先级" } as const;
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
   const paths: Record<IconName, React.ReactNode> = {
@@ -297,7 +298,7 @@ function newTaskDefaultForm(now = new Date()): NewTaskForm {
   return {
     title: "",
     notes: "",
-    priority: "medium",
+    priority: "high",
     estimated_minutes: Math.round((
       new Date(`${end.date}T${end.time}:00+08:00`).getTime()
       - new Date(`${start.date}T${start.time}:00+08:00`).getTime()
@@ -504,7 +505,7 @@ function shortTaskBlockClass(startsAt: string, endsAt: string) {
 function TimelineTaskFacts({ priority, type, inline = false }: { priority?: Task["priority"]; type: TaskBlockType | null; inline?: boolean }) {
   if (!type) return null;
   return <span className={`timeline-task-facts${inline ? " inline-facts" : ""}`}>
-    {type !== "recurring" && priority && <span className={`timeline-fact-priority priority-${priority}`}><span className="timeline-fact-full">{priorityCopy[priority]}</span><span className="timeline-fact-short">{{ high: "高", medium: "中", low: "低" }[priority]}</span></span>}
+    {type !== "recurring" && priority && <span className={`timeline-fact-priority priority-${priority}`}><span className="timeline-fact-full">{priorityCopy[priority]}</span><span className="timeline-fact-short">{{ urgent: "P0", high: "P1", medium: "P2", low: "P3" }[priority]}</span></span>}
     <span className={`timeline-fact-type type-${type}`}><span className="timeline-fact-full">{taskBlockTypeLabels[type].full}</span><span className="timeline-fact-short">{taskBlockTypeLabels[type].short}</span></span>
   </span>;
 }
@@ -553,13 +554,13 @@ function ExecutionOutcomePicker({ result, disabled, label, onChange, onCompleteT
   result: ExecutionResult | null;
   disabled: boolean;
   label: string;
-  onChange: (result: ExecutionResult, outcome: ExecutionOutcome) => void;
+  onChange: (result: ExecutionResult | null, outcome: ExecutionOutcome | null) => void;
   onCompleteTask?: () => void;
   completeTaskDisabled?: boolean;
   wholeTask?: boolean;
 }) {
   return <div className="execution-choice-stack compact"><div className="floating-outcomes" role="group" aria-label={label} style={onCompleteTask ? { gridTemplateColumns: "repeat(3, minmax(0, 1fr))" } : undefined}>
-    {executionResultOptions.map(([value, text]) => <button key={value} type="button" data-outcome={value} aria-pressed={result === value} disabled={disabled} onClick={() => onChange(value, value === "completed" ? "completed" : "not_started")}>{result === value && <Icon name="check" size={14} />}{onCompleteTask && value === "completed" ? "当天完成" : text}</button>)}
+    {executionResultOptions.map(([value, text]) => <button key={value} type="button" data-outcome={value} aria-pressed={result === value} disabled={disabled} onClick={() => result === "completed" && value === "completed" ? onChange(null, null) : onChange(value, value === "completed" ? "completed" : "not_started")}>{result === value && <Icon name="check" size={14} />}{onCompleteTask && value === "completed" ? "当天完成" : text}</button>)}
     {onCompleteTask && <button type="button" data-action="complete-task" aria-pressed={wholeTask} disabled={disabled || completeTaskDisabled} onClick={onCompleteTask}>{wholeTask && <Icon name="check" size={14} />}整体完成</button>}
   </div></div>;
 }
@@ -630,7 +631,7 @@ function emptyNewTaskForm(): NewTaskForm {
   return {
     title: "",
     notes: "",
-    priority: "medium",
+    priority: "high",
     estimated_minutes: null,
     earliest_start_date: "",
     earliest_start_time: "",
@@ -1218,13 +1219,13 @@ function TaskNotesInputs({ id, value, disabled = false, maxLength, icons = false
   const { url, body } = splitTaskNotes(value);
   const urlPrefixLength = url ? 5 + (body ? 2 : 0) : 0;
   return <div className={`task-notes-inputs${icons ? " has-field-icons" : ""}`}>
-    <label htmlFor={`${id}-url`} className="sr-only">URL</label>
+    <label htmlFor={`${id}-url`} className="task-notes-label sr-only">链接</label>
     {icons && <Icon name="external-link" size={14} />}
-    <input id={`${id}-url`} type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} disabled={disabled} value={url} maxLength={maxLength === undefined ? undefined : Math.max(0, maxLength - body.length - 7)} placeholder="URL" onChange={(event) => onChange(joinTaskNotes(event.target.value, body))} />
+    <input id={`${id}-url`} type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} disabled={disabled} value={url} maxLength={maxLength === undefined ? undefined : Math.max(0, maxLength - body.length - 7)} placeholder="粘贴网址（选填）" onChange={(event) => onChange(joinTaskNotes(event.target.value, body))} />
     <span className="task-notes-divider" aria-hidden="true" />
-    <label htmlFor={id} className="sr-only">备注</label>
+    <label htmlFor={id} className="task-notes-label sr-only">备注</label>
     {icons && <Icon name="file" size={14} />}
-    <textarea id={id} rows={3} disabled={disabled} value={body} maxLength={maxLength === undefined ? undefined : Math.max(0, maxLength - url.length - urlPrefixLength)} placeholder="备注" onChange={(event) => onChange(joinTaskNotes(url, event.target.value))} />
+    <textarea id={id} rows={3} disabled={disabled} value={body} maxLength={maxLength === undefined ? undefined : Math.max(0, maxLength - url.length - urlPrefixLength)} placeholder="添加说明或补充信息（选填）" onChange={(event) => onChange(joinTaskNotes(url, event.target.value))} />
   </div>;
 }
 
@@ -1458,7 +1459,8 @@ function RecurringValidityPicker({ startsOn, endsOn, displayTime = "", displayDu
         <section className="schedule-picker-range-panel" aria-label="调整时间范围">
           <header><div><strong>调整时间范围</strong><span>{timeError ? "每次任务" : formatWorkloadMinutes(timeInput.display_duration_minutes!)}</span></div></header>
           <BlockEditorTimeRangeRail start={railRange.start} end={railRange.end} minimumDuration={1} maxMinute={24 * 60} allowMidnightEnd describedBy="recurring-picker-range-help" onChange={updateTimeRange} />
-          <div className="schedule-occurrence-preview"><strong>近期发生预览</strong><p>{previewDates.length ? previewDates.slice(0, 3).map(pickerDateLabel).join("、") : "当前设置没有可发生日期，请调整频率或有效开始日期。"}</p></div>
+          <div className="schedule-occurrence-preview"><strong>近期发生预览</strong><p>{previewDates.length ? previewDates.slice(0, 3).map(pickerDateLabel).join("、") : previewForm.frequency === "weekdays" ? "暂无可确认的发生日期；请检查相关年份的节假日数据或调整规则。" : "当前设置没有可发生日期，请调整频率或有效开始日期。"}</p></div>
+          {previewForm.frequency === "weekdays" && <HolidayCoverageNotice from={draftStartsOn} to={draftEndsOn || shiftDateValue(draftStartsOn, 365)} />}
         </section>
       </div>
       <footer className="schedule-picker-footer">
@@ -1705,6 +1707,7 @@ function RecurringItemEditor({ form, disabled, idPrefix, autoFocusTitle = false,
       </div>
 
       <div className="recurring-validity-card">
+        {form.frequency === "weekdays" && <HolidayCoverageNotice from={form.starts_on} to={form.ends_on || shiftDateValue(form.starts_on, 365)} />}
         <div className="recurring-validity-heading">
           <div className="recurring-validity-title-wrap">
             <span className="recurring-validity-label">有效日期</span>
@@ -2080,14 +2083,14 @@ function TaskDetailResources({ notes }: { notes: string | null }) {
   return <>
     <section className="task-detail-resources" aria-label="任务链接与备注">
       <div className="task-detail-resource-row">
-        <div className="task-detail-resource-label" aria-label="任务 URL" title="任务 URL"><Icon name="external-link" size={14} /><span className="sr-only">任务 URL</span></div>
+        <div className="task-detail-resource-label" aria-label="任务 URL" title="任务 URL"><Icon name="external-link" size={14} /><span>链接</span></div>
         <div className="task-detail-link-content">
           {href ? <a className="task-detail-url" href={href} target="_blank" rel="noopener noreferrer" onClick={(event) => { event.preventDefault(); void openResource(); }} title={url}><span ref={urlRef}>{url}</span></a> : <span ref={urlRef} className="task-detail-empty" title={url || undefined}>{url || "未设置"}</span>}
         </div>
         {url && <TimelineHoverCopyButton field="url" text={url} targetRef={urlRef} />}
       </div>
       <div className="task-detail-resource-row">
-        <div className="task-detail-resource-label" aria-label="任务备注" title="任务备注"><Icon name="file" size={14} /><span className="sr-only">任务备注</span></div>
+        <div className="task-detail-resource-label" aria-label="任务备注" title="任务备注"><Icon name="file" size={14} /><span>备注</span></div>
         <p ref={noteRef} className={`task-detail-note${body ? "" : " task-detail-empty"}`} tabIndex={body ? 0 : undefined} aria-label="任务备注">{body || "未填写"}</p>
         {body && <TimelineHoverCopyButton field="note" text={body} targetRef={noteRef} />}
       </div>
@@ -2245,7 +2248,7 @@ function RecurringExecutionHistory({ itemId, createdAt, status, deletedAt }: { i
       : [...groups].sort(([a], [b]) => b.localeCompare(a)).map(([date, events], index) => <details key={`${itemId}:${date}`} className="task-detail-history" open={index === 0}>
         <summary><Icon name="chevron-down" size={13} /><span>{date}</span><span className="task-detail-history-count">{events.length} 条动态</span></summary>
         <ol className="task-detail-timeline">{events.map((event) => <li key={event.id} className="task-detail-event" data-occurrence-id={event.occurrence_id ?? undefined} data-status={event.kind && event.kind !== "execution" ? event.kind : event.outcome === "completed" ? "done" : event.outcome ? "not_completed" : "cleared"}>
-          <div className="task-detail-event-top"><strong>{event.kind === "created" ? "执行记录已建立" : event.kind === "soft_deleted" ? "已移入回收站" : event.kind === "restored" ? "已从回收站恢复（保持已结束）" : event.kind === "paused" ? "重复事项已暂停" : event.kind === "resumed" ? "重复事项已恢复" : event.kind === "ended" ? "重复事项已结束" : event.outcome === "completed" ? "本次已完成" : event.outcome === "partial" ? "本次部分完成" : event.outcome === "not_completed" ? "本次未完成" : event.notes ? "随手记" : "已取消本次结果"}</strong><time dateTime={event.occurred_at}>{event.occurred_at.length === 10 ? event.occurred_at : Number.isFinite(Date.parse(event.occurred_at)) ? new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(new Date(event.occurred_at)) : event.occurred_at}</time></div>
+          <div className="task-detail-event-top"><strong>{event.kind === "created" ? "执行记录已建立" : event.kind === "soft_deleted" ? "已移入回收站" : event.kind === "restored" ? "已从回收站恢复（保持已结束）" : event.kind === "paused" ? "重复事项已暂停" : event.kind === "resumed" ? "重复事项已恢复" : event.kind === "ended" ? "重复事项已结束" : event.outcome === "completed" ? "本次已完成" : event.outcome === "partial" ? "本次部分完成" : event.outcome === "not_completed" ? "本次未完成" : event.cancelled_outcome ? `已取消本次${event.cancelled_outcome === "completed" ? "完成" : event.cancelled_outcome === "partial" ? "部分完成" : "未完成"}` : event.notes ? "随手记" : "已取消本次结果"}</strong><time dateTime={event.occurred_at}>{event.occurred_at.length === 10 ? event.occurred_at : Number.isFinite(Date.parse(event.occurred_at)) ? new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(new Date(event.occurred_at)) : event.occurred_at}</time></div>
           {event.notes && <p className="task-detail-event-note">{event.notes}</p>}
         </li>)}</ol>
       </details>)}
@@ -2367,12 +2370,12 @@ function TaskCompletionDialog({ task, note, busy, error, onNoteChange, onCancel,
   return <div className="dialog-backdrop task-completion-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
     <ConfirmationDialog role="dialog" aria-modal="true" aria-labelledby="task-completion-heading task-completion-title" initialFocus="textarea:not(:disabled)" busy={busy} onCancel={onCancel}>
       <form onSubmit={(event) => { event.preventDefault(); if (!busy) onConfirm(); }}>
-        <header className="task-completion-header"><p className="task-completion-heading" id="task-completion-heading">{task.earliest_start_date && task.due_date && task.earliest_start_date < task.due_date ? "完成整个任务" : "完成任务"}</p><h2 id="task-completion-title" title={task.title}>{task.title}</h2></header>
+        <header className="task-completion-header"><h2 id="task-completion-title" title={task.title}>{task.title}</h2><p className="task-completion-heading" id="task-completion-heading">{task.earliest_start_date && task.due_date && task.earliest_start_date < task.due_date ? "完成整个任务" : "完成任务"}</p></header>
         <div className="task-completion-body">
           <label className="task-completion-note"><span><span>备注 <small>选填</small></span><span className="task-completion-count" aria-hidden="true">{note.length} / 500</span></span><textarea autoFocus value={note} maxLength={500} disabled={busy} placeholder="记录完成情况…" onChange={(event) => onNoteChange(event.target.value)} /></label>
           {error && <p className="task-completion-error" role="alert">{error}</p>}
         </div>
-        <footer className="dialog-actions task-completion-actions"><button type="button" disabled={busy} onClick={onCancel}>取消</button><button type="submit" className="primary-action" disabled={busy}>{busy ? "正在完成…" : "确认完成"}</button></footer>
+        <footer className="dialog-actions task-completion-actions"><button type="button" disabled={busy} onClick={onCancel}>取消</button><button type="submit" className="primary-action" disabled={busy}>{busy ? "正在完成…" : task.earliest_start_date && task.due_date && task.earliest_start_date < task.due_date ? "完成整个任务" : "完成任务"}</button></footer>
       </form>
     </ConfirmationDialog>
   </div>;
@@ -3668,7 +3671,7 @@ function TaskWorkspace({
                 </section>, document.body)}
               </div>
             </div>
-            {(availableTags.length > 0 || tagFilter) && <div className="task-tag-filter"><label htmlFor="task-tag-filter">标签</label><select id="task-tag-filter" value={tagFilter} onChange={(event) => setTagFilter(event.target.value)}><option value="">全部标签</option>{uniqueTags([...availableTags, tagFilter]).map((tag) => <option key={tag} value={tag}>{tag}</option>)}</select>{tagFilter && <button type="button" onClick={() => setTagFilter("")}>清除</button>}</div>}
+            <TaskTagFilter id="task-tag-filter" tags={availableTags} value={tagFilter} onChange={setTagFilter} />
           </header>
           {showUnsavedCreateCapsule && (
             <div className={`ledger-row selected task-ledger-row task-capsule-row capsule-type-${createItemType} status-row-draft`}>
@@ -3916,26 +3919,26 @@ function TaskWorkspace({
         </aside>
       </div>
       {(pendingTaskChange || externalNavigationRequest) && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) resolvePendingChange(false); }}>
-        <ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="unsaved-dialog-title" aria-describedby="unsaved-dialog-description" busy={busy} tone="caution" onCancel={() => resolvePendingChange(false)}><h2 id="unsaved-dialog-title">{creating ? "放弃正在记录的内容？" : "放弃未保存的修改？"}</h2><p id="unsaved-dialog-description">{creating ? "当前填写的任务还没有创建，放弃后内容将不会保留。" : "当前修改还没有保存，放弃后将恢复为上一次保存的内容。"}</p><div className="dialog-actions">
+        <ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="unsaved-dialog-title" aria-describedby="unsaved-dialog-description" busy={busy} tone="caution" onCancel={() => resolvePendingChange(false)}><h2 id="unsaved-dialog-title">{creating ? "放弃新建任务？" : "放弃未保存的修改？"}</h2><p id="unsaved-dialog-description">{creating ? "任务尚未创建，放弃后已填写的内容将丢失。" : "未保存的修改将丢失，任务恢复为上次保存的内容。"}</p><div className="dialog-actions">
             <button type="button" className="dialog-cancel" autoFocus disabled={busy} onClick={() => resolvePendingChange(false)}>继续编辑</button>
             <button type="button" className="dialog-discard" disabled={busy} onClick={() => void discardAndContinue()}>{busy ? "正在放弃…" : creating ? "放弃新建" : "放弃修改"}</button>
           </div></ConfirmationDialog>
       </div>}
-      {creating && pendingHistoricalCreation && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy && !draftSaving) setPendingHistoricalCreation(null); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="historical-create-title" aria-describedby="historical-create-description" busy={busy || draftSaving} tone="caution" onCancel={() => { if (!busy && !draftSaving) setPendingHistoricalCreation(null); }}><h2 id="historical-create-title">确认补录历史任务？</h2><p id="historical-create-description">“{pendingHistoricalCreation.title}”是历史事项补录，不是待办计划。创建后将直接完成任务，并生成已完成任务块；执行记录会注明“{HISTORICAL_TASK_CREATION_NOTE}”，不自动填写实际耗时。历史完成记录不能取消完成。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy || draftSaving} onClick={() => setPendingHistoricalCreation(null)}>返回编辑</button><button type="button" className="dialog-save" disabled={busy || draftSaving} onClick={() => void commitNewTask(pendingHistoricalCreation.input)}>{busy ? "正在补录…" : "确认补录并完成"}</button></div></ConfirmationDialog></div>}
+      {creating && pendingHistoricalCreation && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy && !draftSaving) setPendingHistoricalCreation(null); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="historical-create-title" aria-describedby="historical-create-description" busy={busy || draftSaving} tone="caution" onCancel={() => { if (!busy && !draftSaving) setPendingHistoricalCreation(null); }}><h2 id="historical-create-title">补录历史任务？</h2><p id="historical-create-description"><strong className="confirmation-object">{pendingHistoricalCreation.title}</strong>这是历史补录，不是待办计划。将直接完成任务并生成已完成任务块，执行记录注明“{HISTORICAL_TASK_CREATION_NOTE}”，实际耗时留空。历史完成记录不能取消完成。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy || draftSaving} onClick={() => setPendingHistoricalCreation(null)}>返回编辑</button><button type="button" className="dialog-save" disabled={busy || draftSaving} onClick={() => void commitNewTask(pendingHistoricalCreation.input)}>{busy ? "正在补录…" : "补录并完成"}</button></div></ConfirmationDialog></div>}
       {pendingTrashTask && <div className="dialog-backdrop task-trash-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingTrashTask(null); }}>
-        <ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="task-trash-title" aria-describedby="task-trash-description" busy={busy} tone="caution" onCancel={() => setPendingTrashTask(null)}><h2 id="task-trash-title">移入回收站？</h2><p id="task-trash-description">“{pendingTrashTask.title}”将从普通任务列表和后续日计划中移除，之后仍可在回收站恢复。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingTrashTask(null)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void moveToTrash()}>{busy ? "正在移入…" : "确认移入"}</button></div></ConfirmationDialog>
+        <ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="task-trash-title" aria-describedby="task-trash-description" busy={busy} tone="caution" onCancel={() => setPendingTrashTask(null)}><h2 id="task-trash-title">移入回收站？</h2><p id="task-trash-description"><strong className="confirmation-object">{pendingTrashTask.title}</strong>将移出普通任务列表和后续日程，可在回收站恢复。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingTrashTask(null)}>取消</button><button type="button" className="dialog-save" disabled={busy} onClick={() => void moveToTrash()}>{busy ? "正在移入…" : "移入回收站"}</button></div></ConfirmationDialog>
       </div>}
-      {pendingDiscardTaskDraft && <div className="dialog-backdrop task-trash-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingDiscardTaskDraft(null); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="discard-task-draft-title" aria-describedby="discard-task-draft-description" busy={busy} tone="caution" onCancel={() => setPendingDiscardTaskDraft(null)}><h2 id="discard-task-draft-title">放弃草稿？</h2><p id="discard-task-draft-description">“{pendingDiscardTaskDraft.title || "未命名草稿"}”将从草稿中移除，原任务不会变化。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingDiscardTaskDraft(null)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void discardTaskDraftFromList(pendingDiscardTaskDraft)}>{busy ? "正在放弃…" : "确认放弃"}</button></div></ConfirmationDialog></div>}
-      {pendingEndRecurringItem && <div className="dialog-backdrop task-trash-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingEndRecurringItem(null); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="end-recurring-item-title" aria-describedby="end-recurring-item-description" busy={busy} tone="caution" onCancel={() => setPendingEndRecurringItem(null)}><h2 id="end-recurring-item-title">结束重复事项？</h2><p id="end-recurring-item-description">“{pendingEndRecurringItem.title}”以后不会再出现；已经保存的记录会继续保留。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingEndRecurringItem(null)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void endRecurringItemFromList(pendingEndRecurringItem)}>{busy ? "正在结束…" : "确认结束"}</button></div></ConfirmationDialog></div>}
-      {pendingTrashRecurringItem && <div className="dialog-backdrop task-trash-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingTrashRecurringItem(null); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="trash-recurring-item-title" aria-describedby="trash-recurring-item-description" busy={busy} tone="caution" onCancel={() => setPendingTrashRecurringItem(null)}><h2 id="trash-recurring-item-title">移入回收站？</h2><p id="trash-recurring-item-description">“{pendingTrashRecurringItem.title}”将{pendingTrashRecurringItem.status === "paused" ? "结束重复并移入回收站" : "移入回收站"}；过去的记录仍会保留，恢复后保持已结束。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingTrashRecurringItem(null)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void moveRecurringItemToTrash()}>{busy ? "正在移入…" : "确认移入"}</button></div></ConfirmationDialog></div>}
-      {pendingRecurringSave && selectedTask && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingRecurringSave(null); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="recurring-scope-title" aria-describedby="recurring-scope-description" busy={busy} tone="info" onCancel={() => setPendingRecurringSave(null)}><h2 id="recurring-scope-title">修改哪些重复任务？</h2><p id="recurring-scope-description">“{selectedTask.title}”来自一项重复安排。以前的任务和执行记录不会改变。</p><div className="dialog-actions"><button type="button" disabled={busy} onClick={() => setPendingRecurringSave(null)}>取消</button><button type="button" disabled={busy} onClick={() => void commitDraft("this")}>仅修改本次</button><button type="button" className="dialog-save" disabled={busy} onClick={() => void commitDraft("future")}>修改本次及以后</button></div></ConfirmationDialog></div>}
+      {pendingDiscardTaskDraft && <div className="dialog-backdrop task-trash-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingDiscardTaskDraft(null); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="discard-task-draft-title" aria-describedby="discard-task-draft-description" busy={busy} tone="caution" onCancel={() => setPendingDiscardTaskDraft(null)}><h2 id="discard-task-draft-title">放弃草稿？</h2><p id="discard-task-draft-description"><strong className="confirmation-object">{pendingDiscardTaskDraft.title || "未命名草稿"}</strong>草稿内容将移除，原任务不变。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingDiscardTaskDraft(null)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void discardTaskDraftFromList(pendingDiscardTaskDraft)}>{busy ? "正在放弃…" : "放弃草稿"}</button></div></ConfirmationDialog></div>}
+      {pendingEndRecurringItem && <div className="dialog-backdrop task-trash-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingEndRecurringItem(null); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="end-recurring-item-title" aria-describedby="end-recurring-item-description" busy={busy} tone="caution" onCancel={() => setPendingEndRecurringItem(null)}><h2 id="end-recurring-item-title">结束重复事项？</h2><p id="end-recurring-item-description"><strong className="confirmation-object">{pendingEndRecurringItem.title}</strong>以后不再出现，已保存的记录保留。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingEndRecurringItem(null)}>取消</button><button type="button" className="dialog-save" disabled={busy} onClick={() => void endRecurringItemFromList(pendingEndRecurringItem)}>{busy ? "正在结束…" : "结束重复"}</button></div></ConfirmationDialog></div>}
+      {pendingTrashRecurringItem && <div className="dialog-backdrop task-trash-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingTrashRecurringItem(null); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="trash-recurring-item-title" aria-describedby="trash-recurring-item-description" busy={busy} tone="caution" onCancel={() => setPendingTrashRecurringItem(null)}><h2 id="trash-recurring-item-title">移入回收站？</h2><p id="trash-recurring-item-description"><strong className="confirmation-object">{pendingTrashRecurringItem.title}</strong>将{pendingTrashRecurringItem.status === "paused" ? "结束重复并移入回收站" : "移入回收站"}。历史记录保留，恢复后仍为已结束状态。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingTrashRecurringItem(null)}>取消</button><button type="button" className="dialog-save" disabled={busy} onClick={() => void moveRecurringItemToTrash()}>{busy ? "正在移入…" : "移入回收站"}</button></div></ConfirmationDialog></div>}
+      {pendingRecurringSave && selectedTask && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingRecurringSave(null); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="recurring-scope-title" aria-describedby="recurring-scope-description" busy={busy} tone="info" onCancel={() => setPendingRecurringSave(null)}><h2 id="recurring-scope-title">修改哪些重复安排？</h2><p id="recurring-scope-description"><strong className="confirmation-object">{selectedTask.title}</strong>以前的任务和执行记录不变。仅修改本次不改变重复规则；修改本次及以后将从本次起应用新安排。</p><div className="dialog-actions"><button type="button" disabled={busy} onClick={() => setPendingRecurringSave(null)}>取消</button><button type="button" disabled={busy} onClick={() => void commitDraft("this")}>仅修改本次</button><button type="button" className="dialog-save" disabled={busy} onClick={() => void commitDraft("future")}>修改本次及以后</button></div></ConfirmationDialog></div>}
       {pendingItemChange && <RecurringScopeConfirmation change={pendingItemChange} busy={busy} error={recurringScopeError} onCancel={() => { if (!busy) setPendingItemChange(null); }} onConfirm={(scope) => void commitRecurringItemChange(scope)} />}
-      {pendingDiscardNew && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingDiscardNew(false); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="discard-new-title" aria-describedby="discard-new-description" busy={busy} tone="caution" onCancel={() => setPendingDiscardNew(false)}><h2 id="discard-new-title">放弃这个草稿？</h2><p id="discard-new-description">已填写的内容将从草稿中移除，原任务不会变化。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingDiscardNew(false)}>继续编辑</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => { setPendingDiscardNew(false); void cancelNewTask(false); }}>放弃草稿</button></div></ConfirmationDialog></div>}
+      {pendingDiscardNew && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingDiscardNew(false); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="discard-new-title" aria-describedby="discard-new-description" busy={busy} tone="caution" onCancel={() => setPendingDiscardNew(false)}><h2 id="discard-new-title">放弃草稿？</h2><p id="discard-new-description">草稿内容将移除，原任务不变。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingDiscardNew(false)}>继续编辑</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => { setPendingDiscardNew(false); void cancelNewTask(false); }}>放弃草稿</button></div></ConfirmationDialog></div>}
 
-      {pendingDraftSelection && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !draftSaving && !busy) setPendingDraftSelection(null); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="switch-draft-title" aria-describedby="switch-draft-description" busy={draftSaving || busy} tone="info" onCancel={() => setPendingDraftSelection(null)}><h2 id="switch-draft-title">保存当前草稿并切换？</h2><p id="switch-draft-description">当前输入会先保存为草稿，然后打开“{pendingDraftSelection.title || "未命名草稿"}”。</p><div className="dialog-actions"><button type="button" autoFocus disabled={draftSaving || busy} onClick={() => setPendingDraftSelection(null)}>留在当前草稿</button><button type="button" className="dialog-save" disabled={draftSaving || busy} onClick={() => { const target = pendingDraftSelection; setPendingDraftSelection(null); void saveAndSwitchPersistedTaskDraft(target); }}>保存并切换</button></div></ConfirmationDialog></div>}
+      {pendingDraftSelection && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !draftSaving && !busy) setPendingDraftSelection(null); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="switch-draft-title" aria-describedby="switch-draft-description" busy={draftSaving || busy} tone="info" onCancel={() => setPendingDraftSelection(null)}><h2 id="switch-draft-title">保存草稿并切换？</h2><p id="switch-draft-description"><strong className="confirmation-object">{pendingDraftSelection.title || "未命名草稿"}</strong>先保存当前草稿，再打开此草稿。</p><div className="dialog-actions"><button type="button" autoFocus disabled={draftSaving || busy} onClick={() => setPendingDraftSelection(null)}>留在当前草稿</button><button type="button" className="dialog-save" disabled={draftSaving || busy} onClick={() => { const target = pendingDraftSelection; setPendingDraftSelection(null); void saveAndSwitchPersistedTaskDraft(target); }}>保存并切换</button></div></ConfirmationDialog></div>}
       {pendingCompletion && selectedTask && <TaskCompletionDialog task={selectedTask} note={completionNote} busy={busy} error={completionError} onNoteChange={setCompletionNote} onCancel={() => { if (!busy) setPendingCompletion(false); }} onConfirm={() => void transition("done", completionNote)} />}
-      {pendingPermanentTask && selectedTask && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingPermanentTask(false); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="permanent-task-title" aria-describedby="permanent-task-description" busy={busy} tone="danger" onCancel={() => setPendingPermanentTask(false)}><h2 id="permanent-task-title">永久删除任务？</h2><p id="permanent-task-description">“{selectedTask.title}”及其本地历史将无法恢复。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingPermanentTask(false)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void permanentlyDelete()}>{busy ? "正在删除…" : "永久删除"}</button></div></ConfirmationDialog></div>}
-      {pendingPermanentRecurringItem && selectedRecurringItem && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingPermanentRecurringItem(false); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="permanent-recurring-item-title" aria-describedby="permanent-recurring-item-description" busy={busy} tone="danger" onCancel={() => setPendingPermanentRecurringItem(false)}><h2 id="permanent-recurring-item-title">永久删除重复事项？</h2><p id="permanent-recurring-item-description">“{selectedRecurringItem.title}”及其全部历史和复盘记录将无法恢复。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingPermanentRecurringItem(false)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void permanentlyDeleteSelectedRecurringItem()}>{busy ? "正在删除…" : "永久删除"}</button></div></ConfirmationDialog></div>}
+      {pendingPermanentTask && selectedTask && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingPermanentTask(false); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="permanent-task-title" aria-describedby="permanent-task-description" busy={busy} tone="danger" onCancel={() => setPendingPermanentTask(false)}><h2 id="permanent-task-title">永久删除任务？</h2><p id="permanent-task-description"><strong className="confirmation-object">{selectedTask.title}</strong>任务及其本地历史记录将永久删除，无法恢复。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingPermanentTask(false)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void permanentlyDelete()}>{busy ? "正在删除…" : "永久删除"}</button></div></ConfirmationDialog></div>}
+      {pendingPermanentRecurringItem && selectedRecurringItem && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPendingPermanentRecurringItem(false); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="permanent-recurring-item-title" aria-describedby="permanent-recurring-item-description" busy={busy} tone="danger" onCancel={() => setPendingPermanentRecurringItem(false)}><h2 id="permanent-recurring-item-title">永久删除重复事项？</h2><p id="permanent-recurring-item-description"><strong className="confirmation-object">{selectedRecurringItem.title}</strong>重复事项及其全部历史和复盘记录将永久删除，无法恢复。</p><div className="dialog-actions"><button type="button" autoFocus disabled={busy} onClick={() => setPendingPermanentRecurringItem(false)}>取消</button><button type="button" className="dialog-discard" disabled={busy} onClick={() => void permanentlyDeleteSelectedRecurringItem()}>{busy ? "正在删除…" : "永久删除"}</button></div></ConfirmationDialog></div>}
     </section>
   );
 }
@@ -4004,7 +4007,7 @@ function executionDraftChanged(block: PlanBlock, draft: ExecutionDraft, task: Ta
 function ExecutionCaptureFields({ draft, disabled, onChange, onCompleteTask, completeTaskDisabled, taskCompleted = false }: {
   draft: ExecutionDraft; disabled: boolean; onChange: (update: Partial<ExecutionDraft>) => void; onCompleteTask?: () => void; completeTaskDisabled?: boolean; taskCompleted?: boolean;
 }) {
-  const choseIncomplete = draft.wholeTask === false && draft.result === "not_completed";
+  const choseIncomplete = draft.wholeTask === false && draft.result !== "completed";
   return <div className="execution-capture-fields">
     <div className="execution-result-label">任务结果</div>
     <ExecutionOutcomePicker label="任务结果" result={draft.result} disabled={disabled} onChange={(result, outcome) => onChange({ result, outcome, wholeTask: false })} onCompleteTask={onCompleteTask} completeTaskDisabled={completeTaskDisabled} wholeTask={draft.wholeTask || (taskCompleted && !choseIncomplete)} />
@@ -4050,7 +4053,7 @@ function RecurringOccurrenceResult({ occurrence, writable, disabled, hidden = fa
     {writable ? <>
       <div className="execution-capture-fields">
         <div className="execution-result-label">本次结果</div>
-        <div className="floating-outcomes" style={{ gridTemplateColumns: "1fr" }}><button type="button" data-outcome="completed" aria-pressed={outcome === "completed"} disabled={disabled} onClick={() => setOutcome(outcome === "completed" ? null : "completed")}>本次完成</button></div>
+        <div className="floating-outcomes" role="group" aria-label="本次结果" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>{(["completed", "not_completed"] as const).map((value) => <button key={value} type="button" data-outcome={value} aria-pressed={outcome === value} disabled={disabled} onClick={() => setOutcome(outcome === value ? null : value)}>{outcome === value && <Icon name="check" size={14} />}{value === "completed" ? "本次完成" : "本次未完成"}</button>)}</div>
         <label className="floating-execution-note"><span>随手记<small>可选</small></span><textarea rows={3} maxLength={500} placeholder="记录进展或需要留意的事…" value={notes} disabled={disabled} onChange={(event) => setNotes(event.target.value)} /></label>
       </div>
       <p className="execution-capture-note">仅记录这一次，不影响其他日期或重复规则；未勾选不会自动记为未完成。</p>
@@ -4912,8 +4915,6 @@ function TodayPage({
   const [monthSelectionPending, setMonthSelectionPending] = useState(false);
   const [todayView, setTodayView] = useState<"month" | "timeline" | "week">("timeline");
   const [calendarDateHint, setCalendarDateHint] = useState<{ date: string; left: number; top: number } | null>(null);
-  const monthSheetRef = useRef<HTMLElement>(null);
-  const monthWheelGestureRef = useRef({ delta: 0, lastAt: 0, flipped: false });
   const [selection, setSelection] = useState<TimelineSelection | null>(null);
   const [planDraftTimeEdit, setPlanDraftTimeEdit] = useState<PlanDraftTimeEdit | null>(null);
   const [recurringTimeEdit, setRecurringTimeEdit] = useState<RecurringBlockTimeEdit | null>(null);
@@ -5082,7 +5083,6 @@ function TodayPage({
   const selectedLunarDate = lunarDateLabel(selectedDate);
   const selectedSolarTerm = solarTermProgressLabel(selectedDate);
   const nonWorkingTimeSegments = nonWorkingSegments(availability, selectedDate);
-  const holidayCoverageAvailable = officialHolidayCoverageFor(`${monthKey}-01`);
 
   function showCalendarDateHint(date: string, target: HTMLElement) {
     const rect = target.getBoundingClientRect();
@@ -5131,10 +5131,10 @@ function TodayPage({
     setQuickCompletingBlockId(item.id);
     let saved = false;
     try {
-      const noteOnly = !outcome && Boolean(notes?.trim());
+      const noteOnly = !outcome && !item.outcome && Boolean(notes?.trim());
       const previousUndo = outcome === "completed" ? await latestUndo().catch(() => null) : null;
       if (outcome || noteOnly) await saveRecurringOccurrenceReview(item.id, { outcome, notes: notes?.trim() || null });
-      else await clearRecurringOccurrenceReview(item.id);
+      else await clearRecurringOccurrenceReview(item.id, notes?.trim() || null);
       saved = true;
       let undoId: string | undefined;
       if (outcome === "completed") {
@@ -5142,7 +5142,7 @@ function TodayPage({
         if (undo?.target_type === "recurring_review" && undo.target_id === item.id && undo.id !== previousUndo?.id) undoId = undo.id;
       }
       await onFactsChanged(item.occurrence_date);
-      onNotify(outcome === "completed" ? "本次已完成" : noteOnly ? "随手记已保存" : outcome ? "本次结果已保存" : "已取消本次结果", "", "check", undoId);
+      onNotify(outcome === "completed" ? "本次已完成" : outcome === "not_completed" ? "本次未完成" : noteOnly ? "随手记已保存" : outcome ? "本次结果已保存" : item.outcome ? `已取消本次${item.outcome === "completed" ? "完成" : item.outcome === "partial" ? "部分完成" : "未完成"}` : "已取消本次结果", "", "check", undoId);
     } catch (reason) { onNotify(saved ? "结果已保存，界面刷新失败" : "本次结果未保存", uiErrorMessage(reason), "review"); }
     finally { recurringResultSavingRef.current = false; setQuickCompletingBlockId(null); }
   }
@@ -5446,6 +5446,10 @@ function TodayPage({
         if (interactive) scheduleTimelineTooltipHide(); else hideTimelineTooltip();
       },
       onFocus: (event: React.FocusEvent<HTMLElement>) => {
+        if ((event.target as HTMLElement).closest(".timeline-event-check")) {
+          hideTimelineTooltip();
+          return;
+        }
         timelineTooltipFocusRef.current = event.target as HTMLElement;
         showTimelineTooltipForTarget(content, event.currentTarget, anchorMode);
       },
@@ -5744,42 +5748,6 @@ function TodayPage({
     setExecutionDraft({ result: executionResultForOutcome(outcome), outcome, note: selectedBlock.review?.notes ?? selectedBlock.execution_note ?? "" });
     setExecutionMessage("");
   }, [selectedBlock?.id, selectedBlock?.review, selectedBlock?.execution_status, selectedBlock?.execution_note, canRecordSelectedBlock, selectedDate, today]);
-
-  useEffect(() => {
-    const sheet = monthSheetRef.current;
-    if (!sheet || !visible || todayView !== "month") return;
-    sheet.addEventListener("wheel", handleMonthWheel, { passive: false });
-    return () => sheet.removeEventListener("wheel", handleMonthWheel);
-  }, [monthKey, selectedDate, todayView, visible]);
-
-  function handleMonthWheel(event: globalThis.WheelEvent) {
-    const sheet = monthSheetRef.current;
-    if (!sheet || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-    const gesture = monthWheelGestureRef.current;
-    if (event.timeStamp - gesture.lastAt > 250) {
-      gesture.delta = 0;
-      gesture.flipped = false;
-    }
-    gesture.lastAt = event.timeStamp;
-    if (gesture.flipped) {
-      event.preventDefault();
-      return;
-    }
-    // Let overflowing calendars scroll to the edge before changing months.
-    if ((event.deltaY < 0 && sheet.scrollTop > 1) || (event.deltaY > 0 && sheet.scrollTop + sheet.clientHeight < sheet.scrollHeight - 1)) {
-      gesture.delta = 0;
-      return;
-    }
-    event.preventDefault();
-    const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? sheet.clientHeight : 1);
-    if (Math.sign(delta) !== Math.sign(gesture.delta)) gesture.delta = 0;
-    gesture.delta += delta;
-    if (Math.abs(gesture.delta) < 40) return;
-    gesture.flipped = true;
-    setCalendarDateHint(null);
-    moveMonth(gesture.delta > 0 ? 1 : -1);
-  }
-
 
   function moveMonth(offset: number) {
     const [year, month] = monthKey.split("-").map(Number);
@@ -6237,8 +6205,9 @@ function TodayPage({
       setExecutionMessage(historicalBlockCompletionLocked(resultDate, selectedBlock, Date.now()) ? HISTORY_COMPLETION_LOCKED_MESSAGE : "已超过结果修改时间");
       return;
     }
-    const noteOnly = !executionDraft.outcome && Boolean(executionDraft.note.trim());
-    if (!executionDraft.outcome && !noteOnly) { setExecutionMessage("请选择任务结果。"); return; }
+    const clearingCompletion = !executionDraft.outcome && (selectedBlock.review?.outcome ?? selectedBlock.execution_status) === "completed";
+    const noteOnly = !executionDraft.outcome && !clearingCompletion && Boolean(executionDraft.note.trim());
+    if (!executionDraft.outcome && !noteOnly && !clearingCompletion) { setExecutionMessage("请选择任务结果。"); return; }
     if (executionDraft.wholeTask && (!selectedTaskIsCrossDay || !selectedTask || !taskResultEditable(selectedTask, Date.now()))) {
       setExecutionMessage("任务已变化，请关闭后重新打开。");
       return;
@@ -6247,7 +6216,9 @@ function TodayPage({
     setExecutionMessage("");
     try {
       let undoId: string | undefined;
-      if (executionDraft.wholeTask && selectedTask) {
+      if (clearingCompletion) {
+        await clearExecutionCapture(resultDate, selectedBlock.id, executionDraft.note.trim());
+      } else if (executionDraft.wholeTask && selectedTask) {
         await completeTask(selectedTask.id, null, executionDraft.note.trim() || null);
       } else if (noteOnly) {
         await saveExecutionCapture(resultDate, { plan_block_id: selectedBlock.id, outcome: null, note: executionDraft.note.trim() || null });
@@ -6270,7 +6241,7 @@ function TodayPage({
       window.requestAnimationFrame(() => timelineSelectionTriggerRef.current?.focus());
       const incomplete = executionDraft.outcome === "not_started";
       const seed = incomplete && selectedTask ? { title: selectedTask.title, priority: selectedTask.priority, tags: [...selectedTask.tags] } : undefined;
-      onNotify(executionDraft.wholeTask ? "整个任务已完成" : noteOnly ? "随手记已保存" : incomplete ? "未完成结果已保存" : "当天结果已保存", "", "check", undoId, seed);
+      onNotify(clearingCompletion ? "已取消当天完成" : executionDraft.wholeTask ? "整个任务已完成" : noteOnly ? "随手记已保存" : incomplete ? "未完成结果已保存" : "当天结果已保存", "", "check", undoId, seed);
     } catch (reason) { setExecutionMessage(`未保存：${uiErrorMessage(reason)}`); }
     finally { setSavingExecution(false); }
   }
@@ -6302,7 +6273,7 @@ function TodayPage({
         const canOfferUndo = !recycled && action === "complete-block" && selectedDate === resultToday(Date.now());
         const previousUndo = canOfferUndo ? await latestUndo().catch(() => null) : null;
         if (action === "uncomplete-block") {
-          await clearExecutionCapture(selectedDate, block.id);
+          await clearExecutionCapture(selectedDate, block.id, (block.review?.notes ?? block.execution_note ?? "").trim());
         } else {
           await saveExecutionCapture(selectedDate, { plan_block_id: block.id, outcome: "completed", note: recycled ? ((note?.trim() || block.review?.notes) ?? block.execution_note ?? null) : (block.review?.notes ?? block.execution_note ?? null) });
         }
@@ -6313,7 +6284,7 @@ function TodayPage({
         await onFactsChanged();
         onNotify(recycled ? "已完成回收站中的任务块" : action === "complete-block" ? "当天已完成" : task?.status === "done" && task.earliest_start_date && task.due_date && task.earliest_start_date < task.due_date ? "已取消当天及整体完成" : "已取消当天完成", recycled ? "执行记录已增加，任务仍在回收站。" : "", "check", undoId);
       } else if (action === "clear") {
-        await clearExecutionCapture(selectedDate, block.id);
+        await clearExecutionCapture(selectedDate, block.id, (block.review?.notes ?? block.execution_note ?? "").trim());
         await onFactsChanged();
         onNotify(selectedDate < resultToday(Date.now()) ? "已取消本次未完成" : "已取消未完成", "", "check");
       }
@@ -6337,7 +6308,6 @@ function TodayPage({
             <div className="timeline-date-copy">
               <div className="timeline-date-primary">
                 <h2 className="timeline-day-title">{todayView === "month" ? monthTitle : todayView === "week" ? selectedWeekHeading.range : selectedDateTitle}</h2>
-                {todayView === "timeline" && <div className="timeline-heading-plan-status" role="status" aria-label="已确认计划状态">{!preview && hasConfirmedPlan && !isPastDate && <span className="confirmed-plan-status"><Icon name="check" size={13} />计划已确认</span>}</div>}
                 {todayView === "week" && <span className="timeline-week-number-badge" title={`${selectedWeekHeading.year}年第${selectedWeekHeading.week}周`}>第{selectedWeekHeading.week}周</span>}
               </div>
               {todayView !== "week" && <div className="timeline-date-meta timeline-day-subline">{todayView === "month" && monthSelectionPending ? <span>选择一天查看安排</span> : <>{todayView === "month" && <><span className="home-selected-date">{selectedShortDateTitle}</span><CopySeparator /></>}<span>{selectedWeekday}</span>{selectedLunarDate && <><CopySeparator /><span>农历{selectedLunarDate}</span></>}{selectedSolarTerm && <><CopySeparator /><span className="timeline-term-chip">{selectedSolarTerm}</span></>}</>}</div>}
@@ -6364,10 +6334,10 @@ function TodayPage({
             </div>}
           </div>
         </header>
+        <HolidayCoverageNotice from={todayView === "month" ? `${monthKey}-01` : weekDates[0]} to={todayView === "month" ? `${monthKey}-01` : weekDates[6]} recurringStarts={recurringItems.filter((item) => item.status === "active" && !item.deleted_at && item.frequency === "weekdays" && (!item.ends_on || item.ends_on >= selectedDate)).map((item) => item.starts_on)} />
 
         {todayView === "week" ? <WeekTimeline selectedDate={selectedDate} today={today} tasks={tasks} recurringItems={recurringItems} /> : todayView === "month" ? <main className="today-month-view" aria-label={monthTitle}>
-          <section ref={monthSheetRef} className="month-sheet today-month-sheet" aria-label="月历，可使用滚轮切换月份">
-            {!holidayCoverageAvailable && <div className="holiday-coverage missing" role="status">当前月份暂无法定节假日和调休信息；农历与节气仍可显示</div>}
+          <section className="month-sheet today-month-sheet" aria-label="月历">
             <div className="weekday-row">{["一", "二", "三", "四", "五", "六", "日"].map((day) => <span key={day}>周{day}</span>)}</div>
             <div className="month-grid" role="grid" aria-label={monthTitle}>{cells.map((cell) => {
               const dayTasks = tasks.filter((task) => task.status !== "deleted" && taskAppearsOnDate(task, cell.key));
@@ -6408,9 +6378,10 @@ function TodayPage({
             <div className="timeline-lanes">
               {untimedRecurringOccurrences.length > 0 && <section className="recurring-occurrence-lane" aria-label="当天的重复事项"><h2>重复事项</h2><div>{untimedRecurringOccurrences.map((item) => {
                 const { url, body } = splitTaskNotes(item.notes ?? "");
-                return <div key={item.id} className="lane-item recurring" {...timelineTooltipProps({ kind: "重复事项", title: item.title, time: "时间未指定", detail: item.outcome === "completed" ? "本次已完成" : "可记录本次完成，未勾选保持中性", tone: "recurring", url, note: body, tags: item.tags })}>
-                  <button type="button" className={`timeline-event-check${item.outcome === "completed" ? " done" : ""}${quickCompletingBlockId === item.id ? " saving" : ""}`} aria-label={`${item.outcome === "completed" ? "取消本次完成" : "标记本次完成"}：${item.title}`} aria-pressed={item.outcome === "completed"} disabled={!canRecordRecurringOccurrence(item) || Boolean(quickCompletingBlockId) || busy || loading || savingExecution || savingRecurringChange || Boolean(preview) || Boolean(pendingRecurringChange)} onClick={() => void saveRecurringResult(item, item.outcome === "completed" ? null : "completed", item.outcome === "completed" ? null : item.review_notes)}>{quickCompletingBlockId === item.id ? <span className="timeline-check-spinner" /> : item.outcome === "completed" ? <Icon name="check" size={11} /> : null}</button>
-                  <button type="button" className="lane-copy" aria-label={`重复事项：${item.title}，时间未指定`} onClick={(event) => selectRecurringOccurrence(item, event.currentTarget, event.currentTarget.parentElement!)}><strong>{item.title}</strong><small>时间未指定</small></button>
+                const display = recurringBlockDisplay(item.outcome);
+                return <div key={item.id} className="lane-item recurring" {...timelineTooltipProps({ kind: "重复事项", title: item.title, time: "时间未指定", detail: display.label, tone: display.outcome === "planned" ? "execution" : `execution-${display.outcome}`, url, note: body, tags: item.tags })}>
+                  <button type="button" className={`timeline-event-check${item.outcome === "completed" ? " done" : item.outcome ? " recorded" : ""}${quickCompletingBlockId === item.id ? " saving" : ""}`} aria-label={`${item.outcome === "completed" ? "取消本次完成" : item.outcome === "not_completed" ? "取消本次未完成" : item.outcome === "partial" ? "取消本次部分完成" : "标记本次完成"}：${item.title}`} aria-pressed={Boolean(item.outcome)} disabled={!canRecordRecurringOccurrence(item) || Boolean(quickCompletingBlockId) || busy || loading || savingExecution || savingRecurringChange || Boolean(preview) || Boolean(pendingRecurringChange)} onClick={(event) => { event.stopPropagation(); void saveRecurringResult(item, item.outcome ? null : "completed", item.review_notes); }}>{quickCompletingBlockId === item.id ? <span className="timeline-check-spinner" /> : item.outcome === "completed" ? <Icon name="check" size={11} /> : null}</button>
+                  <button type="button" className="lane-copy" aria-label={`重复事项：${item.title}，时间未指定`} onClick={(event) => selectRecurringOccurrence(item, event.currentTarget, event.currentTarget.parentElement!)}><strong><img className="week-recurring-icon" src={recurringIcon} alt="" aria-hidden="true" />{item.title}</strong><small>时间未指定 · {display.label}</small></button>
                 </div>;
               })}</div></section>}
               <section className="waiting-task-lane waiting-task-pool" aria-label="待安排池"><h2><Icon name="tasks" size={15} />待安排池<span className="waiting-pool-count">{waitingPoolItems.length}</span></h2><div>{waitingPoolItems.length ? waitingPoolItems.map((item) => {
@@ -6465,10 +6436,9 @@ function TodayPage({
                   {executionMessage && <span role="alert" className="execution-capture-note error">{executionMessage}</span>}
                   {(canRecordSelectedBlock || selectedBlockDialog?.status !== "completed") && <footer className="execution-capture-footer">
                     {canAdjustSelectedBlock && <button type="button" className="execution-remove-today" disabled={busy || loading || savingExecution || Boolean(quickCompletingBlockId) || savingDraggedBlock || Boolean(timelineDrag) || Boolean(preview)} onClick={() => void removeSelectedBlock()}><Icon name="trash" size={14} />移除当前安排</button>}
-                    {!selectedTaskIsCrossDay && selectedBlockDialog?.action === "uncomplete-block" && <button type="button" className="execution-reopen-task secondary-action" title={historicalBlockCompletionLocked(selectedDate, selectedBlock, clock.getTime()) ? HISTORY_COMPLETION_LOCKED_MESSAGE : selectedBlockCompletionAction !== selectedBlockDialog.action ? "当前结果不可修改" : "仅取消当天任务块的完成状态，其他日期保持不变"} disabled={selectedBlockCompletionAction !== selectedBlockDialog.action || busy || loading || savingExecution || Boolean(quickCompletingBlockId) || savingDraggedBlock || Boolean(timelineDrag) || Boolean(preview)} onClick={() => void quickCompleteTimelineBlock(selectedBlock)}><Icon name="restore" size={14} />{quickCompletingBlockId === selectedBlock.id ? "正在取消…" : "取消当天完成"}</button>}
                     {!selectedTaskIsCrossDay && selectedBlockDialog?.action === "new-task" && selectedTask && <button type="button" className="execution-new-task secondary-action" disabled={busy || loading || savingExecution || Boolean(quickCompletingBlockId)} onClick={() => onNewTask({ title: selectedTask.title, priority: selectedTask.priority, tags: [...selectedTask.tags] })}><Icon name="plus" size={14} />新建任务</button>}
                     {selectedBlock.task_status === "deleted" && selectedBlockCompletionAction === "complete-block" && <button type="button" className="execution-complete-recycled secondary-action" disabled={busy || loading || savingExecution || Boolean(quickCompletingBlockId) || Boolean(preview)} onClick={() => { const note = recycledCompletionNote; setRecycledCompletionNote(""); void quickCompleteTimelineBlock(selectedBlock, false, note); }}><Icon name="check" size={14} />确认完成并记录</button>}
-                    <div><button type="button" className="quiet-button" disabled={savingExecution || Boolean(quickCompletingBlockId)} onClick={closeTimelinePanel}>取消</button>{canRecordSelectedBlock && executionDraft && <button type="button" className="primary-action" disabled={savingExecution || busy || loading || Boolean(quickCompletingBlockId) || !executionDraftChanged(selectedBlock, executionDraft, selectedTask) || (!executionDraft.outcome && !executionDraft.note.trim())} onClick={() => void saveSelectedBlockExecution()}>{savingExecution ? "正在保存…" : "保存"}</button>}</div>
+                    <div><button type="button" className="quiet-button" disabled={savingExecution || Boolean(quickCompletingBlockId)} onClick={closeTimelinePanel}>取消</button>{canRecordSelectedBlock && executionDraft && <button type="button" className="primary-action" disabled={savingExecution || busy || loading || Boolean(quickCompletingBlockId) || !executionDraftChanged(selectedBlock, executionDraft, selectedTask) || (!executionDraft.outcome && !executionDraft.note.trim() && selectedBlockDialog?.status !== "completed")} onClick={() => void saveSelectedBlockExecution()}>{savingExecution ? "正在保存…" : "保存"}</button>}</div>
                   </footer>}
                 </> : selectedEvent ? <><header><div><strong>{selectedEvent.title}</strong><small>{selectedEvent.is_all_day ? "全天固定日程" : <>{timeRangeLabel(selectedEvent.starts_at, selectedEvent.ends_at)}<CopySeparator />固定日程</>}</small></div><button type="button" aria-label="关闭日程详情" onClick={closeTimelinePanel}><Icon name="close" size={15} /></button></header><div className="floating-readonly"><strong>固定日程</strong><span>固定日程不提供完成按钮，也不会限制同一时段安排其他事项。</span></div></> : null}
               </section></div>}
@@ -6520,9 +6490,10 @@ function TodayPage({
                   const duration = compactBlockDuration(dragging ? timelineDrag.end - timelineDrag.start : item.display_duration_minutes!);
                   const time = `${range} (${duration})`;
                   const editable = canEditRecurringOccurrence(item);
+                  const display = recurringBlockDisplay(item.outcome);
                   const block: RulePlanBlock = { task_id: item.recurring_item_id, task_title: item.title, starts_at, ends_at, estimated_minutes: item.display_duration_minutes! };
                   return <div key={item.id} data-timeline-kind="recurring" data-timeline-id={item.id}
-                    className={`timeline-event recurring-event${shortTaskBlockClass(starts_at, ends_at)}${editable ? " can-drag" : ""}${dragging ? " is-dragging" : ""}${selection?.kind === "recurring" && selection.id === item.id ? " selected" : ""}`}
+                    className={`timeline-event recurring-event execution-${display.outcome}${shortTaskBlockClass(starts_at, ends_at)}${editable ? " can-drag" : ""}${dragging ? " is-dragging" : ""}${selection?.kind === "recurring" && selection.id === item.id ? " selected" : ""}`}
                     style={draggedTimelineStyle(layoutKey, timelineEventPosition(starts_at, ends_at, selectedDate, axisStart, pixelsPerHour, timelineItemLanes[layoutKey]))}
                     onPointerDown={(event) => beginTimelineDrag(event, block, null, item)}
                     onPointerMove={moveTimelineDrag} onPointerUp={(event) => void finishTimelineDrag(event)} onPointerCancel={cancelTimelineDrag}
@@ -6532,11 +6503,11 @@ function TodayPage({
                       if (event.target instanceof Element && event.target.closest(".timeline-event-check")) return;
                       selectRecurringOccurrence(item, event.currentTarget.querySelector<HTMLElement>(".timeline-event-body") ?? event.currentTarget, event.currentTarget);
                     }}
-                    {...timelineTooltipProps({ kind: "重复事项", title: item.title, time, detail: item.outcome === "completed" ? "本次已完成" : editable ? "上下拖动调整时间·点击精确编辑" : "点击查看本次执行", tone: "recurring", url, note: body, tags: item.tags }, "block-bottom")}
+                    {...timelineTooltipProps({ kind: "重复事项", title: item.title, time, detail: `${display.label}${editable ? " · 上下拖动调整时间·点击精确编辑" : " · 点击查看本次执行"}`, tone: display.outcome === "planned" ? "execution" : `execution-${display.outcome}`, url, note: body, tags: item.tags }, "block-bottom")}
                   >
-                    {!preview && <button type="button" className={`timeline-event-check${item.outcome === "completed" ? " done" : ""}${quickCompletingBlockId === item.id ? " saving" : ""}`} aria-label={`${item.outcome === "completed" ? "取消本次完成" : "标记本次完成"}：${item.title}`} aria-pressed={item.outcome === "completed"} disabled={!canRecordRecurringOccurrence(item) || Boolean(quickCompletingBlockId) || busy || loading || savingExecution || savingRecurringChange || savingDraggedBlock || Boolean(timelineDrag) || Boolean(pendingRecurringChange)} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void saveRecurringResult(item, item.outcome === "completed" ? null : "completed", item.outcome === "completed" ? null : item.review_notes); }}>{quickCompletingBlockId === item.id ? <span className="timeline-check-spinner" /> : item.outcome === "completed" ? <Icon name="check" size={11} /> : null}</button>}
+                    {!preview && <button type="button" className={`timeline-event-check${item.outcome === "completed" ? " done" : item.outcome ? " recorded" : ""}${quickCompletingBlockId === item.id ? " saving" : ""}`} aria-label={`${item.outcome === "completed" ? "取消本次完成" : item.outcome === "not_completed" ? "取消本次未完成" : item.outcome === "partial" ? "取消本次部分完成" : "标记本次完成"}：${item.title}`} aria-pressed={Boolean(item.outcome)} disabled={!canRecordRecurringOccurrence(item) || Boolean(quickCompletingBlockId) || busy || loading || savingExecution || savingRecurringChange || savingDraggedBlock || Boolean(timelineDrag) || Boolean(pendingRecurringChange)} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void saveRecurringResult(item, item.outcome ? null : "completed", item.review_notes); }}>{quickCompletingBlockId === item.id ? <span className="timeline-check-spinner" /> : item.outcome === "completed" ? <Icon name="check" size={11} /> : null}</button>}
                     <span className="timeline-recurring-marker" aria-hidden="true"><img src={recurringIcon} alt="" /></span>
-                    <button type="button" className="timeline-event-body timeline-task-body" aria-label={`重复事项：${item.title}，${time}`} aria-haspopup="dialog" aria-controls="timeline-context-panel" aria-pressed={selection?.kind === "recurring" && selection.id === item.id}>
+                    <button type="button" className="timeline-event-body timeline-task-body" aria-label={`重复事项：${item.title}，${time}，${display.label}`} aria-haspopup="dialog" aria-controls="timeline-context-panel" aria-pressed={selection?.kind === "recurring" && selection.id === item.id}>
                       <TimelineTaskContent title={item.title} range={range} duration={duration} type="recurring" url={url} note={body} tags={item.tags} />
                     </button>
                   </div>;
@@ -6615,7 +6586,7 @@ function TodayPage({
                       detail: [task?.priority ? priorityCopy[task.priority] : "", block.review
                         ? `${reviewOutcomeCopy[block.review.outcome]} · ${block.review.followup_action ? taskNextActionLabels[block.review.followup_action] : "已记录"}`
                         : effectiveOutcome ? `本次${reviewOutcomeCopy[effectiveOutcome]} · 已记录` : canDragTimelineBlock(block) ? "上下拖动调整时间·点击精确编辑" : ""].filter(Boolean).join(" · "),
-                      tone: "task",
+                      tone: effectiveOutcome ? `execution-${effectiveOutcome}` : "execution",
                       url,
                       note: body, tags: task?.tags
                     }, "block-top")}
@@ -6633,7 +6604,7 @@ function TodayPage({
           </>}
         </main>}
       </div>
-      {pendingRecycledCompletion && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !quickCompletingBlockId) setPendingRecycledCompletion(null); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="recycled-block-completion-title" aria-describedby="recycled-block-completion-description" busy={Boolean(quickCompletingBlockId)} tone="success" onCancel={() => setPendingRecycledCompletion(null)}><h2 id="recycled-block-completion-title">确认完成已回收任务的安排？</h2><p id="recycled-block-completion-description">“{pendingRecycledCompletion.block.task_title}”将完成 {pendingRecycledCompletion.date} 的这个任务块，并增加执行记录；任务本身仍保留在回收站。</p><div className="dialog-actions"><button type="button" autoFocus disabled={Boolean(quickCompletingBlockId)} onClick={() => setPendingRecycledCompletion(null)}>取消</button><button type="button" className="dialog-save" disabled={Boolean(quickCompletingBlockId)} onClick={() => void quickCompleteTimelineBlock(pendingRecycledCompletion.block, true)}>{quickCompletingBlockId === pendingRecycledCompletion.block.id ? "正在记录…" : "确认完成并记录"}</button></div></ConfirmationDialog></div>}
+      {pendingRecycledCompletion && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !quickCompletingBlockId) setPendingRecycledCompletion(null); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="recycled-block-completion-title" aria-describedby="recycled-block-completion-description" busy={Boolean(quickCompletingBlockId)} tone="success" onCancel={() => setPendingRecycledCompletion(null)}><h2 id="recycled-block-completion-title">完成这次安排？</h2><p id="recycled-block-completion-description"><strong className="confirmation-object">{pendingRecycledCompletion.block.task_title}</strong>仅完成 {pendingRecycledCompletion.date} 的这个任务块并新增执行记录，任务仍在回收站。</p><div className="dialog-actions"><button type="button" autoFocus disabled={Boolean(quickCompletingBlockId)} onClick={() => setPendingRecycledCompletion(null)}>取消</button><button type="button" className="dialog-save" disabled={Boolean(quickCompletingBlockId)} onClick={() => void quickCompleteTimelineBlock(pendingRecycledCompletion.block, true)}>{quickCompletingBlockId === pendingRecycledCompletion.block.id ? "正在记录…" : "完成本次安排"}</button></div></ConfirmationDialog></div>}
       {pendingRecurringChange && <RecurringScopeConfirmation change={pendingRecurringChange} busy={savingRecurringChange} error={recurringChangeError} onCancel={cancelRecurringChange} onConfirm={(scope) => void commitTimelineRecurringChange(scope)} />}
       {monthRecurringError && <p className="recurring-calendar-error" role="alert">{monthRecurringError}</p>}
       {calendarDateHint && todayView === "month" && createPortal(<div id="calendar-date-open-hint" className="calendar-date-tip" role="tooltip" style={{ left: calendarDateHint.left, top: calendarDateHint.top }}>双击日期查看当天日程</div>, document.body)}
@@ -6840,10 +6811,11 @@ function SettingsPage({ availability, availabilityError, onSaved, onReload, onNo
     <div className="settings-layout"><nav aria-label="设置分类">{settingsCategories.map(([category, label]) => <button key={category} type="button" className={activeCategory === category ? "active" : ""} aria-current={activeCategory === category ? "location" : undefined} onClick={() => requestCategory(category)}>{label}</button>)}</nav><div className="settings-sections">
       <section id="work" className="availability-settings-section"><header><div><h2>工作时间偏好</h2><p>用于自动安排的优先起点和时间线参照，不限制手动安排。</p></div><span className={`setting-state${availability ? " connected" : ""}`}>{availabilityState}</span></header>
         {availabilityError && !draft ? <div className="setting-load-error"><strong>日计划偏好暂时无法打开</strong><span>{availabilityError}</span><button type="button" className="quiet-button" onClick={onReload}>重试</button></div> : draft ? <form className="setting-availability-form" onSubmit={(event) => void submitAvailability(event)}>
-          <fieldset className="setting-weekdays"><legend>工作日</legend><div>{["一", "二", "三", "四", "五", "六", "日"].map((label, index) => <button key={label} type="button" aria-pressed={draft.weekdays.includes(index + 1)} disabled={saving} onClick={() => toggleWorkday(index + 1)}>周{label}</button>)}</div><label className="setting-makeup-workdays"><input type="checkbox" checked={draft.makeup_workdays_as_workdays ?? true} disabled={saving} onChange={(event) => { setDraft({ ...draft, makeup_workdays_as_workdays: event.target.checked }); setSaveMessage(""); }} />将调休补班日设为工作日</label><small>法定放假日自动作为非工作日；未勾选时，补班日按以上每周选择。非工作日使用更浅的网格背景，仍可安排事项。节假日数据覆盖 {OFFICIAL_HOLIDAY_COVERAGE.from.slice(0, 4)} 年，范围外按每周设置。</small></fieldset>
+          <fieldset className="setting-weekdays"><legend>工作日</legend><div>{["一", "二", "三", "四", "五", "六", "日"].map((label, index) => <button key={label} type="button" aria-pressed={draft.weekdays.includes(index + 1)} disabled={saving} onClick={() => toggleWorkday(index + 1)}>周{label}</button>)}</div><label className="setting-makeup-workdays"><input type="checkbox" checked={draft.makeup_workdays_as_workdays ?? true} disabled={saving} onChange={(event) => { setDraft({ ...draft, makeup_workdays_as_workdays: event.target.checked }); setSaveMessage(""); }} />将调休补班日设为工作日</label><small>法定放假日自动作为非工作日；未勾选时，补班日按以上每周选择。非工作日使用更浅的网格背景，仍可安排事项。缺失年份暂按每周设置，不代表已核对法定安排。</small></fieldset>
           <div className="setting-time-group"><div className="setting-time-heading"><div><h3>每日工作时间</h3><p>自动安排会优先从这段时间开始；其他时段同样可以安排。</p></div><strong>{draft.workday_start} – {draft.workday_end}</strong></div><TimeRangeRail start={draft.workday_start} end={draft.workday_end} startLabel="开始工作" endLabel="结束工作" disabled={saving} onChange={updateWorkdayRange} /></div>
           {(availabilityDirty || saving) && <footer className="setting-save-bar" aria-label="未保存的更改"><strong role="status" className={saveMessage && !saveMessage.includes("已保存") && !saveMessage.includes("正在") ? "error" : ""}>{saving ? "正在保存到本机…" : draft.weekdays.length === 0 ? "至少选择一个工作日后才能保存。" : saveMessage || "有未保存的更改"}</strong><div className="draft-bar-actions"><button type="button" className="draft-reset" disabled={saving} onClick={() => { setDraft(availability); setSaveMessage(""); }}>撤销</button><button type="submit" className="draft-save" disabled={saving || draft.weekdays.length === 0}>{saving ? "保存中…" : "保存更改"}</button></div></footer>}
         </form> : <div className="setting-loading"><span className="loader dark" />正在载入日计划偏好…</div>}
+        <HolidayCalendarSettings />
       </section>
       <section id="reminder"><header><div><h2>提醒</h2><p>按设定时间发送通知，不会自动更改任务或计划。</p></div><button type="button" className="quiet-button" onClick={() => void sendTestNotification().then(() => setPreferenceMessage("测试通知已发送。")).catch((reason) => setPreferenceMessage(uiErrorMessage(reason)))}>发送测试通知</button></header><div className="setting-row"><div><strong>晨间计划</strong><span>每日首次达到设定时间后提醒一次</span></div><div className="setting-inline-controls"><input type="time" value={reminders.morningTime} disabled={!reminders.morning} onChange={(event) => setReminders({ ...reminders, morningTime: event.target.value })} /><button type="button" role="switch" aria-checked={reminders.morning} className={`switch-control${reminders.morning ? " enabled" : ""}`} onClick={() => setReminders({ ...reminders, morning: !reminders.morning })}><span /></button></div></div><div className="setting-row"><div><strong>晚间复盘</strong><span>每日首次达到设定时间后提醒一次</span></div><div className="setting-inline-controls"><input type="time" value={reminders.eveningTime} disabled={!reminders.evening} onChange={(event) => setReminders({ ...reminders, eveningTime: event.target.value })} /><button type="button" role="switch" aria-checked={reminders.evening} className={`switch-control${reminders.evening ? " enabled" : ""}`} onClick={() => setReminders({ ...reminders, evening: !reminders.evening })}><span /></button></div></div><label className="setting-buffer">任务块开始前提醒<span><input type="number" min={0} max={60} step={5} value={reminders.taskLead} onChange={(event) => setReminders({ ...reminders, taskLead: Number(event.target.value) })} />分钟</span></label></section>
       <section id="appearance"><header><div><h2>外观</h2><p>主题会即时预览，保存后随应用启动恢复。</p></div><span className="setting-state connected">可配置</span></header><div className="theme-options">{[["default", "默认"], ["github", "GitHub"], ["codex", "Codex"]].map(([value, label]) => <button key={value} type="button" aria-pressed={appearance.theme === value} onClick={() => previewAppearance({ ...appearance, theme: value })}><span className={`theme-swatch ${value}`} />{label}</button>)}</div>
@@ -6859,6 +6831,8 @@ function SettingsPage({ availability, availabilityError, onSaved, onReload, onNo
 }
 
 export default function App() {
+  const holidayRevision = useHolidayCalendarSync();
+  const previousHolidayRevision = useRef(holidayRevision);
   const [today, setToday] = useState(() => shanghaiDateValue());
   const [selectedDate, setSelectedDate] = useState(() => shanghaiDateValue());
   const selectedDateRef = useRef(selectedDate);
@@ -6954,6 +6928,17 @@ export default function App() {
       setAvailabilityError(uiErrorMessage(reason));
     }
   }
+
+  useEffect(() => {
+    if (previousHolidayRevision.current === holidayRevision) return;
+    previousHolidayRevision.current = holidayRevision;
+    const date = selectedDateRef.current;
+    // Refresh rule projections only; do not reset an edited plan preview or reschedule tasks.
+    void refreshTasks(false);
+    void listRecurringOccurrences(date).then((items) => {
+      if (selectedDateRef.current === date) setRecurringOccurrences(items);
+    }).catch((reason) => { if (selectedDateRef.current === date) setScheduleError(uiErrorMessage(reason)); });
+  }, [holidayRevision]);
 
   useEffect(() => {
     void refreshTasks();

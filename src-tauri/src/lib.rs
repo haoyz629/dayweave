@@ -4,6 +4,7 @@ mod ai;
 mod database;
 mod domain;
 mod error;
+mod holiday_calendar;
 mod legacy;
 
 #[cfg(windows)]
@@ -62,6 +63,44 @@ struct AiAssistantResult {
 fn with_database<T>(state: &State<'_, AppState>, operation: impl FnOnce(&mut Database) -> crate::error::AppResult<T>) -> Result<T, String> {
     let mut database = state.database.lock().map_err(|_| "数据库锁不可用，请重试".to_string())?;
     operation(&mut database).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_holiday_calendar(state: State<'_, AppState>) -> Result<holiday_calendar::Snapshot, String> {
+    with_database(&state, |database| Ok(database.get_holiday_calendar()))
+}
+
+// Invoked only on a worker thread. Database locks cover status/commit, never HTTP.
+fn run_holiday_check(app: &AppHandle, years: Vec<i32>, force: bool) -> Result<holiday_calendar::Snapshot, String> {
+    let state = app.state::<AppState>();
+    let (job, snapshot) = {
+        let mut database = state.database.lock().map_err(|_| "数据库锁不可用".to_string())?;
+        let job = database.begin_holiday_update(years, force).map_err(|error| error.to_string())?;
+        (job, database.get_holiday_calendar())
+    };
+    let Some(job) = job else { return Ok(snapshot); };
+    let _ = app.emit("holiday-calendar-updated", &snapshot);
+    let result = job.download();
+    let snapshot = {
+        let mut database = state.database.lock().map_err(|_| "数据库锁不可用".to_string())?;
+        database.finish_holiday_update(result)
+    };
+    let _ = app.emit("holiday-calendar-updated", &snapshot);
+    Ok(snapshot)
+}
+
+#[tauri::command]
+async fn check_holiday_updates(app: AppHandle, years: Vec<i32>, force: bool) -> Result<holiday_calendar::Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || run_holiday_check(&app, years, force))
+        .await.map_err(|error| error.to_string())?
+}
+
+fn launch_holiday_worker(app: AppHandle) {
+    thread::spawn(move || loop {
+        let _ = run_holiday_check(&app, Vec::new(), false);
+        // Hourly wakeups allow a manual check to shift the persistent 24-hour window.
+        thread::sleep(Duration::from_secs(3600));
+    });
 }
 
 #[tauri::command]
@@ -223,8 +262,8 @@ fn list_recurring_execution_history(state: State<'_, AppState>, item_id: String)
 }
 
 #[tauri::command]
-fn clear_recurring_occurrence_review(state: State<'_, AppState>, occurrence_id: String) -> Result<RecurringOccurrenceDto, String> {
-    with_database(&state, |database| database.clear_recurring_occurrence_review(&occurrence_id))
+fn clear_recurring_occurrence_review(state: State<'_, AppState>, occurrence_id: String, notes: Option<String>) -> Result<RecurringOccurrenceDto, String> {
+    with_database(&state, |database| database.clear_recurring_occurrence_review(&occurrence_id, notes))
 }
 
 #[tauri::command]
@@ -828,8 +867,12 @@ fn clear_execution_capture(
     state: State<'_, AppState>,
     capture_date: String,
     plan_block_id: String,
+    note: Option<String>,
 ) -> Result<(), String> {
-    with_database(&state, |database| database.clear_execution_capture(&capture_date, &plan_block_id))
+    with_database(&state, |database| match note {
+        Some(note) => database.clear_execution_capture_with_note(&capture_date, &plan_block_id, Some(note)),
+        None => database.clear_execution_capture(&capture_date, &plan_block_id),
+    })
 }
 
 #[tauri::command]
@@ -924,6 +967,7 @@ pub fn run() {
             {
                 let _ = application.global_shortcut().register(shortcut.as_str());
             }
+            launch_holiday_worker(app_handle.clone());
             launch_reminder_worker(app_handle);
             Ok(())
         })
@@ -948,6 +992,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            get_holiday_calendar,
+            check_holiday_updates,
             set_review_close_guard,
             finish_review_window_close,
             create_manual_task_draft,

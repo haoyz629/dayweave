@@ -144,10 +144,13 @@ fn materialize(tx: &Transaction<'_>, version: &Version, date: NaiveDate) -> AppR
     Ok(id)
 }
 
-fn base_occurs(version: &Version, date: NaiveDate, exceptions: &[(String, String, String)]) -> AppResult<bool> {
+fn base_occurs(connection: &Connection, calendar: &HolidaySnapshot, version: &Version, date: NaiveDate, exceptions: &[(String, String, String)]) -> AppResult<bool> {
+    // A calendar correction changes only unmaterialized predictions, never saved rows.
+    let persisted: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM recurring_occurrences WHERE recurring_item_id=?1 AND rule_version_id=?2 AND original_date=?3 AND is_exception=0)",
+        params![version.rule.id, version.id, date.to_string()], |row| row.get(0))?;
     Ok(date >= version.min_date && version.suppress != Some(date)
         && !exceptions.iter().any(|(_, origin, _)| origin == &date.to_string())
-        && recurring_item_occurs_on(&version.rule, date)?)
+        && (persisted || recurring_item_occurs_on(calendar, &version.rule, date)?))
 }
 
 impl Database {
@@ -175,7 +178,7 @@ impl Database {
                     if moved == &text { result.push(load_snapshot(&tx, exception_id)?); }
                 }
                 if let Some(version) = version_on(&rules, date) {
-                    if base_occurs(version, date, &exceptions)? {
+                    if base_occurs(&tx, &self.holiday_calendar.snapshot, version, date, &exceptions)? {
                         let occurrence_id = materialize(&tx, version, date)?;
                         result.push(load_snapshot(&tx, &occurrence_id)?);
                     }
@@ -189,21 +192,21 @@ impl Database {
 
     pub(super) fn update_recurring_item_versioned(&mut self, item_id: &str, input: RecurringItemInput) -> AppResult<RecurringItemDto> {
         let tx = self.connection.transaction()?;
-        let target = Self::resolve_recurring_target_in_transaction(&tx, item_id)?
+        let target = Self::resolve_recurring_target_in_transaction(&tx, &self.holiday_calendar.snapshot, item_id)?
             .ok_or_else(|| AppError::Domain("重复事项没有可修改的今日或未来发生记录".into()))?;
-        let item = Self::update_recurring_occurrence_in_transaction(&tx, &target.id, input, &target.occurrence_date, "future")?;
+        let item = Self::update_recurring_occurrence_in_transaction(&tx, &self.holiday_calendar.snapshot, &target.id, input, &target.occurrence_date, "future")?;
         tx.commit()?;
         Ok(item)
     }
 
     pub fn resolve_recurring_edit_target(&mut self, item_id: &str) -> AppResult<Option<RecurringOccurrenceDto>> {
         let tx = self.connection.transaction()?;
-        let result = Self::resolve_recurring_target_in_transaction(&tx, item_id)?;
+        let result = Self::resolve_recurring_target_in_transaction(&tx, &self.holiday_calendar.snapshot, item_id)?;
         tx.commit()?;
         Ok(result)
     }
 
-    fn resolve_recurring_target_in_transaction(tx: &Transaction<'_>, item_id: &str) -> AppResult<Option<RecurringOccurrenceDto>> {
+    fn resolve_recurring_target_in_transaction(tx: &Transaction<'_>, calendar: &HolidaySnapshot, item_id: &str) -> AppResult<Option<RecurringOccurrenceDto>> {
         let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM recurring_items WHERE id=?1)", [item_id], |r| r.get(0))?;
         if !exists { return Ok(None); }
         let item = load_recurring_item_in_transaction(&tx, item_id)?;
@@ -222,6 +225,20 @@ impl Database {
                 best = Some((date, id.clone()));
             }
         }
+        // Include saved normal rows even if the newest calendar no longer predicts them.
+        let persisted = {
+            let mut statement = tx.prepare("SELECT id,occurrence_date,rule_version_id FROM recurring_occurrences WHERE recurring_item_id=?1 AND is_exception=0 AND occurrence_date>=?2 ORDER BY occurrence_date,id")?;
+            let rows = statement.query_map(params![item_id, first_editable.to_string()], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?)))?.collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        for (id, text, version_id) in persisted {
+            let date = parse_plan_date(&text)?;
+            if let Some(version) = version_on(&rules, date) {
+                if version.id == version_id && base_occurs(tx, calendar, version, date, &exceptions)? && best.as_ref().is_none_or(|best| date < best.0) {
+                    best = Some((date, id));
+                }
+            }
+        }
         let mut cuts = vec![first_editable];
         cuts.extend(rules.iter().filter(|v| v.effective > first_editable).map(|v| v.effective));
         cuts.sort_unstable(); cuts.dedup();
@@ -230,9 +247,9 @@ impl Database {
             let Some(version) = version_on(&rules, *start) else { continue; };
             let upper = cuts.get(index + 1).copied();
             let mut cursor = (*start).max(version.min_date);
-            while let Some(candidate) = next_rule_date(&version.rule, cursor)? {
+            while let Some(candidate) = next_rule_date(calendar, &version.rule, cursor)? {
                 if upper.is_some_and(|end| candidate >= end) || best.as_ref().is_some_and(|b| candidate > b.0) { break; }
-                if base_occurs(version, candidate, &exceptions)? {
+                if base_occurs(tx, calendar, version, candidate, &exceptions)? {
                     let id = materialize(&tx, version, candidate)?;
                     if best.as_ref().is_none_or(|b| candidate < b.0) { best = Some((candidate, id)); }
                     break;
@@ -247,12 +264,12 @@ impl Database {
 
     pub fn update_recurring_occurrence(&mut self, occurrence_id: &str, input: RecurringItemInput, target_date: &str, scope: &str) -> AppResult<RecurringItemDto> {
         let tx = self.connection.transaction()?;
-        let item = Self::update_recurring_occurrence_in_transaction(&tx, occurrence_id, input, target_date, scope)?;
+        let item = Self::update_recurring_occurrence_in_transaction(&tx, &self.holiday_calendar.snapshot, occurrence_id, input, target_date, scope)?;
         tx.commit()?;
         Ok(item)
     }
 
-    fn update_recurring_occurrence_in_transaction(tx: &Transaction<'_>, occurrence_id: &str, input: RecurringItemInput, target_date: &str, scope: &str) -> AppResult<RecurringItemDto> {
+    fn update_recurring_occurrence_in_transaction(tx: &Transaction<'_>, calendar: &HolidaySnapshot, occurrence_id: &str, input: RecurringItemInput, target_date: &str, scope: &str) -> AppResult<RecurringItemDto> {
         if !matches!(scope, "this" | "future") { return Err(AppError::Schema("修改范围必须为 this 或 future".into())); }
         let target = parse_plan_date(target_date)?;
         let target_date = target.to_string();
@@ -269,7 +286,7 @@ impl Database {
         let rules = versions(&tx, &current.id)?;
         let exceptions = exception_rows(&tx, &current.id)?;
         let original_version = rules.iter().find(|v| v.id == version_id).ok_or_else(|| AppError::Domain("重复事项规则已失效".into()))?;
-        if !is_exception && (version_on(&rules, origin_date).map(|v| v.id) != Some(version_id) || !base_occurs(original_version, origin_date, &exceptions)?) {
+        if !is_exception && (version_on(&rules, origin_date).map(|v| v.id) != Some(version_id) || !base_occurs(tx, calendar, original_version, origin_date, &exceptions)?) {
             return Err(AppError::Domain("该发生记录已被后续规则替代，请刷新后重试".into()));
         }
         database_tags::validate_selection(&input.tags, &selected.tags)?;
@@ -325,7 +342,7 @@ fn apply_input(item: &mut RecurringItemDto, input: &RecurringItemInput) {
 
 // Find the next candidate without scanning infinite history or imposing an
 // arbitrary look-ahead limit (monthly interval=365 may skip decades).
-fn next_rule_date(rule: &RecurringItemDto, from: NaiveDate) -> AppResult<Option<NaiveDate>> {
+fn next_rule_date(calendar: &HolidaySnapshot, rule: &RecurringItemDto, from: NaiveDate) -> AppResult<Option<NaiveDate>> {
     let anchor = parse_plan_date(&rule.starts_on)?;
     let from = from.max(anchor);
     let end = rule.ends_on.as_deref().map(parse_plan_date).transpose()?.unwrap_or(NaiveDate::MAX);
@@ -364,11 +381,12 @@ fn next_rule_date(rule: &RecurringItemDto, from: NaiveDate) -> AppResult<Option<
             found
         }
         "weekdays" => {
-            let calendar = official_workday_calendar();
+            let Some(last) = calendar.last_date() else { return Ok(None); };
             let mut cursor = from;
             let mut found = None;
-            while cursor <= end.min(calendar.to) {
-                if recurring_item_occurs_on(rule, cursor)? { found = Some(cursor); break; }
+            while cursor <= end.min(last) {
+                if !calendar.covers(anchor, cursor) { break; }
+                if recurring_item_occurs_on(calendar, rule, cursor)? { found = Some(cursor); break; }
                 let Some(next) = cursor.succ_opt() else { break; }; cursor = next;
             }
             found

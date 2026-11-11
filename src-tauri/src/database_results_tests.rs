@@ -275,7 +275,7 @@ fn v25() -> Database {
         connection.execute_batch(sql).unwrap();
         connection.execute("INSERT INTO schema_migrations VALUES (?1,?2)",params![version,now()]).unwrap();
     }
-    Database { connection }
+    Database { connection, holiday_calendar: CalendarState::bundled() }
 }
 
 #[test]

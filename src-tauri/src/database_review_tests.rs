@@ -386,7 +386,7 @@ fn v22_migration_preserves_every_old_review_index_trigger_and_foreign_key_and_is
         connection.execute_batch(sql).unwrap();
         connection.execute("INSERT INTO schema_migrations VALUES (?1,?2)",params![version,now()]).unwrap();
     }
-    let mut database = Database { connection };
+    let mut database = Database { connection, holiday_calendar: CalendarState::bundled() };
     let id = task(&mut database);
     let selected = block(&database,&id,TODAY);
     database.connection.execute("INSERT INTO review_entries (id,review_date,plan_block_id,task_id,outcome,actual_minutes,notes,remaining_workload_minutes,created_at,updated_at) VALUES ('legacy',?1,?2,?3,'partial',0,'old note',71,'old-created','old-updated')",params![TODAY,selected,id]).unwrap();

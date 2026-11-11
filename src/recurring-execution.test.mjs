@@ -94,7 +94,7 @@ test("same-day distinct IDs and multiple dates save only that occurrence and ref
   assert.deepEqual(h.writes.map(write => [write[0], write[1], write[2].outcome, write[2].notes]), [["save", "occ-1", "completed", "慢跑"], ["save", "moved-2", "completed", null], ["save", "yesterday", "completed", null]]);
   assert.deepEqual(h.refreshes, ["2026-10-29", "2026-10-29", "2026-10-28"]);
   await h.state.saveRecurringResult({ ...occurrence, outcome: "completed" }, null, null);
-  assert.deepEqual(h.writes.at(-1), ["clear", "occ-1"]);
+  assert.deepEqual(h.writes.at(-1), ["clear", "occ-1", null]);
   await h.state.saveRecurringResult(occurrence, "completed", null);
   assert.equal(h.writes.at(-1)[0], "save");
 });
@@ -151,20 +151,39 @@ test("busy, plan editing, dragging and immutable results never write; save failu
   assert.equal(refreshFailed.notices[0][3], undefined, "refresh errors do not attach an undo action to a different toast");
 });
 
-test("timed and untimed checks preserve notes, stop click propagation and never mark an unclicked date failed", () => {
+test("timed and untimed checks show every saved result and cancel it before completing again", () => {
   assert.equal(quickChecks.length, 2);
-  for (const code of quickChecks) for (const completed of [true, false]) {
+  for (const code of quickChecks) for (const outcome of [null, "completed", "not_completed", "partial"]) {
     const calls = [];
-    const item = { ...occurrence, outcome: completed ? "completed" : null, review_notes: "原备注" };
+    const item = { ...occurrence, outcome, review_notes: "原备注" };
     const state = { React, item, quickCompletingBlockId: null, busy: false, loading: false, savingExecution: false, savingRecurringChange: false, preview: null, savingDraggedBlock: false, timelineDrag: null, pendingRecurringChange: null, canRecordRecurringOccurrence: () => true, Icon: () => null, saveRecurringResult: (...args) => calls.push(args) };
-    const tree = vm.runInNewContext(compile(`(${code})`), state);
-    assert.equal(tree.props["aria-pressed"], completed);
+    const render = () => vm.runInNewContext(compile(`(${code})`), state);
+    const tree = render();
+    assert.equal(tree.props["aria-pressed"], Boolean(outcome));
+    assert.equal(tree.props.className.includes(" done"), outcome === "completed");
+    assert.equal(tree.props.className.includes(" recorded"), Boolean(outcome && outcome !== "completed"));
+    const action = outcome === "completed" ? "取消本次完成" : outcome === "not_completed" ? "取消本次未完成" : outcome === "partial" ? "取消本次部分完成" : "标记本次完成";
+    assert.equal(tree.props["aria-label"], `${action}：${item.title}`);
     assert.equal(tree.props.disabled, false);
     assert.equal(calls.length, 0);
-    tree.props.onClick({ stopPropagation() {} });
+    let stopped = false;
+    tree.props.onClick({ stopPropagation() { stopped = true; } });
+    assert.equal(stopped, true);
     assert.equal(calls[0][0].id, item.id);
-    assert.equal(calls[0][1], completed ? null : "completed");
-    assert.equal(calls[0][2], completed ? null : "原备注");
+    assert.equal(calls[0][1], outcome ? null : "completed");
+    assert.equal(calls[0][2], "原备注");
+    if (outcome) {
+      item.outcome = null;
+      render().props.onClick({ stopPropagation() {} });
+      assert.equal(calls[1][1], "completed");
+      assert.equal(calls[1][2], "原备注");
+    }
+    state.quickCompletingBlockId = item.id;
+    assert.equal(render().props.disabled, true);
+    assert.match(render().props.className, / saving/);
+    state.quickCompletingBlockId = null;
+    state.canRecordRecurringOccurrence = () => false;
+    assert.equal(render().props.disabled, true);
   }
 });
 
@@ -207,7 +226,7 @@ test("result editor keeps saved state separate, accepts optional notes, and clea
 });
 
 test("recurring result saves require a meaningful change and respect busy state", () => {
-  for (const outcome of [null, "completed", "partial", "not_started"]) {
+  for (const outcome of [null, "completed", "partial", "not_completed"]) {
     const writes = [];
     const props = { occurrence: { ...occurrence, outcome, review_notes: " 原备注 " }, writable: true, disabled: false, onCancel() {}, async onSave(...args) { writes.push(args); } };
     const h = mount("RecurringOccurrenceResult", props);
@@ -304,10 +323,10 @@ test("weekly read-only view reports each recurring occurrence result without tre
     { ...occurrence, id: "yesterday", occurrence_date: "2026-10-28", outcome: "completed" }
   ], [], "2026-10-29");
   assert.equal(entries.length, 2);
-  assert.deepEqual(entries.map(entry => entry.status), ["本次已完成", "重复事项"]);
+  assert.deepEqual(entries.map(entry => entry.status), ["本次已完成", "已安排"]);
   assert.deepEqual(entries.map(entry => entry.layoutKey), ["recurring:occ-1", "recurring:moved-2"]);
   assert.equal(entries[0].notes, "已完成运动");
-  assert.ok(entries.every(entry => entry.tone === "recurring"));
+  assert.deepEqual(entries.map(entry => entry.tone), ["completed", "plan"]);
 });
 
 test("active, ended and recycled recurring details retain history, while editing excludes it", () => {
@@ -363,7 +382,7 @@ test("history reloads after pausing and resuming the selected series without nav
 
 test("short recurring blocks share ordinary check sizing and keep their type icon on the trailing edge", () => {
   const blocks = text.slice(text.indexOf("{recurringTimelineBlocks.map"), text.indexOf("{draftBlocks.map"));
-  assert.match(blocks, /recurring-event\$\{shortTaskBlockClass\(starts_at, ends_at\)\}/);
+  assert.match(blocks, /recurring-event execution-\$\{display.outcome\}\$\{shortTaskBlockClass\(starts_at, ends_at\)\}/);
   assert.match(blocks, /<span className="timeline-recurring-marker" aria-hidden="true"><img src=\{recurringIcon\} alt="" \/><\/span>/);
   assert.doesNotMatch(blocks, /timeline-task-leading recurring/);
   const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
@@ -398,4 +417,65 @@ test("note-only recurring history names the note action, not cancellation", asyn
   assert.match(html, /<strong>随手记<\/strong>/);
   assert.match(html, /一条随手记/);
   assert.doesNotMatch(html, /已取消本次结果|本次未完成/);
+});
+
+test("recurring incomplete result switches exclusively, saves explicitly and can cancel while retaining notes", async () => {
+  const writes = [];
+  const props = { occurrence, writable: true, disabled: false, onCancel() {}, async onSave(...args) { writes.push(args); } };
+  const h = mount("RecurringOccurrenceResult", props);
+  const buttons = () => elements(h.render(), node => node.props["data-outcome"]);
+  const save = () => elements(h.render(), node => node.props.className === "primary-action")[0];
+  assert.deepEqual(buttons().map(node => node.props["data-outcome"]), ["completed", "not_completed"]);
+  assert.deepEqual(buttons().map(node => node.props["aria-pressed"]), [false, false]);
+  buttons()[1].props.onClick();
+  assert.deepEqual(buttons().map(node => node.props["aria-pressed"]), [false, true]);
+  assert.deepEqual(writes, []);
+  buttons()[0].props.onClick();
+  assert.deepEqual(buttons().map(node => node.props["aria-pressed"]), [true, false]);
+  buttons()[1].props.onClick();
+  elements(h.render(), node => node.type === "textarea")[0].props.onChange({ target: { value: "  今天没做  " } });
+  save().props.onClick();
+  assert.deepEqual(writes, [["not_completed", "今天没做"]]);
+  h.render({ ...props, occurrence: { ...occurrence, outcome: "not_completed", review_notes: "今天没做" } });
+  assert.equal(save().props.disabled, true);
+  buttons()[1].props.onClick();
+  save().props.onClick();
+  assert.deepEqual(writes.at(-1), [null, "今天没做"]);
+  const saving = savingHarness();
+  await saving.state.saveRecurringResult({ ...occurrence, outcome: "not_completed" }, null, "今天没做");
+  assert.deepEqual(saving.writes, [["clear", "occ-1", "今天没做"]]);
+  assert.equal(saving.notices[0][0], "已取消本次未完成");
+  h.render({ ...props, writable: false, occurrence: { ...occurrence, outcome: "not_completed", review_notes: "今天没做" } });
+  assert.equal(elements(h.render(), node => node.props["data-outcome"]).length, 0);
+});
+
+test("recurring cancellation history names the original result, including cancellation with a note", async () => {
+  const events = ["completed", "not_completed", "partial", null].map((cancelled_outcome, index) => ({
+    ...occurrence, id: `clear-${index}`, kind: "execution", occurrence_id: `occ-${index}`, outcome: null,
+    cancelled_outcome, notes: index === 1 ? "保留的备注" : null, occurred_at: "2026-10-29T10:00:00+08:00"
+  }));
+  events.push({ ...events[0], id: "note", cancelled_outcome: null, notes: "仅随手记" });
+  const h = mount("RecurringExecutionHistory", { itemId: "series-1", createdAt: "2026-10-01" }, { async listRecurringExecutionHistory() { return events; } });
+  h.render(); await tick();
+  const rows = byClass(h.render(), "task-detail-event");
+  assert.deepEqual(rows.slice(0, 5).map(row => elements(row, node => node.type === "strong")[0].props.children),
+    ["已取消本次完成", "已取消本次未完成", "已取消本次部分完成", "已取消本次结果", "随手记"]);
+  assert.ok(rows.slice(0, 5).every(row => row.props["data-status"] === "cleared"));
+  assert.match(renderToStaticMarkup(h.render()), /保留的备注/);
+});
+
+test("focusing a timeline quick check dismisses task hover content before pointerup, while task content still shows it", () => {
+  let shown = 0, hidden = 0;
+  const state = { isTaskTimelineTooltip: () => true, timelineTooltipFocusRef: { current: null }, showTimelineTooltipForTarget() { shown++; }, hideTimelineTooltip() { hidden++; } };
+  vm.runInNewContext(compile(functions.get("timelineTooltipProps")), state);
+  const handlers = state.timelineTooltipProps({ kind: "重复事项" });
+  const check = { closest: selector => selector === ".timeline-event-check" ? {} : null };
+  handlers.onFocus({ target: check, currentTarget: {} });
+  assert.equal(hidden, 1);
+  assert.equal(shown, 0, "the hover card must not move over the pending click");
+  assert.equal(state.timelineTooltipFocusRef.current, null);
+  const body = { closest: () => null };
+  handlers.onFocus({ target: body, currentTarget: {} });
+  assert.equal(shown, 1);
+  assert.equal(state.timelineTooltipFocusRef.current, body);
 });

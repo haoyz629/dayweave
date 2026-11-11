@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { weekDatesFor, weekHeading, shiftWeekDate, weekEntries, weekGroups, weekInitialMinute, weekClock } from './week-timeline-model.ts';
+import { weekDatesFor, weekHeading, shiftWeekDate, weekEntries, weekGroups, weekInitialMinute, weekClock, weekDetailRange } from './week-timeline-model.ts';
 import { readFileSync } from 'node:fs';
 
 const dates = weekDatesFor('2026-11-04');
@@ -156,4 +156,113 @@ test('week blocks reserve tag space while hover keeps every tag', () => {
   assert.match(source, /<TaskTagList tags=\{hover.entry.tags\} expanded/);
   const css = readFileSync(new URL('./week-timeline.css', import.meta.url), 'utf8');
   assert.match(css, /\.week-timeline-event \{[^}]*gap: 3px;[^}]*padding: 3px 4px;/);
+});
+
+test('drawer range includes every timed member and ignores untimed/empty entries', () => {
+  assert.equal(weekDetailRange([]), null);
+  assert.equal(weekDetailRange([entry('untimed', null, null)]), null);
+  assert.equal(weekDetailRange([entry('late', 630, 690), entry('early', 600, 660), entry('untimed', null, null)]), '10:00–11:30');
+  assert.equal(weekDetailRange([entry('midnight', 0, 30), entry('end', 1410, 1440)]), '00:00–24:00');
+  const [group] = weekGroups([entry('first', 600, 660), entry('middle', 630, 690), entry('last', 675, 720)]);
+  assert.equal(weekDetailRange(group.entries), '10:00–12:00');
+  const [dense] = weekGroups(Array.from({length:12}, (_, i) => entry(String(i), 540+i, 600+i)));
+  assert.equal(weekDetailRange(dense.entries), '09:00–10:11');
+});
+
+test('task and more entrances open complete groups while date entrances retain every day entry', () => {
+  const source = readFileSync(new URL('./week-timeline.tsx', import.meta.url), 'utf8');
+  assert.equal(source.match(/openDetails\(day.date, group.entries, event.currentTarget\)/g)?.length, 2);
+  assert.match(source, /openDetails\(day.date, day.entries, event.currentTarget\)/);
+  assert.doesNotMatch(source, /openDetails\(entry.title, \[entry\]/);
+  assert.match(source, /<TaskTagList tags=\{entry.tags\} expanded/);
+  assert.match(source, /entry.startMinute !== null && entry.endMinute !== null && <span className="detail-duration">/);
+  assert.match(source, /dateTime=\{details.date\}/);
+  assert.match(source, /detailRange && <p className="detail-range">/);
+  assert.match(source, /const short = tiny && height >= 28/);
+});
+
+test('approved light week is compact and drawer date/count are centered with a separate range', () => {
+  const css = readFileSync(new URL('./week-timeline.css', import.meta.url), 'utf8');
+  assert.match(css, /html:root:not\(\[data-mode="dark"\]\) \.today-page \.week-timeline \.week-timeline-dates \{ height: 88px/);
+  assert.match(css, /html:root:not\(\[data-mode="dark"\]\) \.week-timeline-grid \{ min-width: 960px/);
+  assert.match(css, /\.week-timeline-details \.detail-title \{[^}]*align-items: center/);
+  assert.match(css, /\.week-timeline-details \.detail-heading-copy \{[^}]*flex-direction: column; gap: 4px/);
+  assert.match(css, /\.detail-surface \{[^}]*width: min\(480px, 100vw\)/);
+  assert.match(css, /\.week-timeline-event.is-tiny.is-short \{ padding: 4px/);
+});
+
+test('week resources split saved URLs before merging ordinary execution notes', () => {
+  for (const [saved, url, body] of [
+    ['URL: url\n\n12313213', 'url', '12313213'],
+    ['URL: https://example.com/docs', 'https://example.com/docs', ''],
+    ['URL: https://example.com/docs\r\n\r\n第一行\r\n第二行', 'https://example.com/docs', '第一行\r\n第二行'],
+    ['URL: javascript:alert(1)\n\n保留正文', 'javascript:alert(1)', '保留正文'],
+    ['普通备注\nURL: 正文中的内容', '', '普通备注\nURL: 正文中的内容'],
+    [null, '', ''],
+  ]) {
+    for (const execution of [null, '执行备注\n第二行', 'URL: 这是执行备注，不是任务链接']) {
+      const task = { id: 'resource', notes: saved, tags: [] };
+      const schedule = { ...empty(), task_blocks: [block('resource', { execution_note: execution })] };
+      const before = structuredClone({ task, schedule });
+      const [row] = weekEntries('2026-11-02', schedule, [], [task], '2026-11-02');
+      assert.equal(row.url, url);
+      assert.equal(row.notes, [body, execution].filter(Boolean).join('\n\n') || null);
+      assert.deepEqual({ task, schedule }, before, 'resource reads never rewrite saved data');
+    }
+  }
+  const [reviewed] = weekEntries('2026-11-02', { ...empty(), task_blocks: [block('resource', { execution_note: '旧执行备注', review: { outcome: 'completed', notes: '确认后的备注' } })] }, [], [{ id: 'resource', notes: 'URL: https://example.com\n\n任务正文', tags: [] }], '2026-11-02');
+  assert.equal(reviewed.url, 'https://example.com');
+  assert.equal(reviewed.notes, '任务正文\n\n确认后的备注');
+});
+
+test('week recurring resources preserve snapshot URL and literal review notes separately', () => {
+  for (const [saved, url, body] of [['URL: url\n\n重复正文', 'url', '重复正文'], ['URL: https://example.com', 'https://example.com', ''], [null, '', '']]) {
+    const occurrence = { id: 'r', occurrence_date: '2026-11-02', title: '重复事项', display_time: '12:30', display_duration_minutes: 30, notes: saved, review_notes: 'URL: 执行备注原文', tags: [] };
+    const [row] = weekEntries('2026-11-02', empty(), [occurrence], [], '2026-11-02');
+    assert.equal(row.url, url);
+    assert.equal(row.notes, [body, occurrence.review_notes].filter(Boolean).join('\n\n'));
+  }
+  const [fixed] = weekEntries('2026-11-02', { ...empty(), fixed_events: [{ id: 'f', title: '固定日程', starts_at: '2026-11-02T09:00:00+08:00', ends_at: '2026-11-02T10:00:00+08:00' }] }, [], [], '2026-11-02');
+  assert.equal(fixed.url, '');
+  assert.equal(fixed.notes, null);
+});
+
+test('ordinary and recurring entries share execution tones while keeping recurring identity', () => {
+  for (const [outcome, execution, label] of [[null,'planned','已安排'],['completed','completed','本次已完成'],['partial','partial','本次部分完成'],['not_completed','not_started','本次未完成']]) {
+    for (const untimed of [false, true]) {
+      const item = { id:'repeat', occurrence_date:'2026-11-02', title:'重复标题', outcome, display_time:untimed?null:'09:00', display_duration_minutes:60, tags:['保留标签'] };
+      const rows = weekEntries('2026-11-02', {...empty(),task_blocks:[block('ordinary',{execution_status:execution})]}, [item], [], '2026-11-04');
+      const ordinary = rows.find(row=>row.layoutKey==='block:ordinary'), recurring = rows.find(row=>row.layoutKey==='recurring:repeat');
+      assert.equal(recurring.tone, ordinary.tone);
+      assert.equal(recurring.status, label);
+      assert.deepEqual(recurring.tags, ['保留标签']);
+      assert.equal(recurring.time, untimed?'时间未指定':'09:00–10:00');
+      assert.equal(item.outcome, outcome, 'display must not mutate execution facts');
+    }
+  }
+});
+
+test('recurring icons and identity labels are independent of week execution tones', () => {
+  const week = readFileSync(new URL('./week-timeline.tsx',import.meta.url),'utf8');
+  const css = readFileSync(new URL('./week-timeline.css',import.meta.url),'utf8');
+  const app = readFileSync(new URL('./App.tsx',import.meta.url),'utf8');
+  assert.doesNotMatch(week, /tone-recurring/);
+  assert.doesNotMatch(css, /tone-recurring/);
+  assert.match(week, /week-timeline-task-title[^\n]+week-recurring-icon/);
+  assert.match(week, /week-timeline-kind[^\n]+重复事项/);
+  assert.match(week, /detail-kind\$\{entry.layoutKey.startsWith\("recurring:"\) \? " is-recurring"/);
+  assert.match(css, /\.detail-kind\.is-recurring/);
+  assert.match(app, /recurring-event execution-\$\{display.outcome\}/);
+  assert.match(app, /timeline-recurring-marker/);
+  assert.match(app, /<TimelineTaskContent[^\n]+type="recurring"/);
+  assert.doesNotMatch(app, /tone: "recurring"/);
+});
+
+test('light week only marks today with a red circle and removes incoming day selection styling', () => {
+  const css = readFileSync(new URL('./color-system.css', import.meta.url), 'utf8');
+  const prefix = 'html:root:not([data-mode="dark"]) .next-workspace .today-page .week-timeline .week-timeline-dates > button';
+  assert.ok(css.includes(`${prefix} .timeline-week-date { color: inherit; background: transparent; box-shadow: none; }`));
+  assert.ok(css.includes(`${prefix}.today .timeline-week-date { color: var(--today-red-label); background: var(--today-red); }`));
+  assert.ok(css.includes(`${prefix}.selected { color: var(--color-ink); border-color: transparent; background: transparent; box-shadow: none; }`));
+  assert.ok(css.includes(`${prefix}.weekend.selected { background: color-mix(in srgb, var(--color-orange-bg) 60%, var(--color-panel)); }`));
 });

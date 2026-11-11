@@ -267,7 +267,7 @@ export function TaskTagEditor({ tags, suggestions = [], disabled, id, onChange }
       </div>
       <footer>
         <div><strong className="task-tag-count">已选 {selected.length}/{MAX_TASK_TAGS}</strong><span className="task-tag-global-count">全局 {definitions.length}/{MAX_GLOBAL_TAGS}</span></div>
-        {taskFull ? <span role="status">已达每项上限，仅可取消已选标签。</span> : globalFull ? <span role="status">已达全局上限，可选择已有标签。</span> : <span>勾选后随任务保存</span>}
+        {taskFull ? <span role="status">已达每项上限，仅可取消已选标签。</span> : globalFull ? <span role="status">已达全局上限，可选择已有标签。</span> : null}
       </footer>
     </div>, triggerRef.current?.closest("dialog") ?? document.body)}
   </div>;
@@ -277,4 +277,52 @@ export function TaskTagList({ tags, expanded = false }: { tags: string[]; expand
   const { definitions } = useTagCatalog();
   if (!tags.length) return null;
   return <span className="task-list-tags" aria-label="标签">{(expanded ? tags : tags.slice(0, 3)).map((tag) => <span key={tag} data-tag-color={colorFor(definitions, tag)} title={tag}>{tag}</span>)}{!expanded && tags.length > 3 && <span className="task-tag-overflow" aria-label={`还有 ${tags.length - 3} 个标签`} title={tags.slice(3).join("、")}>+{tags.length - 3}</span>}</span>;
+}
+
+export function TaskTagFilter({ id, tags, value, onChange }: { id: string; tags: string[]; value: string; onChange: (tag: string) => void }) {
+  const { definitions } = useTagCatalog();
+  const [expanded, setExpanded] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(Infinity);
+  const [promotedTag, setPromotedTag] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  const options = uniqueTags([...(matchesTag(tags, promotedTag) ? [promotedTag] : []), ...tags, value]);
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    function measure() {
+      const buttons = Array.from(list!.querySelectorAll<HTMLButtonElement>(".task-tag-filter-chip"));
+      const first = buttons[0];
+      if (!first) return;
+      const twoRows = first.offsetHeight * 2 + Number.parseFloat(getComputedStyle(list!).rowGap);
+      const count = buttons.filter((button) => button.offsetTop - first.offsetTop + button.offsetHeight <= twoRows + .5).length;
+      setVisibleCount(count);
+      if (!expanded && buttons.slice(count).includes(document.activeElement as HTMLButtonElement)) first.focus();
+    }
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [tags, value, expanded, promotedTag]);
+
+  if (!options.length) return null;
+  const hasOverflow = visibleCount < options.length + 1;
+  return <div className={`task-tag-filter${expanded ? " is-expanded" : ""}`}>
+      <div ref={listRef} id={id} className="task-tag-filter-options" role="group" aria-label="标签筛选">
+      {["", ...options].map((tag, index) => {
+        const clipped = !expanded && index >= visibleCount;
+        const selected = tag ? Boolean(value) && matchesTag([tag], value) : !value;
+        return <button key={tagKey(tag)} type="button" className={`task-tag-filter-chip${!tag ? " is-all" : ""}${clipped ? " is-clipped" : ""}`} data-tag-color={colorFor(definitions, tag)} aria-label={tag || "全部标签"} aria-pressed={selected} aria-hidden={clipped || undefined} tabIndex={clipped ? -1 : 0} title={tag || "全部标签"} onClick={() => {
+          if (expanded && tag && index >= visibleCount) setPromotedTag(tag);
+          onChange(tag);
+        }}>
+          <span>{tag || "全部"}</span>
+        </button>;
+      })}
+    </div>
+    {(hasOverflow || expanded) && <button type="button" className="task-tag-filter-more" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded((current) => !current)}>
+      {expanded ? "收起标签" : `展开全部标签（${options.length}）`}
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d={expanded ? "m4 10 4-4 4 4" : "m4 6 4 4 4-4"} /></svg>
+    </button>}
+  </div>;
 }

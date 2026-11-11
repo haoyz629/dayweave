@@ -80,11 +80,30 @@ test("ordinary and recurring forms retain inline title attributes and flexible w
   assert.ok(!css.includes(".recurring-title-field {"), "keep the original recurring title proportions");
   assert.equal(declarations(".task-compact-body").gap, "16px");
   assert.equal(declarations(":is(.task-notes-region, .recurring-optional-notes.is-expanded)").flex, "1 0 180px");
-  const labels = declarations(".task-notes-inputs > label.sr-only");
+  const labels = declarations(".task-notes-inputs > .task-notes-label");
   assert.equal(labels.position, "static");
   assert.equal(labels.clip, "auto");
-  assert.equal(declarations(".task-notes-inputs")["grid-template-columns"], "16px 32px minmax(0, 1fr)");
+  assert.equal(declarations(".task-notes-inputs")["grid-template-columns"], "16px 36px minmax(0, 1fr)");
   assert.equal(declarations(".task-notes-inputs > :is(input, textarea)")["grid-column"], "3");
+  assert.match(app, /className="task-notes-label sr-only">链接<\/label>/);
+  assert.match(app, /placeholder="粘贴网址（选填）"/);
+  assert.match(app, /placeholder="添加说明或补充信息（选填）"/);
+  assert.doesNotMatch(app, /placeholder="(?:URL|备注)"/);
+});
+
+test("note labels share the first text line with URL inputs and multiline notes", () => {
+  const labels = declarations(".task-notes-inputs > .task-notes-label");
+  const fields = declarations(".task-notes-inputs :is(input, textarea)");
+  assert.equal(labels["font-size"], fields["font-size"]);
+  assert.equal(labels["line-height"], fields["line-height"]);
+  // Placeholder is a separate pseudo-element; matching the field box alone misses its baseline.
+  assert.equal(declarations(".task-notes-inputs :is(input, textarea)::placeholder").font, "inherit");
+  assert.equal(labels["align-self"], "start");
+  const url = declarations(".task-notes-inputs > input");
+  assert.equal(url.height, fields["line-height"]);
+  assert.equal(url["align-self"], "start");
+  assert.equal(declarations(".task-notes-inputs > label:last-of-type").transform, undefined);
+  assert.equal(declarations(".task-notes-inputs > svg")["margin-top"], "5px");
 });
 
 test("form actions remain readable while title and notes retain the original borderless focus", () => {
@@ -98,4 +117,25 @@ test("form actions remain readable while title and notes retain the original bor
   const legacy = read("./styles.css");
   assert.match(legacy, /\.task-title-input:focus-visible \{ outline: none; \}/);
   assert.match(legacy, /\.task-notes-inputs > :is\(input, textarea\):focus-visible \{\s*outline: none;/);
+});
+
+test("resource details share editor typography and column rhythm, including empty values", () => {
+  const text = declarations(".ordinary-task-detail :is(.task-detail-note, .task-detail-url, .task-detail-empty, .task-detail-resource-label)");
+  assert.equal(text["font-size"], "14px");
+  assert.equal(text["line-height"], "24px");
+  const row = declarations(".ordinary-task-detail .task-detail-resource-row");
+  assert.equal(row["grid-template-columns"], "60px minmax(0, 1fr) 28px");
+  assert.equal(row.padding, "16px");
+  assert.equal(row.gap, "8px");
+  assert.equal(declarations(".ordinary-task-detail .task-detail-resource-label")["grid-template-columns"], "16px 36px");
+  assert.equal(declarations(".ordinary-task-detail .task-detail-resource-label > svg")["margin-top"], "5px");
+  assert.equal(declarations(".ordinary-task-detail .task-detail-resource-label")["align-items"], "start");
+  const resources = app.slice(app.indexOf("function TaskDetailResources("), app.indexOf("function TaskPageHeader("));
+  assert.match(resources, /<span>链接<\/span>/);
+  assert.match(resources, /<span>备注<\/span>/);
+});
+
+test("search input delegates its focus indicator to the composite wrapper", () => {
+  assert.equal(declarations('.task-queue-search > input[type="search"]:focus-visible').outline, "none");
+  assert.match(read("./styles.css"), /\.task-queue-search:focus-within \{[^}]*border-color: var\(--jx-focus\);[^}]*box-shadow:/);
 });

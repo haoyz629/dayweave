@@ -383,7 +383,7 @@ fn migration_v23_preserves_existing_records_and_adds_nullable_checked_action() {
         connection.execute_batch(sql).unwrap();
         connection.execute("INSERT INTO schema_migrations VALUES (?1,?2)",params![version,now()]).unwrap();
     }
-    let mut database = Database { connection };
+    let mut database = Database { connection, holiday_calendar: CalendarState::bundled() };
     let (id, selected) = fixture(&mut database,true);
     database.connection.execute("INSERT INTO review_entries (id,review_date,plan_block_id,task_id,outcome,actual_minutes,notes,created_at,updated_at)
         VALUES ('legacy',?1,?2,?3,'partial',27,'legacy note',?4,?4)",params![TODAY,selected,id,now()]).unwrap();
@@ -480,4 +480,63 @@ fn confirming_other_day_plan_invalidates_stale_resolution_without_deleting_new_s
             assert_eq!(database.count("review_entries").unwrap(), 0);
         }
     }
+}
+
+#[test]
+fn dialog_uncheck_keeps_current_note_in_the_same_cancellation_transaction() {
+    let _clock = TestToday::new(TODAY);
+    for cross_day in [false, true] {
+        for reviewed in [false, true] {
+            for note in ["", "  original note  ", "  changed note  "] {
+                let mut db = Database::in_memory().unwrap();
+                let (id, selected) = fixture(&mut db, cross_day);
+                let other = block(&db, &id, NEXT);
+                if reviewed {
+                    db.save_review_entry(TODAY, ReviewEntryInput { plan_block_id: selected.clone(), outcome: ReviewOutcome::Completed,
+                        actual_minutes: Some(23), defer_reason: None, notes: Some("original note".into()), remaining_workload_minutes: None }).unwrap();
+                } else {
+                    db.save_execution_capture(TODAY, ExecutionCaptureInput { plan_block_id: selected.clone(), outcome: Some(ReviewOutcome::Completed), note: Some("original note".into()) }).unwrap();
+                }
+                if cross_day { db.complete_task(&id, Some(&selected)).unwrap(); }
+                let untouched = rows(&db, &other);
+                let actual = db.get_task(&id).unwrap().actual_minutes;
+                db.clear_execution_capture_with_note(TODAY, &selected, Some(note.into())).unwrap();
+                let saved = execution_snapshot(&db.connection, &selected).unwrap();
+                assert_eq!(saved.execution_status, "planned");
+                assert_eq!(saved.execution_note.as_deref(), if note.trim().is_empty() { None } else { Some(note.trim()) });
+                assert_eq!(db.get_task(&id).unwrap().status, "scheduled");
+                assert_eq!(db.get_task(&id).unwrap().actual_minutes, actual);
+                assert_eq!(rows(&db, &other), untouched);
+                assert!(db.get_review_entry_for_block(&selected).is_err());
+                if reviewed {
+                    let payload: String = db.connection.query_row("SELECT payload_json FROM review_form_drafts WHERE item_id = ?1", [&selected], |row| row.get(0)).unwrap();
+                    assert!(payload.contains("23"), "independent review supplements remain available");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn dialog_uncheck_note_failure_rolls_back_completion_review_and_history() {
+    let _clock = TestToday::new(TODAY);
+    let mut db = Database::in_memory().unwrap();
+    let (id, selected) = fixture(&mut db, false);
+    db.save_review_entry(TODAY, ReviewEntryInput { plan_block_id: selected.clone(), outcome: ReviewOutcome::Completed,
+        actual_minutes: Some(23), defer_reason: None, notes: Some("original note".into()), remaining_workload_minutes: None }).unwrap();
+    let before = fact_fingerprint(&db.connection, "task_completion", &id).unwrap();
+    let history: i64 = db.connection.query_row("SELECT COUNT(*) FROM task_changes", [], |row| row.get(0)).unwrap();
+    db.connection.execute_batch("CREATE TRIGGER reject_dialog_note BEFORE UPDATE OF execution_note ON plan_blocks
+        WHEN NEW.execution_note = 'FAIL' BEGIN SELECT RAISE(ABORT, 'note write failed'); END;").unwrap();
+    assert!(db.clear_execution_capture_with_note(TODAY, &selected, Some("FAIL".into())).is_err());
+    assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), before);
+    assert_eq!(db.connection.query_row("SELECT COUNT(*) FROM task_changes", [], |row| row.get::<_, i64>(0)).unwrap(), history);
+    assert_eq!(db.get_review_entry_for_block(&selected).unwrap().notes.as_deref(), Some("original note"));
+    assert!(db.clear_execution_capture_with_note(TODAY, &selected, Some("x".repeat(501))).is_err());
+    assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), before);
+    assert!(db.clear_execution_capture_with_note(NEXT, &selected, Some("wrong date".into())).is_err());
+    assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), before);
+    let _tomorrow = TestToday::new(NEXT);
+    assert!(db.clear_execution_capture_with_note(TODAY, &selected, Some("historical".into())).is_err());
+    assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), before);
 }

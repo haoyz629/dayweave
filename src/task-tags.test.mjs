@@ -128,6 +128,11 @@ function createHost(initial = [], overrides = {}) {
       return editor;
     },
     list(tags, expanded = false) { return mount(exports.TaskTagList, { tags, expanded }); },
+    filter(props = {}) {
+      let filter;
+      filter = mount(exports.TaskTagFilter, { id: "filter", tags: [], value: "", onChange(value) { filter.changes.push(value); filter.props.value = value; }, ...props });
+      return filter;
+    },
     fire(name, event) { for (const listener of listeners.get(name) ?? []) listener(event); }
   };
 }
@@ -168,6 +173,85 @@ test("detail can show every tag while list defaults retain three tags and an ove
   assert.equal(nodes(detail.tree, node => node.type === "span" && node.props.title === tags.slice(3).join("、")).length, 0);
   assert.equal(host.list([], true).tree, null);
   assert.deepEqual(tags, before);
+});
+
+test("flat tag filter shares catalog colors, deduplicates and selects exactly one tag without writes", async () => {
+  const host = createHost([{ name: "Work", color: 3 }, { name: "设计", color: 1 }]);
+  const tags = ["Work", " work ", "设计", ""];
+  const filter = host.filter({ tags });
+  const list = host.list(["Work"]);
+  await settle();
+  filter.render(); list.render();
+  const chips = () => byClass(filter, "task-tag-filter-chip");
+  assert.deepEqual(chips().map(node => node.props.title), ["全部标签", "Work", "设计"]);
+  assert.deepEqual(chips().map(node => node.props["data-tag-color"]), [undefined, 3, 1]);
+  assert.deepEqual(chips().map(node => node.props["aria-pressed"]), [true, false, false]);
+  chips()[2].props.onClick(); filter.render();
+  assert.deepEqual(filter.changes, ["设计"]);
+  assert.deepEqual(chips().filter(node => node.props["aria-pressed"]).map(node => node.props.title), ["设计"]);
+  assert.deepEqual(chips().map(node => node.props.title), ["全部标签", "Work", "设计"]);
+  chips()[0].props.onClick(); filter.render();
+  assert.equal(filter.props.value, "");
+  assert.equal(host.calls.list, 1);
+  assert.deepEqual(host.calls.create, []);
+  assert.deepEqual(tags, ["Work", " work ", "设计", ""]);
+});
+
+test("flat filter hides empty catalogs but preserves a selected legacy tag", () => {
+  const host = createHost();
+  assert.equal(host.filter().tree, null);
+  const filter = host.filter({ value: "旧标签", tags: ["其他"] });
+  assert.deepEqual(byClass(filter, "task-tag-filter-chip").map(node => node.props.title), ["全部标签", "其他", "旧标签"]);
+  assert.equal(byClass(filter, "task-tag-filter-chip")[2].props["aria-pressed"], true);
+});
+
+test("flat filter stays compact, has no tag icon and gives All a persistent background and selection", () => {
+  const filter = createHost().filter({ tags: ["开发", "设计"] });
+  const group = byClass(filter, "task-tag-filter-options")[0];
+  assert.equal(group.props["aria-label"], "标签筛选");
+  assert.equal(group.props["aria-labelledby"], undefined);
+  assert.equal(byClass(filter, "task-tag-filter-label").length, 0);
+  const chips = byClass(filter, "task-tag-filter-chip");
+  assert.equal(nodes(filter.tree, node => node.type === "svg").length, 0);
+  assert.equal(chips[0].props.children.props.children, "全部");
+  assert.equal(chips[0].props["aria-label"], "全部标签");
+  assert.equal(nodes(group, node => node.type === "svg").length, 0);
+  assert.ok(chips.every(chip => chip.props.children.type === "span"));
+  const css = readFileSync(new URL("./task-tags.css", import.meta.url), "utf8");
+  assert.match(css, /\.task-tag-filter-options[^}]*gap: 6px; max-height: 58px/);
+  assert.match(css, /\.task-tag-filter-chip \{[^}]*height: 26px;[^}]*border-radius: 8px/);
+  assert.match(css, /\.task-tag-filter-chip\[aria-pressed="true"\] \{ background: color-mix\(in srgb, currentColor 8%, white\); \}/);
+  assert.match(css, /\.task-tag-filter-chip\.is-all \{[^}]*background: var\(--jx-surface\)/);
+  assert.match(css, /\.task-tag-filter-chip\.is-all\[aria-pressed="true"\] \{ border-color: var\(--jx-ink-soft\);[^}]*background: color-mix\(in srgb, var\(--jx-ink\) 12%, white\)/);
+  assert.doesNotMatch(css, /\.task-tag-filter-chip[^}]*box-shadow/);
+  assert.doesNotMatch(css, /\.task-tag-filter-chip\[aria-pressed="true"\][^}]*text-decoration/);
+});
+
+test("picker footer retains counts and limit messages without the save hint", async () => {
+  const host = createHost([{ name: "开发", color: 0 }]);
+  const editor = host.editor({ tags: ["开发"] });
+  await open(editor);
+  const footer = () => nodes(editor.tree, node => node.type === "footer")[0];
+  assert.doesNotMatch(JSON.stringify(footer()), /勾选后随任务保存/);
+  assert.equal(byClass(editor, "task-tag-count").length, 1);
+  assert.equal(byClass(editor, "task-tag-global-count").length, 1);
+  assert.equal(nodes(footer(), node => node.props.role === "status").length, 0);
+  editor.props.tags = Array.from({ length: 10 }, (_, i) => `标签${i}`);
+  editor.render();
+  assert.equal(nodes(footer(), node => node.props.role === "status")[0].props.children, "已达每项上限，仅可取消已选标签。");
+  const globalHost = createHost(Array.from({ length: 50 }, (_, i) => ({ name: `标签${i}`, color: i % 8 })));
+  const globalEditor = globalHost.editor();
+  await open(globalEditor);
+  assert.equal(nodes(globalEditor.tree, node => node.props.role === "status")[0].props.children, "已达全局上限，可选择已有标签。");
+});
+
+test("tag selection intersects with text search instead of replacing it", () => {
+  const tasks = [
+    { title: "整理项目", tags: ["开发"] },
+    { title: "整理资料", tags: ["阅读"] },
+    { title: "修复问题", tags: ["开发"] }
+  ];
+  assert.deepEqual(tasks.filter(task => matchesTag(task.tags, "开发") && matchesTaggedSearch(task, "整理")), [tasks[0]]);
 });
 
 test("all editors use a dropdown, rows share one initial request and persisted colors", async () => {

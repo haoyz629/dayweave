@@ -1,7 +1,7 @@
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { Priority } from "./tauri";
 
-const priorityCopy = { low: "低优先级", medium: "中优先级", high: "高优先级" } as const;
+export const priorityCopy = { urgent: "P0 紧急", high: "P1 高优先级", medium: "P2 中优先级", low: "P3 低优先级" } as const;
 
 export function TaskPrioritySelector({ id, value, disabled = false, onChange }: {
   id: string;
@@ -11,7 +11,7 @@ export function TaskPrioritySelector({ id, value, disabled = false, onChange }: 
 }) {
   const [priorityOpen, setPriorityOpen] = useState(false);
   const priorityDropdownRef = useRef<HTMLDivElement>(null);
-  const priority = value ?? "medium";
+  const priority = value ?? "high";
 
   function closePriorityMenu() {
     setPriorityOpen(false);
@@ -63,9 +63,10 @@ export function TaskPrioritySelector({ id, value, disabled = false, onChange }: 
   }, [priorityOpen, disabled]);
 
   const priorityOptions: Array<{ value: Priority; label: string; tone: string }> = [
-    { value: "high", label: "高优先级", tone: "high" },
-    { value: "medium", label: "中优先级", tone: "medium" },
-    { value: "low", label: "低优先级", tone: "low" },
+    { value: "urgent", label: priorityCopy.urgent, tone: "urgent" },
+    { value: "high", label: priorityCopy.high, tone: "high" },
+    { value: "medium", label: priorityCopy.medium, tone: "medium" },
+    { value: "low", label: priorityCopy.low, tone: "low" },
   ];
 
   return <div ref={priorityDropdownRef} className={`priority-select-control priority-tone-${priority}`} onKeyDown={handlePriorityKeyDown} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPriorityOpen(false); }}>
@@ -107,7 +108,7 @@ export function TaskPrioritySelector({ id, value, disabled = false, onChange }: 
                 <span>{opt.label}</span>
               </span>
               <span className="priority-option-aside">
-                {opt.value === "medium" && <span className="priority-option-default">默认</span>}
+                {opt.value === "high" && <span className="priority-option-default">默认</span>}
                 {isSelected && (
                   <span className="priority-check-icon" aria-hidden="true">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

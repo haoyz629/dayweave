@@ -871,7 +871,7 @@ fn explicit_cross_day_clear_failure_rolls_back_all_facts_including_undo_and_revi
 }
 
 #[test]
-fn cross_day_clear_restores_legacy_or_unknown_workload_but_preserves_single_day_explicit_protection() {
+fn source_block_clear_restores_single_and_cross_day_legacy_or_unknown_workload() {
     for cross_day in [false, true] {
         for provenance in ["snapshot", "unknown_workload", "legacy_undo", "no_snapshot"] {
             let _clock = TestNow::new("2026-10-21T18:00:00+08:00");
@@ -892,10 +892,10 @@ fn cross_day_clear_restores_legacy_or_unknown_workload_but_preserves_single_day_
             }
             db.clear_execution_capture(FIRST, &first).unwrap();
             let current = db.get_task(&id).unwrap();
-            assert_eq!(current.status, if cross_day { "scheduled" } else { "done" }, "{provenance}");
-            let expected = if !cross_day { Some(0) } else { match provenance {
+            assert_eq!(current.status, "scheduled", "cross_day={cross_day}, {provenance}");
+            let expected = match provenance {
                 "unknown_workload" => None, "no_snapshot" => Some(120), _ => Some(75),
-            }};
+            };
             assert_eq!(current.remaining_workload_minutes, expected, "{provenance}");
             assert_eq!(execution_snapshot(&db.connection, &first).unwrap().execution_status, "planned");
         }
@@ -1167,4 +1167,64 @@ fn historical_reopened_completion_requires_its_own_unfinished_original_date() {
         assert!(db.complete_task(&id, None).is_err(), "{change}");
         assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), before, "{change}");
     }
+}
+
+#[test]
+fn single_day_detail_completion_then_block_uncheck_reopens_task_and_keeps_reservation() {
+    let _clock = TestNow::new("2026-10-21T18:00:00+08:00");
+    for prior in ["planned", "capture", "review"] {
+        for note in [None, Some(""), Some("保留的备注")] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("block-uncheck.sqlite");
+            let mut db = Database::open(&path).unwrap();
+            let (id, block) = confirmed_single_day_task(&mut db);
+            if prior != "planned" {
+                write(&mut db, prior, FIRST, &id, &block, ReviewOutcome::NotStarted).unwrap();
+            }
+            let reservation = rows(&db, &block);
+            db.complete_task_with_note(&id, None, Some("详情完成备注".into())).unwrap();
+            assert_eq!(db.get_task(&id).unwrap().status, "done");
+            assert_eq!(db.get_day_schedule(FIRST).unwrap().task_blocks[0].execution_status, "completed");
+
+            db.clear_execution_capture_with_note(FIRST, &block, note.map(str::to_owned)).unwrap();
+            drop(db);
+            let mut db = Database::open(&path).unwrap();
+            let task = db.get_task(&id).unwrap();
+            assert_eq!(task.status, "scheduled", "prior={prior}, note={note:?}");
+            assert_eq!(task.remaining_workload_minutes, Some(30));
+            assert_eq!(task.notes.as_deref(), Some("task note"));
+            let schedule = db.get_day_schedule(FIRST).unwrap();
+            assert_eq!(schedule.task_blocks.len(), 1);
+            let saved = &schedule.task_blocks[0];
+            assert_eq!(saved.id, block);
+            assert_eq!(saved.task_status, "scheduled");
+            assert_eq!(saved.execution_status, "planned");
+            assert!(saved.review.is_none());
+            assert_eq!(saved.execution_note.as_deref(), note.filter(|note| !note.is_empty()));
+            assert_eq!(&rows(&db, &block)[0][..6], &reservation[0][..6]);
+            assert!(db.get_task_metadata(&id).unwrap().history.iter().any(|event|
+                event.kind == "cleared" && event.plan_date.as_deref() == Some(FIRST)));
+
+            write(&mut db, "capture", FIRST, &id, &block, ReviewOutcome::Completed).unwrap();
+            assert_eq!(db.get_task(&id).unwrap().status, "done");
+        }
+    }
+}
+
+#[test]
+fn single_day_detail_completion_block_uncheck_rolls_back_if_task_reopen_fails() {
+    let _clock = TestNow::new("2026-10-21T18:00:00+08:00");
+    let mut db = Database::in_memory().unwrap();
+    let (id, block) = confirmed_single_day_task(&mut db);
+    write(&mut db, "review", FIRST, &id, &block, ReviewOutcome::NotStarted).unwrap();
+    db.complete_task(&id, None).unwrap();
+    let before = fact_fingerprint(&db.connection, "task_completion", &id).unwrap();
+    let history = fact_rows(&db.connection, "SELECT * FROM task_changes WHERE task_id = ?1", &id).unwrap();
+    db.connection.execute_batch("CREATE TRIGGER fail_block_reopen BEFORE UPDATE OF status ON tasks
+        WHEN NEW.status <> 'done' BEGIN SELECT RAISE(ABORT, 'reopen failure'); END;").unwrap();
+    assert!(db.clear_execution_capture_with_note(FIRST, &block, Some("new note".into())).is_err());
+    assert_eq!(fact_fingerprint(&db.connection, "task_completion", &id).unwrap(), before);
+    assert_eq!(fact_rows(&db.connection, "SELECT * FROM task_changes WHERE task_id = ?1", &id).unwrap(), history);
+    assert_eq!(db.get_task(&id).unwrap().status, "done");
+    assert_eq!(db.get_review_entry_for_block(&block).unwrap().outcome, "completed");
 }

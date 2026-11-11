@@ -204,7 +204,7 @@ fn task_draft_schema() -> Value {
                         "target_task_id": nullable_string,
                         "title": { "type": "string", "minLength": 1, "maxLength": 300 },
                         "notes": nullable_string,
-                        "priority": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] },
+                        "priority": { "type": ["string", "null"], "enum": ["low", "medium", "high", "urgent", null] },
                         "earliest_start_date": nullable_string,
                         "earliest_start_time": nullable_string,
                         "due_date": nullable_string,

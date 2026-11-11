@@ -3,15 +3,34 @@ import { createPortal } from "react-dom";
 import { getDaySchedule, listRecurringOccurrencesRange, RecurringItem, Task } from "./tauri";
 import { timelineHoverPosition } from "./timeline-hover-card";
 import { resultToday } from "./task-result";
-import { WEEK_HOUR_HEIGHT, WeekEntry, weekClock, weekDatesFor, weekEntries, weekGroups, weekInitialMinute } from "./week-timeline-model";
+import { WEEK_HOUR_HEIGHT, WeekEntry, weekClock, weekDatesFor, weekDetailRange, weekEntries, weekGroups, weekInitialMinute } from "./week-timeline-model";
 import { TimelineWeekDateContent } from "./timeline-week-date-content";
 import { TaskTagList } from "./task-tag-editor";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { taskResourceUrl } from "./task-notes";
+import recurringIcon from "./assets/recurring.svg";
 import "./week-timeline.css";
 
 type WeekDay = { date: string; entries: WeekEntry[] };
-type WeekDetails = { title: string; entries: WeekEntry[] };
+type WeekDetails = { date: string; entries: WeekEntry[] };
 const hourHeight = WEEK_HOUR_HEIGHT;
 const timeTop = (minute: number) => minute / 60 * hourHeight;
+const detailDateLabel = (date: string) => `${Number(date.slice(5, 7))}月${Number(date.slice(8, 10))}日 周${["日", "一", "二", "三", "四", "五", "六"][new Date(`${date}T00:00:00Z`).getUTCDay()]}`;
+
+function WeekDetailUrl({ url }: { url: string }) {
+  const href = taskResourceUrl(url);
+  const [error, setError] = useState("");
+  async function openResource() {
+    if (!href) return;
+    try { await openUrl(href); setError(""); }
+    catch { setError("链接暂时无法打开，请复制后在浏览器中打开。"); }
+  }
+  return <section className="detail-notes-group detail-url-group" aria-label="任务 URL">
+    <h4 className="detail-label">URL</h4>
+    {href ? <a className="detail-notes detail-url" href={href} target="_blank" rel="noopener noreferrer" onClick={event => { event.preventDefault(); void openResource(); }}>{url}</a> : <p className="detail-notes">{url}</p>}
+    {error && <p className="detail-label" role="alert">{error}</p>}
+  </section>;
+}
 
 export function WeekTimeline({ selectedDate, today, tasks, recurringItems }: {
   selectedDate: string;
@@ -45,6 +64,7 @@ export function WeekTimeline({ selectedDate, today, tasks, recurringItems }: {
   const days = ready ? data.days : [];
   const nowMinute = ((clock + 8 * 3_600_000) % 86_400_000) / 60_000;
   const clockDate = resultToday(clock);
+  const detailRange = details ? weekDetailRange(details.entries) : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -150,10 +170,10 @@ export function WeekTimeline({ selectedDate, today, tasks, recurringItems }: {
     return () => observer.disconnect();
   }, [hover]);
 
-  function openDetails(title: string, entries: WeekEntry[], trigger: HTMLElement) {
+  function openDetails(date: string, entries: WeekEntry[], trigger: HTMLElement) {
     detailTriggerRef.current = trigger;
     hideHover(true);
-    setDetails({ title, entries });
+    setDetails({ date, entries });
   }
   function closeDetails() {
     suppressedRef.current = detailTriggerRef.current;
@@ -167,7 +187,7 @@ export function WeekTimeline({ selectedDate, today, tasks, recurringItems }: {
       {error && <div className="week-timeline-refresh-error" role="alert"><span>更新未完成，显示上次载入的安排。</span><button type="button" onClick={() => setRetry(value => value + 1)}>重试</button></div>}
       <div ref={scrollerRef} className="week-timeline-scroll" tabIndex={0} aria-label="全周共享 24 小时时间轴">
         <div ref={gridRef} className="week-timeline-grid">
-          <div ref={headerRef} className="timeline-week week-timeline-dates"><div className="week-timeline-corner" aria-hidden="true">时间</div>{days.map((day, index) => <button type="button" key={day.date} className={`${index > 4 ? "weekend " : ""}${day.date === today ? "today " : ""}${day.date === selectedDate ? "selected" : ""}`.trim()} aria-label={`${day.date}，星期${["一", "二", "三", "四", "五", "六", "日"][index]}，查看全部${day.entries.length}项安排`} aria-current={day.date === today ? "date" : undefined} onClick={event => openDetails(`${day.date} 全部安排`, day.entries, event.currentTarget)}>
+          <div ref={headerRef} className="timeline-week week-timeline-dates"><div className="week-timeline-corner" aria-hidden="true">时间</div>{days.map((day, index) => <button type="button" key={day.date} className={`${index > 4 ? "weekend " : ""}${day.date === today ? "today " : ""}${day.date === selectedDate ? "selected" : ""}`.trim()} aria-label={`${day.date}，星期${["一", "二", "三", "四", "五", "六", "日"][index]}，查看全部${day.entries.length}项安排`} aria-current={day.date === today ? "date" : undefined} onClick={event => openDetails(day.date, day.entries, event.currentTarget)}>
             <TimelineWeekDateContent date={day.date} weekday={["一", "二", "三", "四", "五", "六", "日"][index]} />
           </button>)}</div>
           <div className="week-timeline-body" style={{ height: 24 * hourHeight }}>
@@ -179,36 +199,53 @@ export function WeekTimeline({ selectedDate, today, tasks, recurringItems }: {
                   const span = group.dense ? Math.min(lane.columnSpan, 2 - lane.column) : lane.columnSpan;
                   const height = Math.max(2, timeTop(entry.endMinute - entry.startMinute) - 6);
                   const timeRows = (measure.widths[index] ?? 160) * span / group.columns - 14 >= measure.time ? 1 : 2;
-                  const showTime = height >= 8 + timeRows * 14 + 3 + 18;
-                  const showTags = entry.tags.length > 0 && height >= 8 + (showTime ? timeRows * 14 + 3 : 0) + 18 + 21;
-                  const lines = Math.max(1, Math.min(6, Math.floor((height - 8 - (showTime ? timeRows * 14 + 3 : 0) - (showTags ? 21 : 0)) / 18)));
+                  const showTime = height >= 10 + timeRows * 14 + 2 + 18;
+                  const showTags = entry.tags.length > 0 && height >= 10 + (showTime ? timeRows * 14 + 2 : 0) + 18 + 20;
+                  const lines = Math.max(1, Math.min(6, Math.floor((height - 10 - (showTime ? timeRows * 14 + 2 : 0) - (showTags ? 20 : 0)) / 18)));
                   const tiny = height < 44;
+                  const short = tiny && height >= 28;
                   return <button type="button" key={entry.layoutKey} data-entry={entry.layoutKey} data-start={entry.startMinute} data-end={entry.endMinute} data-column={lane.column} data-columns={group.columns} data-span={span}
-                    className={`week-timeline-event tone-${entry.tone}${tiny ? " is-tiny" : ""}`}
+                    className={`week-timeline-event tone-${entry.tone}${tiny ? " is-tiny" : ""}${short ? " is-short" : ""}`}
                     style={{ top: timeTop(entry.startMinute) + 3, height, left: `calc(${lane.column / group.columns * 100}% + 2px)`, right: `calc(${(group.columns - lane.column - span) / group.columns * 100}% + 2px)`, "--title-lines": lines } as CSSProperties}
-                    aria-label={`${entry.time} ${entry.title}，${entry.status}，查看详情`} aria-describedby={hover?.entry.layoutKey === entry.layoutKey && hover.entry.date === day.date ? "week-timeline-hover" : undefined}
+                    aria-label={`${entry.time} ${entry.title}，${entry.layoutKey.startsWith("recurring:") ? "重复事项，" : ""}${entry.status}，查看详情`} aria-describedby={hover?.entry.layoutKey === entry.layoutKey && hover.entry.date === day.date ? "week-timeline-hover" : undefined}
                     onPointerEnter={event => { if (event.pointerType !== "touch") queueHover(entry, event.currentTarget, { x: event.clientX, y: event.clientY }); }} onPointerLeave={leaveHover}
                     onFocus={event => { if (event.currentTarget.matches(":focus-visible")) queueHover(entry, event.currentTarget); }} onBlur={() => { if (!hoverRef.current?.matches(":hover")) leaveHover(); }}
-                    onClick={event => openDetails(entry.title, [entry], event.currentTarget)}>
-                    {!tiny && <>{showTime && <time className="week-timeline-time">{timeRows === 1 ? entry.time : <><span>{weekClock(entry.startMinute)}</span><span>{weekClock(entry.endMinute)}</span></>}</time>}<span className="week-timeline-task-title">{entry.title}</span>{showTags && <span className="week-timeline-tags"><TaskTagList tags={entry.tags} /></span>}</>}
+                    onClick={event => openDetails(day.date, group.entries, event.currentTarget)}>
+                    {tiny ? short && <span className="week-timeline-task-title">{entry.layoutKey.startsWith("recurring:") && <img className="week-recurring-icon" src={recurringIcon} alt="" aria-hidden="true" />}{entry.title}</span> : <>{showTime && <time className="week-timeline-time">{timeRows === 1 ? entry.time : <><span>{weekClock(entry.startMinute)}</span><span>{weekClock(entry.endMinute)}</span></>}</time>}<span className="week-timeline-task-title">{entry.layoutKey.startsWith("recurring:") && <img className="week-recurring-icon" src={recurringIcon} alt="" aria-hidden="true" />}{entry.title}</span>{showTags && <span className="week-timeline-tags"><TaskTagList tags={entry.tags} /></span>}</>}
                   </button>;
                 })}
-                {group.hidden > 0 && <button type="button" className={`week-timeline-more${timeTop(group.endMinute - group.startMinute) - 6 < 44 ? " is-tiny" : ""}`} data-hidden={group.hidden} style={{ top: timeTop(group.startMinute) + 3, height: Math.max(2, Math.min(44, timeTop(group.endMinute - group.startMinute) - 6)) }} aria-label={`另有${group.hidden}项，查看完整清单`} onClick={event => openDetails(`${day.date} ${weekClock(group.startMinute)}–${weekClock(group.endMinute)} 全部安排`, group.entries, event.currentTarget)}>+{group.hidden}</button>}
+                {group.hidden > 0 && <button type="button" className={`week-timeline-more${timeTop(group.endMinute - group.startMinute) - 6 < 44 ? " is-tiny" : ""}`} data-hidden={group.hidden} style={{ top: timeTop(group.startMinute) + 3, height: Math.max(2, Math.min(44, timeTop(group.endMinute - group.startMinute) - 6)) }} aria-label={`另有${group.hidden}项，查看完整清单`} onClick={event => openDetails(day.date, group.entries, event.currentTarget)}>+{group.hidden}</button>}
               </div>)}
               {day.date === clockDate && <div className="week-timeline-now" style={{ top: timeTop(nowMinute) }} aria-label={`当前时间 ${weekClock(Math.floor(nowMinute))}`}><span>{weekClock(Math.floor(nowMinute))}</span></div>}
             </div>)}
           </div>
         </div>
       </div>
-      <footer className="week-timeline-legend" aria-label="任务状态图例"><span className="tone-plan">已安排</span><span className="tone-completed">已完成</span><span className="tone-not-started">未完成</span><span className="tone-recurring">重复事项</span></footer>
+      <footer className="week-timeline-legend" aria-label="任务状态图例"><span className="tone-plan">已安排</span><span className="tone-completed">已完成</span><span className="tone-not-started">未完成</span></footer>
     </>}
     {hover && createPortal(<aside ref={hoverRef} id="week-timeline-hover" className={`week-timeline-mini tone-${hover.entry.tone}`} role="tooltip" style={hoverPosition} onPointerEnter={keepHover} onPointerLeave={leaveHover}>
       <div><span>{hover.entry.status}</span><time>{hover.entry.time}</time></div><strong>{hover.entry.title}</strong>
+      {hover.entry.layoutKey.startsWith("recurring:") && <span className="week-timeline-kind"><img className="week-recurring-icon" src={recurringIcon} alt="" aria-hidden="true" />重复事项</span>}
       <TaskTagList tags={hover.entry.tags} expanded />
     </aside>, document.body)}
     {details && createPortal(<dialog ref={dialogRef} className="week-timeline-details" aria-labelledby="week-timeline-details-title" onCancel={event => { event.preventDefault(); closeDetails(); }} onKeyDown={event => { if (event.key === "Escape") event.stopPropagation(); }} onClick={event => { if (event.target === event.currentTarget) closeDetails(); }}>
-      <section><header><div><h2 id="week-timeline-details-title">{details.title}</h2><span>只读安排</span></div><button type="button" aria-label="关闭周视图详情" onClick={closeDetails}>×</button></header>
-        <div className="week-timeline-detail-list">{details.entries.length ? details.entries.map(entry => <article key={entry.layoutKey} className={`tone-${entry.tone}`}><div><span>{entry.status}</span><time>{entry.date} {entry.time}</time></div><h3>{entry.title}</h3>{entry.tags.length > 0 && <p>{entry.tags.join(" · ")}</p>}{entry.notes && <p className="week-timeline-notes">{entry.notes}</p>}</article>) : <p>这一天没有安排。</p>}</div>
+      <section className="detail-surface">
+        <header className="detail-heading">
+          <div className="detail-heading-copy">
+            <h2 id="week-timeline-details-title" className="detail-title"><time dateTime={details.date} title={details.date}>{detailDateLabel(details.date)}</time><span className="detail-count">· {details.entries.length}项安排</span></h2>
+            {detailRange && <p className="detail-range">{detailRange}</p>}
+          </div>
+          <button type="button" className="detail-close" aria-label="关闭周视图详情" onClick={closeDetails}><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg></button>
+        </header>
+        <div className="detail-body" tabIndex={0} aria-label="整组安排清单">{details.entries.length ? details.entries.map(entry => <article key={entry.layoutKey} data-entry={entry.layoutKey} className={`detail-item tone-${entry.tone}`}>
+          <div className="detail-status-line"><span className={`detail-kind${entry.layoutKey.startsWith("recurring:") ? " is-recurring" : ""}`}>{entry.layoutKey.startsWith("recurring:") ? <><img className="week-recurring-icon" src={recurringIcon} alt="" aria-hidden="true" />重复事项</> : entry.layoutKey.startsWith("event:") ? "固定日程" : "普通任务"}</span><span className="detail-status">{entry.status}</span></div>
+          <h3 className="detail-item-title">{entry.title}</h3>
+          <div className="detail-item-schedule"><time className="detail-item-time">{entry.time}</time>{entry.startMinute !== null && entry.endMinute !== null && <span className="detail-duration">安排 {entry.endMinute - entry.startMinute} 分钟</span>}</div>
+          {entry.tags.length > 0 && <div className="detail-tags"><TaskTagList tags={entry.tags} expanded /></div>}
+          {entry.url && <WeekDetailUrl key={entry.url} url={entry.url} />}
+          {entry.notes && <section className="detail-notes-group"><h4 className="detail-label">备注</h4><p className="detail-notes">{entry.notes}</p></section>}
+        </article>) : <p className="detail-empty">这一天没有安排。</p>}</div>
+        <footer className="detail-footer"><span>仅查看安排，不会修改任务</span><span>Esc 关闭</span></footer>
       </section>
     </dialog>, document.body)}
   </section>;

@@ -1,0 +1,9 @@
+/* Holiday status is local to the existing light-mode settings and calendar. */
+html:root:not([data-mode="dark"]) .holiday-calendar-settings { margin-top: 18px; padding: 14px 0 0; border-top: 1px solid var(--color-border, #dce3ec); font-size: 12px; line-height: 1.65; color: var(--color-muted, #596579); }
+html:root:not([data-mode="dark"]) .holiday-calendar-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+html:root:not([data-mode="dark"]) .holiday-calendar-heading h3 { margin: 0; font-size: 14px; color: var(--color-ink, #253047); }
+html:root:not([data-mode="dark"]) .holiday-calendar-settings p { margin: 5px 0; overflow-wrap: anywhere; }
+html:root:not([data-mode="dark"]) .holiday-calendar-settings .holiday-update-error { color: var(--color-red-ink, #a6303a); }
+html:root:not([data-mode="dark"]) .holiday-calendar-notice { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; flex: none; padding: 7px 12px; font-size: 12px; line-height: 1.5; }
+html:root:not([data-mode="dark"]) .holiday-calendar-notice > span { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+html:root:not([data-mode="dark"]) :is(.holiday-calendar-notice,.holiday-calendar-settings) .quiet-button { min-height: 30px; flex: none; white-space: nowrap; }

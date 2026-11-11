@@ -79,7 +79,10 @@ html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail > heade
   text-overflow: ellipsis;
   overflow-wrap: normal;
 }
-html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail :is(.task-detail-note, .task-detail-url) { font-size: 14px; line-height: 24px; }
+html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail :is(.task-detail-note, .task-detail-url, .task-detail-empty, .task-detail-resource-label) { font-size: 14px; line-height: 24px; }
+html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail .task-detail-resource-row { grid-template-columns: 60px minmax(0, 1fr) 28px; gap: 8px; padding: 16px; }
+html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail .task-detail-resource-label { display: grid; grid-template-columns: 16px 36px; align-items: start; gap: 8px; padding: 0; font-weight: 400; }
+html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail .task-detail-resource-label > svg { margin-top: 5px; }
 html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail :is(.task-detail-facts dt, .task-detail-unit, .priority-badge, .task-detail-history-count, .task-detail-event-top time) { font-size: 12px; }
 html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail :is(.task-detail-section-heading, .task-detail-history > summary, .task-detail-event-top) { font-size: 14px; font-weight: 500; }
 html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail .task-detail-actions button { font-size: 12px; font-weight: 500; }
@@ -87,6 +90,8 @@ html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail .task-d
 html:root:not([data-mode="dark"]) .tasks-workspace .task-page-header .terminal-task-status { font-weight: 500; }
 html:root:not([data-mode="dark"]) .tasks-workspace .task-tag-filter > label { font-size: 12px; }
 html:root:not([data-mode="dark"]) .tasks-workspace :is(button, a, input, select):focus-visible { outline: 2px solid #3168dc; outline-offset: 2px; }
+/* The composite search owns its focus ring; do not outline the inner input again. */
+html:root:not([data-mode="dark"]) .tasks-workspace .task-queue-search > input[type="search"]:focus-visible { outline: none; }
 
 /* Creation, saved drafts and both editors: same quiet type, no input clamping. */
 html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-compact-body :is(.task-title-input, .recurring-title-field .recurring-modal-input) {
@@ -100,6 +105,7 @@ html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-edi
   font-size: 14px;
   line-height: 24px;
 }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs :is(input, textarea)::placeholder { font: inherit; }
 html:root:not([data-mode="dark"]) .task-completion-backdrop .task-completion-header h2 {
   font-weight: 500;
   letter-spacing: 0;
@@ -150,12 +156,12 @@ html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-edi
   min-height: 180px;
 }
 html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs {
-  grid-template-columns: 16px 32px minmax(0, 1fr);
+  grid-template-columns: 16px 36px minmax(0, 1fr);
   grid-template-rows: 28px 1px minmax(80px, 1fr);
   column-gap: 8px;
   row-gap: 12px;
 }
-html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs > label.sr-only {
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs > .task-notes-label {
   position: static;
   width: auto;
   height: auto;
@@ -165,17 +171,18 @@ html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-edi
   clip-path: none;
   grid-column: 2;
   align-self: start;
+  display: block;
   color: #58667a;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 24px;
   font-weight: 400;
 }
 html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs > label:first-of-type { grid-row: 1; }
 html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs > label:last-of-type { grid-row: 3; }
 html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs > :is(input, textarea) { grid-column: 3; width: 100%; }
-html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs > input { height: 28px; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs > input { height: 24px; align-self: start; }
 html:root:not([data-mode="dark"]) .tasks-workspace #new-task-form .recurring-optional-notes.is-expanded .task-notes-inputs > input { width: calc(100% - 48px); }
-html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs > svg { margin-top: 4px; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs > svg { margin-top: 5px; }
 html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) > .task-compact-actions {
   flex-direction: row;
   flex-wrap: wrap;

@@ -37,8 +37,8 @@ fn recurring_execution_unchecked_and_empty_clear_do_not_invent_results() {
     occurrence(&mut db, &item.id, "2026-10-15");
     occurrence(&mut db, &item.id, "2026-10-17");
     assert!(db.list_recurring_execution_history(&item.id).unwrap().is_empty());
-    assert_eq!(db.clear_recurring_occurrence_review(&current.id).unwrap(), current);
-    assert_eq!(db.clear_recurring_occurrence_review(&current.id).unwrap(), current);
+    assert_eq!(db.clear_recurring_occurrence_review(&current.id, None).unwrap(), current);
+    assert_eq!(db.clear_recurring_occurrence_review(&current.id, None).unwrap(), current);
     assert!(db.list_recurring_execution_history(&item.id).unwrap().is_empty());
     assert!(db.latest_undo().unwrap().is_none());
 }
@@ -56,11 +56,11 @@ fn recurring_execution_save_is_normalized_idempotent_and_clear_recomplete_is_rea
         assert_eq!(db.latest_undo().unwrap().unwrap().id, undo.id);
     }
     assert_eq!(db.list_recurring_execution_history(&item.id).unwrap().len(), 1);
-    let cleared = db.clear_recurring_occurrence_review(&current.id).unwrap();
+    let cleared = db.clear_recurring_occurrence_review(&current.id, None).unwrap();
     assert_eq!(cleared.outcome, None);
     assert_eq!(cleared.review_notes, None);
     assert_eq!(cleared.reviewed_at, None);
-    assert_eq!(db.clear_recurring_occurrence_review(&current.id).unwrap(), cleared);
+    assert_eq!(db.clear_recurring_occurrence_review(&current.id, None).unwrap(), cleared);
     assert!(db.apply_undo(&undo.id).is_err());
     let repeated = save(&mut db, &current.id, "completed", Some("done"));
     assert_ne!(first.reviewed_at, repeated.reviewed_at);
@@ -78,7 +78,8 @@ fn recurring_execution_save_is_normalized_idempotent_and_clear_recomplete_is_rea
     assert!(events.windows(2).all(|w| w[0].id.parse::<i64>().unwrap() < w[1].id.parse::<i64>().unwrap()));
     assert!(events.iter().all(|e| e.occurrence_id.as_deref() == Some(current.id.as_str()) && e.kind == "execution"));
     let json = serde_json::to_value(&events[1]).unwrap();
-    assert_eq!(json.as_object().unwrap().len(), 10);
+    assert_eq!(json.as_object().unwrap().len(), 11);
+    assert_eq!(json["cancelled_outcome"], "completed");
     assert_eq!(json["kind"], "execution");
     assert!(json["id"].is_string());
     assert_eq!(json["occurrence_id"], current.id);
@@ -115,7 +116,7 @@ fn recurring_execution_isolates_series_dates_and_two_same_day_blocks_and_their_d
     let current_draft = db.list_review_form_drafts(TODAY).unwrap().into_iter().find(|d| d.item_id == current.id).unwrap();
     assert_eq!(current_draft.payload_json, "{}");
     db.save_review_form_draft(TODAY, "recurring", &current.id, "{\"notes\":\"clear me\"}", current_draft.revision).unwrap();
-    db.clear_recurring_occurrence_review(&current.id).unwrap();
+    db.clear_recurring_occurrence_review(&current.id, None).unwrap();
     assert_eq!(drafts(&db, &other_current.id), other_draft);
     assert_eq!(drafts(&db, &tomorrow.id), second_draft);
     assert_eq!(load_occurrence(&db.connection, &tomorrow.id).unwrap().outcome, None);
@@ -157,7 +158,7 @@ fn recurring_execution_reviewed_exception_and_snapshots_survive_rule_lifecycle_c
     save(&mut db, &current.id, "completed", Some("original review"));
     let exception: bool = db.connection.query_row("SELECT is_exception FROM recurring_occurrences WHERE id=?1", [&current.id], |r| r.get(0)).unwrap();
     assert!(exception);
-    db.clear_recurring_occurrence_review(&current.id).unwrap();
+    db.clear_recurring_occurrence_review(&current.id, None).unwrap();
     db.update_recurring_occurrence(&tomorrow.id, rule("New schedule"), TODAY, "this").unwrap();
     let mut replacement = rule("Future rule");
     replacement.starts_on = "2026-10-20".into();
@@ -202,7 +203,7 @@ fn recurring_execution_permissions_and_rejected_requests_leave_all_facts_unchang
         let before = facts(&db, &target.id);
         let draft = drafts(&db, &target.id);
         if date != TODAY {
-            assert!(db.clear_recurring_occurrence_review(&target.id).is_err());
+            assert!(db.clear_recurring_occurrence_review(&target.id, Some("keep note".into())).is_err());
             assert!(db.save_recurring_occurrence_review(&target.id, input()).is_err());
             assert_eq!(facts(&db, &target.id), before);
             assert_eq!(drafts(&db, &target.id), draft);
@@ -215,13 +216,13 @@ fn recurring_execution_permissions_and_rejected_requests_leave_all_facts_unchang
         assert!(db.save_recurring_occurrence_review(&current.id, input).is_err());
         assert_eq!(facts(&db, &current.id), before);
     }
-    assert!(db.clear_recurring_occurrence_review("missing").is_err());
+    assert!(db.clear_recurring_occurrence_review("missing", None).is_err());
     db.set_recurring_item_status(&item.id, "ended").unwrap();
     db.soft_delete_recurring_item(&item.id, true).unwrap();
     let before = facts(&db, &current.id);
     // Recycled recurring items keep today's occurrence recordable and cancellable.
     assert!(db.save_recurring_occurrence_review(&current.id, RecurringOccurrenceReviewInput { outcome: Some("completed".into()), notes: Some("recycled note".into()) }).is_ok());
-    assert!(db.clear_recurring_occurrence_review(&current.id).is_ok());
+    assert!(db.clear_recurring_occurrence_review(&current.id, None).is_ok());
     assert_ne!(facts(&db, &current.id), before);
 }
 
@@ -244,7 +245,7 @@ fn recurring_execution_event_and_draft_failures_roll_back_save_and_clear_atomica
             let draft = drafts(&db, &current.id);
             let undo = db.latest_undo().unwrap().map(|e| e.id);
             db.connection.execute_batch(trigger).unwrap();
-            let result = if clear { db.clear_recurring_occurrence_review(&current.id) } else {
+            let result = if clear { db.clear_recurring_occurrence_review(&current.id, Some("keep note".into())) } else {
                 db.save_recurring_occurrence_review(&current.id, RecurringOccurrenceReviewInput { outcome: Some("completed".into()), notes: None })
             };
             assert!(result.is_err(), "{failure}, clear={clear}");
@@ -271,6 +272,8 @@ fn recurring_execution_migration_backfills_only_known_results_once_and_reopens_d
         db.connection.execute_batch("DROP TABLE recurring_execution_events;
             DROP TABLE recurring_lifecycle_events;
             ALTER TABLE recurring_status_versions DROP COLUMN occurred_at;
+            DROP TABLE holiday_calendar_years;
+            DROP TABLE holiday_calendar_metadata;
             DELETE FROM schema_migrations WHERE version >= 28;").unwrap();
         db.connection.execute("UPDATE recurring_occurrences SET outcome='partial', review_notes='legacy note', reviewed_at='2026-10-16T03:00:00+00:00', is_exception=0 WHERE id=?1", [&current.id]).unwrap();
         db.connection.execute("UPDATE recurring_occurrences SET outcome='completed', reviewed_at=NULL, updated_at='2026-10-15T05:00:00+00:00' WHERE id=?1", [&past.id]).unwrap();
@@ -293,7 +296,7 @@ fn recurring_execution_migration_backfills_only_known_results_once_and_reopens_d
     let mut db = Database::open(&path).unwrap();
     assert_eq!(db.list_recurring_execution_history(&item_id).unwrap(), expected);
     assert!(load_occurrence(&db.connection, &fallback_id).unwrap().outcome.is_some());
-    db.clear_recurring_occurrence_review(&reviewed_id).unwrap();
+    db.clear_recurring_occurrence_review(&reviewed_id, None).unwrap();
     let after = db.list_recurring_execution_history(&item_id).unwrap();
     assert_eq!(after.len(), 3);
     drop(db);
@@ -391,7 +394,7 @@ fn recurring_execution_end_merges_by_actual_instant_and_numeric_sequence_without
     let current = occurrence(&mut db, &item.id, TODAY);
     for _ in 0..6 {
         save(&mut db, &current.id, "completed", Some("original note"));
-        db.clear_recurring_occurrence_review(&current.id).unwrap();
+        db.clear_recurring_occurrence_review(&current.id, None).unwrap();
     }
     // Equal instants with different offsets, plus out-of-insertion-order actions.
     db.connection.execute_batch("UPDATE recurring_execution_events SET occurred_at='2026-10-16T12:00:00+08:00';
@@ -499,6 +502,8 @@ fn recurring_execution_end_migration_preserves_legacy_date_only_and_new_timestam
         // Recreate the exact version-28 status schema, including existing ended rows.
         db.connection.execute_batch("ALTER TABLE recurring_status_versions DROP COLUMN occurred_at;
             DROP TABLE recurring_lifecycle_events;
+            DROP TABLE holiday_calendar_years;
+            DROP TABLE holiday_calendar_metadata;
             DELETE FROM schema_migrations WHERE version>=29;").unwrap();
         ids
     };
@@ -549,7 +554,7 @@ fn recurring_execution_end_pre_version27_backfill_does_not_require_or_fabricate_
         VALUES('legacy-paused','Legacy paused','paused','daily','2026-01-01',?1,?1)", [now()]).unwrap();
     connection.execute("INSERT INTO recurring_items(id,title,status,frequency,starts_on,created_at,updated_at)
         VALUES('legacy-ended','Legacy ended','ended','daily','2026-01-01',?1,?1)", [now()]).unwrap();
-    let mut db = Database { connection };
+    let mut db = Database { connection, holiday_calendar: CalendarState::bundled() };
     db.migrate().unwrap();
     db.migrate().unwrap();
     let history = db.list_recurring_execution_history("legacy-ended").unwrap();
@@ -718,7 +723,9 @@ fn recurring_trash_migration_backfills_only_deleted_at_once_and_cycles_survive_r
         }
         db.restore_recurring_item(&restored.id).unwrap();
         db.connection.execute("UPDATE recurring_items SET deleted_at='2026-10-14T17:30:00Z', updated_at='2026-10-16T03:00:00Z' WHERE id=?1", [&deleted.id]).unwrap();
-        db.connection.execute_batch("DROP TABLE recurring_lifecycle_events; DELETE FROM schema_migrations WHERE version=30;").unwrap();
+        db.connection.execute_batch("DROP TABLE recurring_lifecycle_events;
+            DROP TABLE holiday_calendar_years; DROP TABLE holiday_calendar_metadata;
+            DELETE FROM schema_migrations WHERE version>=30;").unwrap();
         (deleted.id, restored.id)
     };
     let expected = {
@@ -749,4 +756,60 @@ fn recurring_trash_migration_backfills_only_deleted_at_once_and_cycles_survive_r
     let item = db.list_recurring_items(true, false).unwrap().into_iter().find(|i| i.id == deleted_id).unwrap();
     assert_eq!(item.status, "ended");
     assert!(item.deleted_at.is_none());
+}
+
+#[test]
+fn recurring_cancellation_recovers_each_original_outcome_by_occurrence_sequence() {
+    let _clock = TestToday::new(TODAY);
+    let mut db = Database::in_memory().unwrap();
+    let item = db.create_recurring_item(rule("Cancellation details")).unwrap();
+    let first = occurrence(&mut db, &item.id, TODAY);
+    let second = occurrence(&mut db, &item.id, "2026-10-17");
+    db.update_recurring_occurrence(&second.id, rule("Same-day second block"), TODAY, "this").unwrap();
+    for outcome in ["completed", "partial", "not_completed"] {
+        save(&mut db, &first.id, outcome, Some("old note"));
+        save(&mut db, &second.id, "completed", Some(outcome));
+        let cleared = db.clear_recurring_occurrence_review(&first.id, Some("  keep note  ".into())).unwrap();
+        assert_eq!(cleared.outcome, None);
+        assert_eq!(cleared.review_notes.as_deref(), Some("keep note"));
+        assert!(cleared.reviewed_at.is_some());
+        let events = db.list_recurring_execution_history(&item.id).unwrap();
+        let cancellation = events.iter().rev().find(|e| e.occurrence_id.as_deref() == Some(&first.id)).unwrap();
+        assert_eq!(cancellation.cancelled_outcome.as_deref(), Some(outcome));
+        assert_eq!(cancellation.notes.as_deref(), Some("keep note"));
+        assert_eq!(db.clear_recurring_occurrence_review(&first.id, Some("keep note".into())).unwrap(), cleared);
+        assert_eq!(db.list_recurring_execution_history(&item.id).unwrap(), events);
+        db.save_recurring_occurrence_review(&first.id, RecurringOccurrenceReviewInput { outcome: None, notes: Some("note edit only".into()) }).unwrap();
+        let events = db.list_recurring_execution_history(&item.id).unwrap();
+        assert!(events.last().unwrap().cancelled_outcome.is_none(), "neutral note edits do not repeat the cancellation");
+    }
+    let history = db.list_recurring_execution_history(&item.id).unwrap();
+    db.connection.execute("UPDATE recurring_execution_events SET occurred_at='2026-10-16T00:00:00Z' WHERE id % 2=0", []).unwrap();
+    let reordered = db.list_recurring_execution_history(&item.id).unwrap();
+    for event in history {
+        assert_eq!(reordered.iter().find(|e| e.id == event.id).unwrap().cancelled_outcome, event.cancelled_outcome);
+    }
+    let before = facts(&db, &first.id);
+    assert!(db.clear_recurring_occurrence_review(&first.id, Some("x".repeat(2001))).is_err());
+    assert_eq!(facts(&db, &first.id), before);
+    assert_eq!(db.list_recurring_execution_history(&item.id).unwrap(), reordered);
+}
+
+#[test]
+fn recurring_undo_to_neutral_reports_the_cancelled_result_and_keeps_old_notes() {
+    let _clock = TestToday::new(TODAY);
+    for outcome in ["completed", "partial", "not_completed"] {
+        let mut db = Database::in_memory().unwrap();
+        let item = db.create_recurring_item(rule("Undo cancellation")).unwrap();
+        let current = occurrence(&mut db, &item.id, TODAY);
+        db.save_recurring_occurrence_review(&current.id, RecurringOccurrenceReviewInput { outcome: None, notes: Some("existing note".into()) }).unwrap();
+        save(&mut db, &current.id, outcome, Some("result note"));
+        let undo = db.latest_undo().unwrap().unwrap();
+        db.apply_undo(&undo.id).unwrap();
+        let events = db.list_recurring_execution_history(&item.id).unwrap();
+        assert_eq!(events.last().unwrap().outcome, None);
+        assert_eq!(events.last().unwrap().cancelled_outcome.as_deref(), Some(outcome));
+        assert_eq!(events.last().unwrap().notes.as_deref(), Some("existing note"));
+        assert_eq!(load_occurrence(&db.connection, &current.id).unwrap().outcome, None);
+    }
 }

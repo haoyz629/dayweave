@@ -144,7 +144,7 @@ fn migration_preserves_over_limit_data_backfills_colors_and_permits_only_reducti
         [serde_json::to_string(&old).unwrap()]).unwrap();
     connection.execute("INSERT INTO recurring_items(id,title,frequency,starts_on,created_at,updated_at,tags_json)
         VALUES ('legacy-recurring','legacy','daily','2026-10-16','old','old','[\"recurring-only\"]')", []).unwrap();
-    let mut db = Database { connection };
+    let mut db = Database { connection, holiday_calendar: CalendarState::bundled() };
     db.migrate().unwrap();
     assert_eq!(db.list_tag_catalog().unwrap().len(), 52);
     assert!(db.list_tag_catalog().unwrap().iter().all(|tag| tag.color < 8));

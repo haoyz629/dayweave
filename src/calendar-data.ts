@@ -1,4 +1,5 @@
-import officialWorkdays2026 from "./official-workdays-2026.json" with { type: "json" };
+import { officialDayOn, officialHolidayCoverageFor } from "./official-holiday-calendar.ts";
+export { officialHolidayCoverageFor } from "./official-holiday-calendar.ts";
 
 export type CalendarWorkState = "rest" | "work";
 export type CalendarLabelKind = "holiday" | "festival" | "solar-term";
@@ -9,23 +10,6 @@ export type CalendarDayInfo = {
   labels: { text: string; kind: CalendarLabelKind }[];
 };
 
-type OfficialHolidayGroup = {
-  name: string;
-  dates: string[];
-  namedDate?: string;
-};
-
-// 国务院办公厅：国办发明电〔2025〕7号
-// https://www.gov.cn/zhengce/content/202511/content_7047090.htm
-const OFFICIAL_HOLIDAYS_2026: OfficialHolidayGroup[] = officialWorkdays2026.holidays;
-
-const MAKEUP_WORKDAYS_2026 = new Map<string, string>(officialWorkdays2026.makeupWorkdays.map(([date, name]) => [date, name]));
-
-export const OFFICIAL_HOLIDAY_COVERAGE = { from: officialWorkdays2026.from, to: officialWorkdays2026.to, version: officialWorkdays2026.version } as const;
-
-export function officialHolidayCoverageFor(date: string) {
-  return date >= OFFICIAL_HOLIDAY_COVERAGE.from && date <= OFFICIAL_HOLIDAY_COVERAGE.to;
-}
 
 const SOLAR_TERMS_2026: Record<string, string> = {
   "2026-01-05": "小寒", "2026-01-20": "大寒",
@@ -105,15 +89,11 @@ function nextDate(date: string) {
   return value.toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
 }
 
-const officialHolidayByDate = new Map<string, OfficialHolidayGroup>();
-for (const group of OFFICIAL_HOLIDAYS_2026) {
-  for (const date of group.dates) officialHolidayByDate.set(date, group);
-}
-
 export function availabilityWorkdayOn(date: string, weekdays: readonly number[], makeupWorkdaysAsWorkdays = true) {
+  const { holiday, makeup } = officialDayOn(date);
   if (officialHolidayCoverageFor(date)) {
-    if (officialHolidayByDate.has(date)) return false;
-    if (makeupWorkdaysAsWorkdays && MAKEUP_WORKDAYS_2026.has(date)) return true;
+    if (holiday) return false;
+    if (makeupWorkdaysAsWorkdays && makeup) return true;
   }
   const weekday = new Date(`${date}T00:00:00Z`).getUTCDay() || 7;
   return weekdays.includes(weekday);
@@ -121,12 +101,12 @@ export function availabilityWorkdayOn(date: string, weekdays: readonly number[],
 
 export function calendarDayInfo(date: string): CalendarDayInfo | null {
   const labels: CalendarDayInfo["labels"] = [];
-  const officialHoliday = officialHolidayByDate.get(date);
-  const makeupHoliday = MAKEUP_WORKDAYS_2026.get(date);
+  const { holiday: officialHolidayName, makeup: makeupHoliday } = officialDayOn(date);
+  const officialHoliday = officialHolidayName;
   const workState = officialHoliday ? "rest" : makeupHoliday ? "work" : undefined;
 
-  const officialHolidayName = officialHoliday?.name ?? makeupHoliday;
-  if (officialHolidayName) labels.push({ text: officialHolidayName, kind: "holiday" });
+  const holidayName = officialHolidayName ?? makeupHoliday;
+  if (holidayName) labels.push({ text: holidayName, kind: "holiday" });
 
   const lunarFestival = LUNAR_FESTIVALS[lunarMonthDay(date) ?? ""];
   const isNewYearsEve = lunarMonthDay(nextDate(date)) === "1-1";

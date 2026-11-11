@@ -145,7 +145,7 @@ test("short success copy retains existing toast actions and hides empty descript
   assert.match(text, /persisted.draft_kind === "update" \? "任务已更新" : historicalTaskCompletionLocked\(result.item\) \? "历史任务已创建并自动完成" : result.item.status === "scheduled" \? "任务已创建并安排" : "任务已创建"/);
   assert.match(text, /setSuccessToast\(\{ id: Date.now\(\), message: "已移入回收站" \}\)/);
   assert.match(text, /undo\?\.target_type === "execution_capture"/);
-  assert.match(text, /onNotify\(executionDraft.wholeTask \? "整个任务已完成" : noteOnly \? "随手记已保存" : incomplete \? "未完成结果已保存" : "当天结果已保存", "", "check", undoId, seed\)/);
+  assert.match(text, /onNotify\(clearingCompletion \? "已取消当天完成" : executionDraft.wholeTask \? "整个任务已完成" : noteOnly \? "随手记已保存" : incomplete \? "未完成结果已保存" : "当天结果已保存", "", "check", undoId, seed\)/);
   assert.match(text, /onNotify\("任务已创建", "", "check"\)/);
   assert.match(text, /duration=\{planToast.undoId \|\| planToast.taskSeed \? 10_000/);
   assert.match(text, /label: "撤销"/);

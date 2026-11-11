@@ -30,7 +30,7 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
   const trackRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
-  const pointer = useRef<{ id: number; anchor: number; y: number } | null>(null);
+  const pointer = useRef<{ id: number; anchor: number; y: number; moved: boolean } | null>(null);
   const frame = useRef(0);
   const rangeRef = useRef<TimelineCreateRange | null>(null);
   const draftRef = useRef<TaskDraft | null>(null);
@@ -64,8 +64,12 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
   }
 
   function updateSelection() {
-    if (!pointer.current) return;
-    rangeRef.current = selectedRange(pointer.current.anchor, snapAt(pointer.current.y));
+    const active = pointer.current;
+    if (!active) return;
+    const end = snapAt(active.y);
+    if (end !== active.anchor) active.moved = true;
+    if (active.moved && end === active.anchor) { clearRange(); return; }
+    rangeRef.current = selectedRange(active.anchor, end);
     onRange({ ...rangeRef.current, dragging: true });
   }
 
@@ -81,13 +85,13 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
 
   function open(range: TimelineCreateRange) {
     rangeRef.current = range; onRange(range); onStart(); setError("");
-    setForm({ title: "", start: clock(range.start), end: clock(range.end), priority: "medium", tags: [] });
+    setForm({ title: "", start: clock(range.start), end: clock(range.end), priority: "high", tags: [] });
   }
 
   function start(event: ReactPointerEvent<HTMLDivElement>) {
     if (disabled || event.button !== 0 || !event.isPrimary || form || pointer.current) return;
     event.preventDefault(); onStart();
-    pointer.current = { id: event.pointerId, anchor: snapAt(event.clientY), y: event.clientY };
+    pointer.current = { id: event.pointerId, anchor: snapAt(event.clientY), y: event.clientY, moved: false };
     event.currentTarget.setPointerCapture(event.pointerId);
     updateSelection(); frame.current = requestAnimationFrame(autoScroll);
   }
@@ -185,7 +189,7 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
       aria-label="框选创建任务" aria-disabled={disabled} title="在右侧拖选时间创建任务；Enter 创建 15 分钟任务"
       onPointerDown={start}
       onPointerMove={(event) => { if (pointer.current?.id === event.pointerId) { pointer.current.y = event.clientY; updateSelection(); } }}
-      onPointerUp={(event) => { if (pointer.current?.id !== event.pointerId) return; if (!event.currentTarget.hasPointerCapture(event.pointerId)) { cancelSelection(); return; } updateSelection(); const range = rangeRef.current; clearPointer(); if (range) open(range); }}
+      onPointerUp={(event) => { if (pointer.current?.id !== event.pointerId) return; if (!event.currentTarget.hasPointerCapture(event.pointerId)) { cancelSelection(); return; } pointer.current.y = event.clientY; updateSelection(); const range = rangeRef.current; clearPointer(); if (range) open(range); }}
       onPointerCancel={cancelSelection} onLostPointerCapture={cancelSelection}
       onKeyDown={(event) => {
         if ((event.key === "Enter" || event.key === " ") && !disabled && !form) {

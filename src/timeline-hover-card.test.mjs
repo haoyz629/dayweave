@@ -26,20 +26,24 @@ collect(source);
 
 test("task tooltip separates only nonempty priority and status details", () => {
   assert.ok(blockTooltipDetail);
-  const priorityCopy = { high: "高优先级", medium: "中优先级", low: "低优先级" };
+  const priorityText = readFileSync(new URL("./task-priority-selector.tsx", import.meta.url), "utf8");
+  const prioritySource = ts.createSourceFile("task-priority-selector.tsx", priorityText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const priorityDeclaration = prioritySource.statements.find(node => ts.isVariableStatement(node) && node.declarationList.declarations.some(declaration => declaration.name.getText(prioritySource) === "priorityCopy"));
+  const priorityCopy = vm.runInNewContext(compile(`${priorityDeclaration.getText(prioritySource).replace("export ", "")}\npriorityCopy;`));
   const reviewOutcomeCopy = { completed: "完成", incomplete: "未完成" };
   const hint = "上下拖动调整时间·点击精确编辑";
   const cases = [
-    { task: { priority: "medium" }, expected: "中优先级" },
-    { task: { priority: "high" }, expected: "高优先级" },
-    { task: { priority: "low" }, expected: "低优先级" },
+    { task: { priority: "urgent" }, expected: "P0 紧急" },
+    { task: { priority: "medium" }, expected: "P2 中优先级" },
+    { task: { priority: "high" }, expected: "P1 高优先级" },
+    { task: { priority: "low" }, expected: "P3 低优先级" },
     { task: { priority: null }, expected: "" },
     { task: undefined, expected: "" },
-    { task: { priority: "medium" }, draggable: true, expected: `中优先级 · ${hint}` },
+    { task: { priority: "medium" }, draggable: true, expected: `P2 中优先级 · ${hint}` },
     { task: undefined, draggable: true, expected: hint },
-    { task: { priority: "medium" }, effectiveOutcome: "incomplete", expected: "中优先级 · 本次未完成 · 已记录" },
+    { task: { priority: "medium" }, effectiveOutcome: "incomplete", expected: "P2 中优先级 · 本次未完成 · 已记录" },
     { task: undefined, effectiveOutcome: "completed", expected: "本次完成 · 已记录" },
-    { task: { priority: "medium" }, block: { review: { outcome: "incomplete", followup_action: "continue" } }, expected: "中优先级 · 未完成 · 继续" },
+    { task: { priority: "medium" }, block: { review: { outcome: "incomplete", followup_action: "continue" } }, expected: "P2 中优先级 · 未完成 · 继续" },
     { task: undefined, block: { review: { outcome: "completed", followup_action: null } }, expected: "完成 · 已记录" }
   ];
   for (const { task, draggable = false, block = {}, effectiveOutcome = null, expected } of cases) {

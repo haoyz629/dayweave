@@ -11,15 +11,16 @@ const names = ["emptyNewTaskForm", "taskFormForManualUpdate", "manualUpdateForTa
 const selectorText = readFileSync(new URL("./task-priority-selector.tsx", import.meta.url), "utf8");
 const selectorSource = ts.createSourceFile("task-priority-selector.tsx", selectorText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const selector = selectorSource.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "TaskPrioritySelector");
-const code = [...source.statements.filter(node => ts.isFunctionDeclaration(node) && names.includes(node.name?.text)).map(node => node.getText(source)), selector.getText(selectorSource).replace("export ", "")].join("\n");
-function harness(priority = "medium", disabled = false) {
+const copy = selectorSource.statements.find(node => ts.isVariableStatement(node) && node.declarationList.declarations.some(declaration => declaration.name.getText(selectorSource) === "priorityCopy"));
+const code = [copy.getText(selectorSource).replace("export ", ""), ...source.statements.filter(node => ts.isFunctionDeclaration(node) && names.includes(node.name?.text)).map(node => node.getText(source)), selector.getText(selectorSource).replace("export ", "")].join("\n");
+function harness(priority = "high", disabled = false) {
   const changes = [], effects = [], focus = [], listeners = new Map();
   let contains = true;
-  const options = [0, 1, 2].map(index => ({ focus() { focus.push(index); context.document.activeElement = this; } }));
+  const options = [0, 1, 2, 3].map(index => ({ focus() { focus.push(index); context.document.activeElement = this; } }));
   const trigger = { focus() { focus.push("trigger"); context.document.activeElement = this; } };
   const state = { open: true };
   const context = vm.createContext({
-    React, priorityCopy: { high: "高优先级", medium: "中优先级", low: "低优先级" },
+    React,
     useState: () => [state.open, value => { state.open = value; }],
     useRef: () => ({ current: { querySelector: selector => selector.includes("trigger") ? trigger : options[1], querySelectorAll: () => options, contains: () => contains } }),
     useEffect: fn => { effects.push(fn); },
@@ -40,20 +41,22 @@ function harness(priority = "medium", disabled = false) {
 }
 function key(value) { return { key: value, prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; } }; }
 
-test("new tasks default to medium and the shared selector has exactly three choices", () => {
+test("new tasks default to P1 and the shared selector offers P0 through P3 in order", () => {
   const h = harness();
-  assert.equal(h.context.emptyNewTaskForm().priority, "medium");
+  assert.equal(h.context.emptyNewTaskForm().priority, "high");
   const view = h.render();
-  assert.deepEqual(view.options.map(n => n.props.children[0].props.children[1].props.children), ["高优先级", "中优先级", "低优先级"]);
-  assert.deepEqual(view.options.map(n => n.props["aria-selected"]), [false, true, false]);
+  assert.deepEqual(view.options.map(n => n.props.children[0].props.children[1].props.children), ["P0 紧急", "P1 高优先级", "P2 中优先级", "P3 低优先级"]);
+  assert.deepEqual(view.options.map(n => n.props["aria-selected"]), [false, true, false, false]);
+  assert.equal(view.options[1].props.children[1].props.children[0].props.children, "默认");
+  assert.ok(view.options.filter((_, index) => index !== 1).every(n => n.props.children[1].props.children[0] === false));
   assert.equal(view.nodes.some(n => n.type === "select"), false);
   assert.equal(view.trigger.props["aria-controls"], "test-priority-menu");
 });
 
-test("legacy null displays medium without writing or changing the task form", () => {
+test("legacy null displays P1 without writing or changing the task form", () => {
   const h = harness(null);
   const view = h.render();
-  assert.equal(view.trigger.props["aria-label"], "优先级：中优先级");
+  assert.equal(view.trigger.props["aria-label"], "优先级：P1 高优先级");
   assert.equal(view.options[1].props["aria-selected"], true);
   h.effects.forEach(fn => fn());
   assert.equal(h.form.priority, null);
@@ -69,7 +72,7 @@ test("a choice updates once on click and returns focus; pointer-down never write
   assert.equal(h.changes.length, 0);
   option.props.onClick();
   assert.equal(h.changes.length, 1);
-  assert.equal(h.changes[0].priority, "high");
+  assert.equal(h.changes[0].priority, "urgent");
   assert.equal(h.state.open, false);
   assert.deepEqual(h.focus, ["trigger"]);
 });
@@ -78,7 +81,7 @@ test("keyboard navigation wraps, supports endpoints, and isolates Escape", () =>
   const h = harness();
   const view = h.render();
   for (const value of ["ArrowDown", "ArrowDown", "End", "Home"]) view.control.props.onKeyDown(key(value));
-  assert.deepEqual(h.focus, [2, 0, 2, 0]);
+  assert.deepEqual(h.focus, [2, 3, 3, 0]);
   const escape = key("Escape");
   view.control.props.onKeyDown(escape);
   assert.equal(escape.prevented, true);
@@ -141,10 +144,31 @@ test("disabled state hides an already open menu and resets it without changes", 
 test("task editors and slide creation use the same selector without normalizing persisted nulls", () => {
   assert.match(text, /<TaskPrioritySelector id=\{priorityId\} value=\{form.priority\} disabled=\{disabled\}/);
   const timeline = readFileSync(new URL("./timeline-task-create.tsx", import.meta.url), "utf8");
-  assert.match(timeline, /setForm\(\{ title: "", start: clock\(range.start\), end: clock\(range.end\), priority: "medium", tags: \[\] \}\)/);
+  assert.match(timeline, /setForm\(\{ title: "", start: clock\(range.start\), end: clock\(range.end\), priority: "high", tags: \[\] \}\)/);
   assert.match(timeline, /<TaskPrioritySelector[^>]*value=\{form.priority\} disabled=\{saving \|\| disabled\}/);
   assert.doesNotMatch(timeline, /<select name="priority"/);
   assert.match(timeline, /title: form.title.trim\(\), notes: null, priority: form.priority/);
   // The timeline's Escape shortcut detects explicit dialog roles before native cancel runs.
   assert.match(timeline, /<dialog ref=\{dialogRef\} role="dialog"/);
+});
+
+test("all four choices round-trip unchanged and selecting each writes exactly once", () => {
+  for (const [index, priority] of ["urgent", "high", "medium", "low"].entries()) {
+    const h = harness(priority);
+    const view = h.render();
+    assert.equal(view.options[index].props["aria-selected"], true);
+    assert.equal(view.options.filter(n => n.props["aria-selected"]).length, 1);
+    const form = h.context.taskFormForManualUpdate({ title: "既有任务", priority });
+    assert.equal(h.context.manualUpdateForTaskForm(form).priority, priority);
+    view.options[index].props.onClick();
+    assert.equal(h.changes.length, 1);
+    assert.equal(h.changes[0].priority, priority);
+  }
+});
+
+test("scheduled task creation defaults to P1 and all displays use the shared labels", () => {
+  const defaults = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "newTaskDefaultForm");
+  assert.match(defaults.getText(source), /priority: "high"/);
+  assert.match(text, /import \{ priorityCopy, TaskPrioritySelector \} from "\.\/task-priority-selector"/);
+  assert.doesNotMatch(text, /const priorityCopy\s*=/);
 });

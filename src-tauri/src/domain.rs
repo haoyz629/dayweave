@@ -81,6 +81,7 @@ pub enum Priority {
     Low,
     Medium,
     High,
+    Urgent,
 }
 
 impl Priority {
@@ -89,6 +90,7 @@ impl Priority {
             Self::Low => "low",
             Self::Medium => "medium",
             Self::High => "high",
+            Self::Urgent => "urgent",
         }
     }
 }
@@ -380,6 +382,24 @@ pub fn parse_shanghai_timestamp(value: &str) -> AppResult<DateTime<FixedOffset>>
 mod tests {
     use super::AiProposal;
     use serde_json::json;
+
+    #[test]
+    fn priority_serialization_preserves_storage_values_and_null() {
+        use super::Priority;
+        for (priority, value) in [
+            (Priority::Urgent, "urgent"), (Priority::High, "high"),
+            (Priority::Medium, "medium"), (Priority::Low, "low"),
+        ] {
+            assert_eq!(priority.as_str(), value);
+            assert_eq!(serde_json::to_value(priority).unwrap(), json!(value));
+            assert_eq!(serde_json::from_value::<Priority>(json!(value)).unwrap(), priority);
+        }
+        assert_eq!(serde_json::from_value::<Option<Priority>>(json!(null)).unwrap(), None);
+        assert_eq!(serde_json::to_value(None::<Priority>).unwrap(), json!(null));
+        for invalid in ["P0", "P1", "critical", "", "URGENT"] {
+            assert!(serde_json::from_value::<Priority>(json!(invalid)).is_err());
+        }
+    }
 
     fn proposed_plan(ends_at: &str) -> String {
         json!({

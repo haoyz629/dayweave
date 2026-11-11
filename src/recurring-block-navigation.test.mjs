@@ -77,23 +77,34 @@ test("requested recurring navigation selects the exact active, ended or recycled
   }
 });
 
-test("returning locates, focuses and centers the original recurring block, not a normal block", () => {
-  let focused = false, handled = false;
-  const target = { dataset: { timelineKind: "recurring", timelineId: item.id }, querySelector: () => ({ focus() { focused = true; } }), getBoundingClientRect: () => ({ top: 400, height: 100 }) };
-  const scroller = { scrollTop: 200, clientHeight: 500, scrollHeight: 1800, getBoundingClientRect: () => ({ top: 100 }), querySelectorAll: () => [{ dataset: { timelineKind: "block", timelineId: item.id } }, target], scrollTo(options) { this.scrollTop = options.top; } };
-  let frame, timeout;
-  const state = { timelineReturnContext: { date: "2026-10-29", occurrenceId: item.id }, selectedDate: "2026-10-29", loading: false, schedule: {}, error: null, recurringOccurrences: [item], taskBlocks: [], timelineScrollRef: { current: scroller }, onTimelineReturnHandled() { handled = true; }, window: { requestAnimationFrame(fn) { frame = fn; return 1; }, cancelAnimationFrame() {}, setTimeout(fn) { timeout = fn; }, matchMedia: () => ({ matches: true }) } };
-  setters(state, ["todayView", "followingNow", "timelineTooltip", "planDraftTimeEdit", "selection", "executionDraft", "executionMessage"]);
-  vm.runInNewContext(compile(`(${returnEffect})()`), state);
-  frame();
-  assert.equal(state.todayView, "timeline");
-  assert.equal(state.followingNow, false);
-  assert.equal(focused, true);
-  assert.equal(handled, true);
-  assert.equal(scroller.scrollTop, 300);
-  assert.equal(target.dataset.returnLocated, "true");
-  timeout();
-  assert.equal(target.dataset.returnLocated, undefined);
+test("returning focuses and centers the exact ordinary or recurring block without losing keyboard access", () => {
+  for (const kind of ["block", "recurring"]) {
+    let focused = false, handled = false;
+    const target = { dataset: { timelineKind: kind, timelineId: item.id }, querySelector: () => ({ focus(options) { focused = options.preventScroll; } }), getBoundingClientRect: () => ({ top: 400, height: 100 }) };
+    const scroller = { scrollTop: 200, clientHeight: 500, scrollHeight: 1800, getBoundingClientRect: () => ({ top: 100 }), querySelectorAll: () => [{ dataset: { timelineKind: kind === "block" ? "recurring" : "block", timelineId: item.id } }, target], scrollTo(options) { this.scrollTop = options.top; } };
+    let frame, timeout;
+    const state = { timelineReturnContext: { date: "2026-10-29", ...(kind === "recurring" ? { occurrenceId: item.id } : { blockId: item.id }) }, selectedDate: "2026-10-29", loading: false, schedule: {}, error: null, recurringOccurrences: [item], taskBlocks: [item], timelineScrollRef: { current: scroller }, onTimelineReturnHandled() { handled = true; }, window: { requestAnimationFrame(fn) { frame = fn; return 1; }, cancelAnimationFrame() {}, setTimeout(fn) { timeout = fn; }, matchMedia: () => ({ matches: true }) } };
+    setters(state, ["todayView", "followingNow", "timelineTooltip", "planDraftTimeEdit", "selection", "executionDraft", "executionMessage"]);
+    vm.runInNewContext(compile(`(${returnEffect})()`), state);
+    frame();
+    assert.equal(state.todayView, "timeline");
+    assert.equal(state.followingNow, false);
+    assert.equal(focused, true);
+    assert.equal(handled, true);
+    assert.equal(scroller.scrollTop, 300);
+    assert.equal(target.dataset.returnLocated, "true");
+    timeout();
+    assert.equal(target.dataset.returnLocated, undefined);
+  }
+});
+
+test("return location uses a soft halo rather than a dark outline and retains keyboard focus styling", () => {
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  const rule = css.match(/\.timeline-event\[data-return-located="true"\]\s*\{([^}]+)\}/)?.[1];
+  assert.ok(rule);
+  assert.match(rule, /outline:\s*none/);
+  assert.match(rule, /box-shadow:.*color-mix\(in srgb, var\(--state-plan-border\) 50%, transparent\)/);
+  assert.match(css, /\.timeline-event-body:focus-visible\s*\{[^}]*outline:\s*2px solid/);
 });
 
 test("recurring edit header returns to timeline while ordinary edit still returns to details", () => {

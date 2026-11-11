@@ -208,7 +208,7 @@ fn recurring_migration_preserves_ids_review_and_nullable_legacy_snapshots() {
     }
     connection.execute("INSERT INTO recurring_items(id,title,frequency,starts_on,created_at,updated_at) VALUES('legacy','legacy title','daily','2026-09-01',?1,?1)",[now()]).unwrap();
     connection.execute("INSERT INTO recurring_occurrences(id,recurring_item_id,occurrence_date,outcome,review_notes,reviewed_at,created_at,updated_at) VALUES('stable','legacy','2026-10-15','completed','old review',?1,?1,?1)",[now()]).unwrap();
-    let mut db = Database { connection }; db.migrate().unwrap(); db.migrate().unwrap();
+    let mut db = Database { connection, holiday_calendar: CalendarState::bundled() }; db.migrate().unwrap(); db.migrate().unwrap();
     let old = occurrence(&mut db,"2026-10-15");
     assert_eq!(old.id,"stable"); assert_eq!(old.outcome.as_deref(),Some("completed")); assert_eq!(old.review_notes.as_deref(),Some("old review")); assert_eq!(old.display_time,None);
     db.update_recurring_item("legacy",input("updated")).unwrap();

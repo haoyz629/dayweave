@@ -39,9 +39,6 @@
 .timeline-date-navigation button:hover { color: var(--color-ink); background: var(--color-hover); }
 .desktop-app .timeline-heading { flex: 1 1 304px; flex-wrap: nowrap; }
 .desktop-app .timeline-top-actions { flex: none; margin-left: auto; }
-.timeline-heading-plan-status { display: flex; flex: 0 0 96px; min-height: 24px; align-items: center; }
-html:root .desktop-app .today-page .timeline-heading-plan-status .confirmed-plan-status { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 24px; margin: 0; padding: 0 7px; border: 1px solid var(--color-plan-edge); border-radius: 6px; color: var(--color-plan-ink); background: var(--color-plan-bg); font-size: 11px; font-weight: 400; line-height: 16px; }
-.timeline-heading-plan-status .confirmed-plan-status > svg { display: block; flex: none; }
 @media (max-width: 1100px) {
   .desktop-app .today-page .timeline-page-shell .timeline-design-topbar { padding-block: 12px; }
   .desktop-app .timeline-top-actions { margin-left: auto; }

@@ -1,4 +1,4 @@
-import officialWorkdays2026 from "./official-workdays-2026.json" with { type: "json" };
+import { missingHolidayYears, officialWorkdayOn } from "./official-holiday-calendar.ts";
 
 export type CalendarTaskPlacement = {
   scheduled_dates: readonly string[];
@@ -32,18 +32,6 @@ function dateParts(value: string) {
   return { year: Number(year), month: Number(month), day: Number(day) };
 }
 
-const officialHolidays = new Set(officialWorkdays2026.holidays.flatMap((group) => group.dates));
-const makeupWorkdays = new Set(officialWorkdays2026.makeupWorkdays.map(([date]) => date));
-
-function officialWorkdayOn(date: string): boolean | null {
-  if (date < officialWorkdays2026.from || date > officialWorkdays2026.to) return null;
-  if (officialHolidays.has(date)) return false;
-  if (makeupWorkdays.has(date)) return true;
-  const parts = dateParts(date);
-  if (!parts) return null;
-  const weekday = new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay();
-  return weekday !== 0 && weekday !== 6;
-}
 
 export function recurringRuleOccursOn(rule: CalendarRecurrenceRule, date: string) {
   if (date < rule.starts_on || rule.ends_on && date > rule.ends_on) return false;
@@ -58,7 +46,7 @@ export function recurringRuleOccursOn(rule: CalendarRecurrenceRule, date: string
   const weekday = new Date(Date.UTC(target.year, target.month - 1, target.day)).getUTCDay() || 7;
   if (rule.frequency === "daily") return days % rule.interval_value === 0;
   if (rule.frequency === "weekdays") {
-    if (officialWorkdayOn(rule.starts_on) === null || officialWorkdayOn(date) !== true) return false;
+    if (missingHolidayYears(rule.starts_on, date).length || officialWorkdayOn(date) !== true) return false;
     let workdays = 0;
     for (let day = startDay; day <= targetDay; day += 1) {
       if (officialWorkdayOn(new Date(day * 86_400_000).toISOString().slice(0, 10))) workdays += 1;

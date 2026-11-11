@@ -58,6 +58,7 @@ pub struct RecurringExecutionEventDto {
     pub display_time: Option<String>,
     pub display_duration_minutes: Option<i64>,
     pub outcome: Option<String>,
+    pub cancelled_outcome: Option<String>,
     pub notes: Option<String>,
     pub occurred_at: String,
 }
@@ -91,14 +92,19 @@ impl Database {
         // Active baselines and repeated active requests are not resumptions. The
         // immediately preceding series state must be paused, including legacy rows.
         let mut statement = self.connection.prepare(
-            "SELECT CAST(id AS TEXT), 'execution', occurrence_id, occurrence_date, title,
-                    display_time, display_duration_minutes, outcome, notes, occurred_at, id, 0
-             FROM recurring_execution_events WHERE recurring_item_id = ?1
+            "SELECT CAST(event.id AS TEXT), 'execution', event.occurrence_id, event.occurrence_date, event.title,
+                    event.display_time, event.display_duration_minutes, event.outcome, event.notes, event.occurred_at, event.id, 0,
+                    CASE WHEN event.outcome IS NULL THEN (
+                        SELECT previous.outcome FROM recurring_execution_events previous
+                        WHERE previous.occurrence_id = event.occurrence_id AND previous.id < event.id
+                        ORDER BY previous.id DESC LIMIT 1
+                    ) END
+             FROM recurring_execution_events event WHERE event.recurring_item_id = ?1
              UNION ALL
              SELECT 'status:' || s.id,
                     CASE s.status WHEN 'active' THEN 'resumed' ELSE s.status END,
                     NULL, date(s.effective_from, '-1 day'), i.title, NULL, NULL, NULL, NULL,
-                    COALESCE(s.occurred_at, date(s.effective_from, '-1 day')), s.id, 1
+                    COALESCE(s.occurred_at, date(s.effective_from, '-1 day')), s.id, 1, NULL
              FROM recurring_status_versions s JOIN recurring_items i ON i.id = s.recurring_item_id
              WHERE s.recurring_item_id = ?1 AND (
                  s.status IN ('paused', 'ended') OR (s.status = 'active' AND (
@@ -108,14 +114,14 @@ impl Database {
                  ) = 'paused'))
              UNION ALL
              SELECT 'lifecycle:' || id, kind, NULL, action_date, title, NULL, NULL, NULL, NULL,
-                    occurred_at, id, 2
+                    occurred_at, id, 2, NULL
              FROM recurring_lifecycle_events WHERE recurring_item_id = ?1",
         )?;
         let rows = statement.query_map([item_id], |row| Ok((RecurringExecutionEventDto {
             id: row.get(0)?, kind: row.get(1)?, occurrence_id: row.get(2)?,
             occurrence_date: row.get(3)?, title: row.get(4)?, display_time: row.get(5)?,
             display_duration_minutes: row.get(6)?, outcome: row.get(7)?, notes: row.get(8)?,
-            occurred_at: row.get(9)?,
+            occurred_at: row.get(9)?, cancelled_outcome: row.get(12)?,
         }, row.get::<_, i64>(10)?, row.get::<_, i64>(11)?)))?;
         let mut events = rows.collect::<Result<Vec<_>, _>>()?;
         // Keep schedule days grouped, then compare actual instants (including nanoseconds
@@ -129,19 +135,20 @@ impl Database {
         Ok(events.into_iter().map(|(event, _, _)| event).collect())
     }
 
-    pub fn clear_recurring_occurrence_review(&mut self, occurrence_id: &str) -> AppResult<RecurringOccurrenceDto> {
+    pub fn clear_recurring_occurrence_review(&mut self, occurrence_id: &str, notes: Option<String>) -> AppResult<RecurringOccurrenceDto> {
+        let notes = normalize_review_text(notes, 2000, "复盘备注")?;
         let transaction = self.connection.transaction()?;
         let before = load_occurrence(&transaction, occurrence_id)?;
         validate_review_target(&transaction, &before.occurrence_date, "recurring", occurrence_id)?;
         if before.occurrence_date != shanghai_today() {
             return Err(AppError::Domain("只能取消今天的重复事项结果；过去记录只读".into()));
         }
-        if before.outcome.is_some() {
+        if before.outcome.is_some() || before.review_notes != notes {
             let timestamp = now();
             transaction.execute(
-                "UPDATE recurring_occurrences SET outcome = NULL, review_notes = NULL,
-                    reviewed_at = NULL, updated_at = ?2 WHERE id = ?1",
-                params![occurrence_id, timestamp],
+                "UPDATE recurring_occurrences SET outcome = NULL, review_notes = ?3,
+                    reviewed_at = ?4, updated_at = ?2, is_exception = 1 WHERE id = ?1",
+                params![occurrence_id, timestamp, notes, notes.as_ref().map(|_| &timestamp)],
             )?;
             record(&transaction, occurrence_id, &timestamp)?;
         }

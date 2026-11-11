@@ -25,13 +25,17 @@ function collect(node) {
 }
 collect(source);
 const compile = code => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
+const priorityText = readFileSync(new URL("./task-priority-selector.tsx", import.meta.url), "utf8");
+const prioritySource = ts.createSourceFile("task-priority-selector.tsx", priorityText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const priorityDeclaration = prioritySource.statements.find(node => ts.isVariableStatement(node) && node.declarationList.declarations.some(declaration => declaration.name.getText(prioritySource) === "priorityCopy"));
+const priorityCopy = vm.runInNewContext(compile(`${priorityDeclaration.getText(prioritySource).replace("export ", "")}\npriorityCopy;`));
 function harness(tasks = []) {
   const state = {
     React, CopySeparator, taskListStatus, taskResultEditable, historicalTaskCompletionLocked, HISTORY_COMPLETION_LOCKED_MESSAGE, tasks, taskDrafts: [], recurringItems: [],
     useMemo: fn => fn(), useState: React.useState, useRef: React.useRef, Icon: () => null, TaskTagList: () => null, TaskCapsuleFact: () => null,
     TimelineHoverCopyButton: ({ field }) => React.createElement("button", { "aria-label": field === "url" ? "复制任务链接" : "复制任务备注" }),
     splitTaskNotes, taskResourceUrl, formatWorkloadMinutes, recycleCleanupMessage,
-    priorityCopy: { high: "高优先级", medium: "中优先级", low: "低优先级" }, taskTimingFact: () => null, today: "2026-10-20",
+    priorityCopy, taskTimingFact: () => null, today: "2026-10-20",
     ConfirmationDialog: ({ children, initialFocus, ...props }) => React.createElement("section", props, children)
   };
   const context = vm.createContext(state);
@@ -46,7 +50,7 @@ test("capsule puts tags after priority in its heading and only shows AI attribut
   state.TaskTagList = ({ tags }) => React.createElement("span", { className: "task-list-tags" }, tags.join("、"));
   for (const sourceType of ["manual", "ai_assistant"]) {
     const markup = renderToStaticMarkup(state.TaskCapsuleContent({ title: "一个很长的任务标题", priority: "medium", tags: ["开发", "产品"], sourceType, status: "已安排" }));
-    assert.match(markup, /task-capsule-heading[\s\S]*中优先级<\/span><span class="task-list-tags">开发、产品<\/span>/);
+    assert.match(markup, /task-capsule-heading[\s\S]*P2 中优先级<\/span><span class="task-list-tags">开发、产品<\/span>/);
     assert.doesNotMatch(markup, /手动创建|source-manual/);
     assert.equal(markup.includes('aria-label="AI 创建"'), sourceType === "ai_assistant");
     assert.match(markup, /title="一个很长的任务标题"/);
@@ -160,7 +164,7 @@ test("restored history ends in its restored state, retaining deletion and previo
 test("completion dialog supplies an optional separate note with length and busy guards", () => {
   const { state } = harness();
   const html = renderToStaticMarkup(state.TaskCompletionDialog({ task: original, note: "本次完成备注", busy: false, error: null, onNoteChange() {}, onCancel() {}, onConfirm() {} }));
-  assert.match(html, /选填/); assert.match(html, /maxLength="500"/i); assert.match(html, /本次完成备注/); assert.match(html, /确认完成/);
+  assert.match(html, /选填/); assert.match(html, /maxLength="500"/i); assert.match(html, /本次完成备注/); assert.match(html, /type="submit" class="primary-action">完成任务<\/button>/);
   assert.match(html, /完成任务/);
   assert.match(html, /<h2 id="task-completion-title" title="原任务">原任务<\/h2>/);
   assert.match(html, /aria-labelledby="task-completion-heading task-completion-title"/);
@@ -169,6 +173,10 @@ test("completion dialog supplies an optional separate note with length and busy 
   const busy = renderToStaticMarkup(state.TaskCompletionDialog({ task: original, note: "", busy: true, error: "失败", onNoteChange() {}, onCancel() {}, onConfirm() {} }));
   assert.equal((busy.match(/disabled=""/g) ?? []).length, 3);
   assert.match(busy, /role="alert">失败/);
+  const cross = renderToStaticMarkup(state.TaskCompletionDialog({ task: { ...original, earliest_start_date: "2026-10-20", due_date: "2026-10-21" }, note: "", busy: false, error: null, onNoteChange() {}, onCancel() {}, onConfirm() {} }));
+  assert.match(cross, /id="task-completion-heading">完成整个任务<\/p>/);
+  assert.match(cross, /type="submit" class="primary-action">完成整个任务<\/button>/);
+  assert.ok(html.indexOf('id="task-completion-title"') < html.indexOf('id="task-completion-heading"'));
 });
 
 test("history title counts records and each date counts only its own operations", () => {
@@ -561,4 +569,16 @@ test("completion primary text overrides the shared neutral confirmation-button c
   const colors = readFileSync(new URL("./color-system.css", import.meta.url), "utf8");
   assert.match(colors, /html:root \.task-completion-backdrop \.feedback-confirm \.task-completion-actions button\.primary-action \{ color: #fff; \}/);
   assert.ok(colors.indexOf("button.primary-action { color: #fff;") > colors.indexOf("button:not(.dialog-save):not(.dialog-discard) { color:"));
+});
+
+test("task cards and details retain each legacy priority and show P0 through P3", () => {
+  const { state } = harness();
+  for (const [priority, label] of Object.entries(priorityCopy)) {
+    const markup = renderToStaticMarkup(state.TaskCapsuleContent({ title: "任务", priority, tags: [], status: "待处理" }));
+    assert.ok(markup.includes(label));
+    assert.ok(markup.includes(`priority-${priority}`));
+    const details = renderToStaticMarkup(state.TaskDetailContent({ task: { ...original, priority }, metadata: null, busy: false, children: null, onNewTask() {} }));
+    assert.ok(details.includes(label));
+    assert.ok(details.includes(`priority-${priority}`));
+  }
 });

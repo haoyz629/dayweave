@@ -68,11 +68,11 @@ export function createDialogHarness({ status = "executing", expired = false, del
 
 const button = (current, className) => current.elements().find(node => node.type === "button" && node.props.className?.split(" ").includes(className));
 
-test("saved states show exactly the requested left-footer action", () => {
-  for (const [status, label, reopen, create] of [["completed", "当天已完成", true, false], ["not_completed", "未完成", false, true], ["executing", "执行中", false, false]]) {
+test("saved states keep only removal or new-task actions on the left footer", () => {
+  for (const [status, label, create] of [["completed", "当天已完成", false], ["not_completed", "未完成", true], ["executing", "执行中", false]]) {
     const current = createDialogHarness({ status });
     assert.match(current.markup(), new RegExp(`execution-status-badge status-${status}[^>]*>${label}`));
-    assert.equal(Boolean(button(current, "execution-reopen-task")), reopen);
+    assert.equal(button(current, "execution-reopen-task"), undefined);
     assert.equal(Boolean(button(current, "execution-new-task")), create);
     assert.equal(Boolean(button(current, "execution-remove-today")), status === "executing");
     assert.equal(current.elements().filter(node => node.type === "footer").length, 1);
@@ -96,10 +96,9 @@ test("unsaved outcome choices keep the saved-state action and expose an optional
   }
 });
 
-test("footer buttons retain reopen and independent new-task behavior", () => {
+test("the footer keeps independent new-task behavior without a duplicate completion-cancel button", () => {
   const completed = createDialogHarness({ status: "completed" });
-  button(completed, "execution-reopen-task").props.onClick();
-  assert.deepEqual(completed.calls, [["reopen", "block"]]);
+  assert.equal(button(completed, "execution-reopen-task"), undefined);
   const unfinished = createDialogHarness({ status: "not_completed" });
   button(unfinished, "execution-new-task").props.onClick();
   const seed = unfinished.calls[0][1];
@@ -266,11 +265,12 @@ test("refreshing a reopened task clears only the whole-task check while this day
   assert.equal(current.state.executionDraft.wholeTask, undefined);
 });
 
-test("choosing the checked daily result never promotes saved completion to a whole-task action", () => {
+test("unchecking the daily result clears its draft and never promotes whole completion", () => {
   const current = createDialogHarness({ crossDay: true, status: "completed" });
   current.elements().find(node => node.props["data-outcome"] === "completed").props.onClick();
   assert.equal(current.state.executionDraft.wholeTask, false);
-  assert.equal(current.elements().find(node => node.props["data-action"] === "complete-task").props["aria-pressed"], true);
+  assert.equal(current.state.executionDraft.outcome, null);
+  assert.equal(current.elements().find(node => node.props["data-action"] === "complete-task").props["aria-pressed"], false);
   button(current, "primary-action").props.onClick();
   assert.equal(current.calls[0][1].wholeTask, false);
 });
@@ -383,4 +383,40 @@ test("readonly compact record close and navigation respect in-flight operations"
     assert.equal(button(current, "quiet-button").props.disabled, true);
     assert.equal(button(current, "execution-open-task").props.disabled, true);
   }
+});
+
+test("ordinary completed choices toggle off as a draft without a duplicate footer cancellation", () => {
+  for (const crossDay of [false, true]) {
+    const current = createDialogHarness({ status: "completed", crossDay });
+    const completed = () => current.elements().find(node => node.props["data-outcome"] === "completed");
+    assert.equal(completed().props["aria-pressed"], true);
+    completed().props.onClick();
+    assert.equal(current.state.executionDraft.result, null);
+    assert.equal(current.state.executionDraft.outcome, null);
+    assert.equal(current.state.executionDraft.wholeTask, false);
+    assert.equal(completed().props["aria-pressed"], false);
+    assert.equal(button(current, "primary-action").props.disabled, false, "empty-note cancellation is saveable");
+    assert.equal(button(current, "execution-reopen-task"), undefined);
+    assert.equal(current.state.selectedBlock.execution_status, "completed");
+    assert.deepEqual(current.calls, [], "unchecking does not persist before Save");
+    if (crossDay) assert.equal(current.elements().find(node => node.props["data-action"] === "complete-task").props["aria-pressed"], false);
+    completed().props.onClick();
+    assert.equal(completed().props["aria-pressed"], true);
+    assert.equal(button(current, "primary-action").props.disabled, true, "restoring the saved result is a no-op");
+    completed().props.onClick();
+    button(current, "quiet-button").props.onClick();
+    assert.deepEqual(current.calls, [["close"]]);
+    assert.equal(current.state.selectedBlock.execution_status, "completed");
+  }
+});
+
+test("a new completion choice can be unchecked back to the original empty draft", () => {
+  const current = createDialogHarness();
+  const completed = () => current.elements().find(node => node.props["data-outcome"] === "completed");
+  completed().props.onClick();
+  assert.equal(button(current, "primary-action").props.disabled, false);
+  completed().props.onClick();
+  assert.equal(current.state.executionDraft.outcome, null);
+  assert.equal(button(current, "primary-action").props.disabled, true);
+  assert.deepEqual(current.calls, []);
 });

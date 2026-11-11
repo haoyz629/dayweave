@@ -4976,6 +4976,7 @@ html[data-mode="dark"] .ledger-quick-action.danger { color: #e2a6a6; }
   --task-card-deadline: #6373a5;
   --task-card-icon: #7d78ea;
   padding: 0 0 24px;
+  scrollbar-gutter: stable;
   background: var(--task-workspace-bg, #f4f5f7);
 }
 .next-workspace .task-queue-header { margin: 0; padding-inline: 18px; }
@@ -6956,7 +6957,7 @@ html[data-mode="dark"] .next-workspace .task-compact-body .recurring-basic-info-
 .task-compact-title-row > .task-context-return-icon, .task-context-return > .task-context-return-icon { display: inline-grid; width: 32px; height: 32px; min-height: 32px; flex: 0 0 auto; place-items: center; padding: 0; border: 1px solid var(--jx-edge-soft); border-radius: 8px; color: var(--jx-muted); background: var(--jx-raised); }
 .task-context-return-icon:hover { color: var(--jx-ink); border-color: var(--jx-edge); background: var(--jx-paper); }
 .task-context-return-icon:focus-visible { outline: 2px solid var(--jx-focus); outline-offset: 2px; }
-.timeline-event[data-return-located="true"] { outline: 2px solid var(--state-plan); outline-offset: 2px; }
+.timeline-event[data-return-located="true"] { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-plan-border) 50%, transparent); }
 .timeline-floating-layer.is-time-editor .timeline-floating-panel.plan-draft-editor,
 .timeline-floating-layer.is-block-editor .timeline-floating-panel.task-block-editor { width: min(360px,100%); outline: none; }
 .timeline-floating-panel:is(.plan-draft-editor,.task-block-editor) > header { min-height: 48px; align-items: center; gap: 8px; padding: 12px 12px 8px 16px; }

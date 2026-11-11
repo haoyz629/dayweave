@@ -15,14 +15,13 @@ const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true
 const handlers = new Map();
 const renderExpressions = new Map();
 const names = ["executionDraftChanged", "quickCompleteTimelineBlock", "saveSelectedBlockExecution", "CompletedTaskDetails", "reopen", "requestTaskChange", "applyTaskChange", "openIndependentDraft"];
-let checkbox, dialogReopen;
+let checkbox;
 function collect(node) {
   if (ts.isFunctionDeclaration(node) && names.includes(node.name?.text)) handlers.set(node.name.text, node.getText(source));
   if (ts.isVariableDeclaration(node) && ["blockHasFact", "taskCompleted", "quickCompleteText", "quickCompleteLabel"].includes(node.name.getText(source))) renderExpressions.set(node.name.getText(source), node.initializer.getText(source));
   if (ts.isJsxElement(node) && node.openingElement.tagName.getText(source) === "button") {
     const className = node.openingElement.attributes.properties.find((attr) => attr.name?.getText(source) === "className");
     if (className?.initializer?.getText(source).includes("timeline-event-check")) checkbox = node.getText(source);
-    if (className?.initializer?.getText(source) === '"execution-reopen-task secondary-action"') dialogReopen = node.getText(source);
   }
   ts.forEachChild(node, collect);
 }
@@ -81,19 +80,18 @@ function harness({ task = baseTask, block = baseBlock, selectedDate = previous, 
   for (const [name, expression] of renderExpressions) vm.runInContext(compile(`${name} = ${expression};`), context);
   for (const name of names) vm.runInContext(compile(handlers.get(name)), context);
   const button = markup => vm.runInContext(compile(`const button = (${markup}); button;`), vm.createContext({ ...state }));
-  return { state, calls, clock, checkbox: () => button(checkbox), dialog: () => button(dialogReopen) };
+  return { state, calls, clock, checkbox: () => button(checkbox) };
 }
 
-test("historical completion cannot be cancelled from checkbox, dialog or task list, even inside former grace", async () => {
+test("historical completion cannot be cancelled from checkbox or task list, even inside former grace", async () => {
+  assert.doesNotMatch(text, /className="execution-reopen-task secondary-action"/);
   for (const now of [`${today}T05:00:00+08:00`, `${today}T12:00:00+08:00`, "2027-01-01T12:00:00+08:00"]) {
     const current = harness({ now });
-    for (const target of ["checkbox", "dialog"]) {
-      const button = current[target]();
-      assert.equal(Boolean(button.props.disabled), true);
-      assert.equal(button.props.title, rules.HISTORY_COMPLETION_LOCKED_MESSAGE);
-      button.props.onClick({ stopPropagation() {} });
-      await settle();
-    }
+    const button = current.checkbox();
+    assert.equal(Boolean(button.props.disabled), true);
+    assert.equal(button.props.title, rules.HISTORY_COMPLETION_LOCKED_MESSAGE);
+    button.props.onClick({ stopPropagation() {} });
+    await settle();
     await current.state.reopen();
     assert.deepEqual(current.calls, []);
     assert.equal(current.state.feedback, rules.HISTORY_COMPLETION_LOCKED_MESSAGE);
@@ -155,6 +153,34 @@ test("today completion and cancellation use the daily API and never reopen the w
     assert.equal(current.calls[0][0],outcome === "planned" ? "history" : "clear");
     if (outcome === "planned") assert.equal(current.calls[0][2].outcome,"completed");
     assert.equal(current.calls.some(([type])=>["reopen","result"].includes(type)),false);
+  }
+});
+
+test("single-day checkbox cancellation refreshes the reopened reservation without hiding it", async () => {
+  for (const reviewed of [false, true]) {
+    const task = { ...baseTask, earliest_start_date: today, due_date: today, result_date: today };
+    const block = { ...baseBlock, result_date: today, review: reviewed ? { outcome: "completed", notes: "保留备注" } : null };
+    const current = harness({ task, block, selectedDate: today });
+    let refreshedTask, refreshedBlock;
+    // Model the persisted scheduled/planned pair covered by the database regression.
+    current.state.onFactsChanged = async () => {
+      current.calls.push(["refresh"]);
+      refreshedTask = { ...task, status: "scheduled", remaining_workload_minutes: 30 };
+      refreshedBlock = { ...block, task_status: "scheduled", execution_status: "planned", review: null };
+    };
+    const button = current.checkbox();
+    assert.equal(Boolean(button.props.disabled), false);
+    assert.equal(button.props["aria-pressed"], true);
+    button.props.onClick({ stopPropagation() {} });
+    await settle();
+    assert.deepEqual(current.calls.slice(0, 2), [["clear", today, "block"], ["refresh"]]);
+    assert.deepEqual(rules.visibleTaskScheduleBlocks([refreshedBlock], today, today), [refreshedBlock]);
+    assert.equal(rules.taskListStatus(refreshedTask), "scheduled");
+    const reopened = harness({ task: refreshedTask, block: refreshedBlock, selectedDate: today });
+    assert.equal(reopened.checkbox().props["aria-pressed"], false);
+    await reopened.state.quickCompleteTimelineBlock(refreshedBlock);
+    assert.equal(reopened.calls[0][0], "history");
+    assert.equal(reopened.calls[0][2].outcome, "completed");
   }
 });
 
@@ -551,4 +577,47 @@ test("unchanged ordinary results never write or refresh even if the handler is c
     assert.deepEqual(current.calls, [], `${saved}/${reviewed}`);
     assert.equal(current.state.savingExecution, false);
   }
+});
+
+test("saving an unchecked completed dialog cancels atomically with its current note", async () => {
+  for (const crossDay of [false, true]) for (const reviewed of [false, true]) for (const note of ["", "  保留或修改随手记  "]) {
+    const end = `${today}T10:00:00+08:00`;
+    const task = { ...baseTask, earliest_start_date: crossDay ? previous : today, due_date: today, result_date: today, result_ends_at: end };
+    const block = { ...baseBlock, result_date: today, result_ends_at: end, ends_at: end, review: reviewed ? { outcome: "completed", notes: "原备注" } : null };
+    const current = harness({ task, block, selectedDate: today, now: `${today}T12:00:00+08:00` });
+    current.state.clearExecutionCapture = async (...args) => current.calls.push(["clear", ...args]);
+    current.state.executionDraft = { result: null, outcome: null, wholeTask: false, note };
+    await current.state.saveSelectedBlockExecution();
+    assert.deepEqual(current.calls[0], ["clear", today, "block", note.trim()]);
+    assert.equal(current.calls.filter(([type]) => ["clear", "result", "history", "reopen", "complete-task"].includes(type)).length, 1);
+    assert.ok(current.calls.some(([type]) => type === "refresh"));
+    assert.equal(current.state.selection, null);
+    assert.equal(current.state.savingExecution, false);
+    assert.ok(current.calls.some(([type, title]) => type === "toast" && title.includes("已取消当天")));
+  }
+});
+
+test("unchecked completion save respects history and busy guards and keeps failed drafts", async () => {
+  for (const flags of [{ busy: true }, { savingExecution: true }, { loading: true }, { preview: {} }, { quickCompletingBlockId: "block" }]) {
+    const current = harness({ block: { ...baseBlock, result_date: today }, selectedDate: today });
+    current.state.executionDraft = { result: null, outcome: null, wholeTask: false, note: "" };
+    Object.assign(current.state, flags);
+    await current.state.saveSelectedBlockExecution();
+    assert.deepEqual(current.calls, []);
+  }
+  const historical = harness();
+  historical.state.executionDraft = { result: null, outcome: null, wholeTask: false, note: "" };
+  await historical.state.saveSelectedBlockExecution();
+  assert.deepEqual(historical.calls, []);
+  assert.equal(historical.state.executionMessage, rules.HISTORY_COMPLETION_LOCKED_MESSAGE);
+  const current = harness({ block: { ...baseBlock, result_date: today }, selectedDate: today });
+  current.state.selection = { kind: "block", id: "block" };
+  current.state.executionDraft = { result: null, outcome: null, wholeTask: false, note: "待保存备注" };
+  current.state.clearExecutionCapture = async () => { throw new Error("取消失败"); };
+  await current.state.saveSelectedBlockExecution();
+  assert.equal(current.state.selection.id, "block");
+  assert.equal(current.state.executionDraft.outcome, null);
+  assert.equal(current.state.executionDraft.note, "待保存备注");
+  assert.match(current.state.executionMessage, /取消失败/);
+  assert.deepEqual(current.calls, []);
 });

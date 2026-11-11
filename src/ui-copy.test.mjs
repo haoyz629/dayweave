@@ -317,7 +317,7 @@ test("result notes stay visible and editable without reasons or followup schedul
   assert.match(appSource, /<label className="floating-execution-note"/);
   assert.doesNotMatch(appSource, /draft\.result !== null && <label className="floating-execution-note"/);
   assert.doesNotMatch(appSource, /execution-add-note|incompleteReasonOptions|未完成原因|TaskNextActionFields/);
-  assert.match(appSource, /disabled=\{savingExecution \|\| busy \|\| loading \|\| Boolean\(quickCompletingBlockId\) \|\| !executionDraftChanged\(selectedBlock, executionDraft, selectedTask\) \|\| \(!executionDraft\.outcome && !executionDraft\.note\.trim\(\)\)\}/);
+  assert.match(appSource, /disabled=\{savingExecution \|\| busy \|\| loading \|\| Boolean\(quickCompletingBlockId\) \|\| !executionDraftChanged\(selectedBlock, executionDraft, selectedTask\) \|\| \(!executionDraft\.outcome && !executionDraft\.note\.trim\(\) && selectedBlockDialog\?\.status !== "completed"\)\}/);
 });
 
 
@@ -375,7 +375,7 @@ test("task selection stays inline and the inspector adapts to its available widt
   assert.match(appSource, /className="task-form-region task-notes-region" aria-label="备注"/);
   assert.doesNotMatch(appSource, /备注说明/);
   assert.match(appSource, /<strong id=\{attributesTitleId\}>安排与时限<\/strong>/);
-  assert.match(appSource, /placeholder="备注"/);
+  assert.match(appSource, /placeholder="添加说明或补充信息（选填）"/);
   assert.doesNotMatch(appSource, /taskEditorOpen|fullScreenTaskEditor|open-editor|全屏编辑/);
   assert.doesNotMatch(stylesSource, /task-editor-workspace|is-task-editor-open|task-fullscreen/);
   assert.match(stylesSource, /\.task-compact-form \{[\s\S]*?width: 100%;[\s\S]*?height: 100%;[\s\S]*?border: 0;[\s\S]*?box-shadow: none;/);
@@ -395,7 +395,7 @@ test("task editor uses shared semantic colors and keeps recycle actions in place
   assert.match(appSource, /sameDay \? <output className="apple-schedule-workload"/);
   assert.match(appSource, /<TaskPrioritySelector id=\{priorityId\} value=\{form.priority\} disabled=\{disabled\}/);
   const prioritySource = readFileSync(new URL("./task-priority-selector.tsx", import.meta.url), "utf8");
-  for (const label of ["低优先级", "中优先级", "高优先级"]) assert.ok(prioritySource.includes(label));
+  for (const label of ["P0 紧急", "P1 高优先级", "P2 中优先级", "P3 低优先级"]) assert.ok(prioritySource.includes(label));
   assert.match(appSource, /status=\{statusCopy\[taskListStatus\(task\)\]\} statusTone=\{taskListStatus\(task\)\}/);
   assert.match(appSource, /status="待确认" statusTone="draft"/);
   assert.match(stylesSource, /--task-state-draft:/);
@@ -660,7 +660,8 @@ test("whole-task controls keep their result window while historical blocks have 
   assert.match(details, /disabled=\{busy \|\| !editable\}/);
   assert.match(details, /task.status === "done" \? task.earliest_start_date && task.due_date && task.earliest_start_date < task.due_date \? "取消整体完成" : "取消完成" : task.earliest_start_date && task.due_date && task.earliest_start_date < task.due_date \? "完成整个任务" : "完成任务"/);
   assert.match(appSource, /disabled=\{!completionAction \|\| Boolean\(quickCompletingBlockId\)/);
-  assert.match(appSource, /selectedBlockCompletionAction !== selectedBlockDialog.action/);
+  assert.match(appSource, /const canRecordSelectedBlock = Boolean\(selectedBlock && canCaptureTaskResult\(selectedDate, today, selectedBlock, clock\.getTime\(\)\)\)/);
+  assert.doesNotMatch(appSource, /selectedBlockCompletionAction !== selectedBlockDialog.action/);
   assert.match(appSource, /action === "complete-block" \|\| action === "uncomplete-block"/);
   assert.match(appSource, /resultDate === resultToday\(Date.now\(\)\)/);
   assert.match(appSource, /timelineTaskDialogState\(selectedBlock\)/);

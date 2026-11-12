@@ -395,7 +395,8 @@ test("task editor uses shared semantic colors and keeps recycle actions in place
   assert.match(appSource, /sameDay \? <output className="apple-schedule-workload"/);
   assert.match(appSource, /<TaskPrioritySelector id=\{priorityId\} value=\{form.priority\} disabled=\{disabled\}/);
   const prioritySource = readFileSync(new URL("./task-priority-selector.tsx", import.meta.url), "utf8");
-  for (const label of ["P0 紧急", "P1 高优先级", "P2 中优先级", "P3 低优先级"]) assert.ok(prioritySource.includes(label));
+  for (const label of ["P0", "P1", "P2", "P3"]) assert.ok(prioritySource.includes(`"${label}"`));
+  assert.doesNotMatch(prioritySource, /紧急|高优先级|中优先级|低优先级/);
   assert.match(appSource, /status=\{statusCopy\[taskListStatus\(task\)\]\} statusTone=\{taskListStatus\(task\)\}/);
   assert.match(appSource, /status="待确认" statusTone="draft"/);
   assert.match(stylesSource, /--task-state-draft:/);

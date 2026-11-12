@@ -1,11 +1,11 @@
 //! Independently updated, complete annual official calendars. No task data is written here.
-use std::{collections::HashSet, io::Read, time::{Duration, Instant}};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, io::Read, time::{Duration, Instant}};
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use crate::error::{AppError, AppResult};
 
-pub const BASE: &str = "https://raw.githubusercontent.com/haoyz629/dayweave/main/data/holidays/";
+pub const BASE: &str = "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/";
 const BODY_LIMIT: usize = 256 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(15);
 pub const MIGRATION: &str = "
@@ -48,40 +48,40 @@ pub struct Snapshot {
     pub checking: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ManifestEntry {
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CdnAnnual {
+    #[serde(rename = "$schema", default)]
+    _schema: Option<String>,
+    #[serde(rename = "$id", default)]
+    _id: Option<String>,
     year: i32,
-    revision: u32,
-    path: String,
-    source_url: String,
-    verified_at: String,
+    papers: Vec<String>,
+    days: Vec<CdnDay>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Manifest {
-    schema_version: u32,
-    years: Vec<ManifestEntry>,
+struct CdnDay {
+    name: String,
+    date: String,
+    is_off_day: bool,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct CalendarState {
     pub snapshot: Snapshot,
-    manifest: Option<Manifest>,
     #[serde(default)]
-    attempted_years: HashSet<i32>,
+    source: String,
 }
 
 pub struct UpdateJob {
     snapshot: Snapshot,
-    manifest: Option<Manifest>,
     requested: Vec<i32>,
-    verify_existing: bool,
+    checked_on: String,
 }
 
 pub struct Downloaded {
-    manifest: Manifest,
     years: Vec<Annual>,
 }
 
@@ -161,19 +161,83 @@ impl Snapshot {
     }
 }
 
-fn validate_manifest(body: &[u8]) -> AppResult<Manifest> {
-    if body.len() > BODY_LIMIT { return Err(invalid("节假日索引超过大小限制")); }
-    let manifest: Manifest = serde_json::from_slice(body)?;
-    if manifest.schema_version != 1 || manifest.years.len() > 301 { return Err(invalid("节假日索引版本或数量无效")); }
-    let mut years = HashSet::new();
-    for entry in &manifest.years {
-        if !(1900..=2200).contains(&entry.year) || entry.revision == 0 || entry.path != format!("{}.json", entry.year)
-            || !source(&entry.source_url) || !years.insert(entry.year) {
-            return Err(invalid("节假日索引年度、路径或来源无效"));
+impl CdnAnnual {
+    fn parse(body: &[u8], year: i32) -> AppResult<Self> {
+        if body.len() > BODY_LIMIT { return Err(invalid("节假日响应超过大小限制")); }
+        let data: Self = serde_json::from_slice(body)?;
+        if data.year != year || !(1900..=2200).contains(&year) || data.papers.is_empty()
+            || data.papers.len() > 16 || data.papers.iter().any(|paper| !source(paper))
+            || data.days.is_empty() || data.days.len() > 732 {
+            return Err(invalid("CDN 节假日年份、公告来源或日期列表无效"));
         }
-        date(&entry.verified_at)?;
+        let mut seen = HashSet::new();
+        for day in &data.days {
+            // A notice for next year can also arrange the preceding December.
+            let date = date(&day.date)?;
+            if !text(&day.name, 80) || !(date.year() == year || (date.year() == year - 1 && date.month() == 12))
+                || !seen.insert(&day.date) {
+                return Err(invalid("CDN 节假日日期重复、冲突或超出公告年度范围"));
+            }
+        }
+        if !data.days.iter().any(|day| day.is_off_day && day.date.starts_with(&format!("{year}-"))) {
+            return Err(invalid("CDN 年度数据缺少本年放假安排"));
+        }
+        Ok(data)
     }
-    Ok(manifest)
+
+    fn annual(&self, adjacent: Option<&Self>, old: Option<&Annual>, checked_on: &str) -> AppResult<Annual> {
+        let year = self.year;
+        let prefix = format!("{year}-");
+        let mut days = BTreeMap::new();
+        for packet in std::iter::once(self).chain(adjacent) {
+            for day in &packet.days {
+                if day.date.starts_with(&prefix) { days.insert(day.date.clone(), day.clone()); }
+            }
+        }
+        // If the next notice is temporarily absent, retain known December exceptions.
+        if adjacent.is_none() {
+            if let Some(old) = old {
+                let december = format!("{year}-12-");
+                for holiday in &old.holidays {
+                    for date in &holiday.dates {
+                        if date.starts_with(&december) {
+                            days.entry(date.clone()).or_insert(CdnDay { name: holiday.name.clone(), date: date.clone(), is_off_day: true });
+                        }
+                    }
+                }
+                for (date, name) in &old.makeup_workdays {
+                    if date.starts_with(&december) {
+                        days.entry(date.clone()).or_insert(CdnDay { name: name.clone(), date: date.clone(), is_off_day: false });
+                    }
+                }
+            }
+        }
+        let mut groups = BTreeMap::<String, Vec<String>>::new();
+        let mut makeup_workdays = Vec::new();
+        for day in days.into_values() {
+            if day.is_off_day { groups.entry(day.name).or_default().push(day.date); }
+            else { makeup_workdays.push((day.date, day.name)); }
+        }
+        let holidays = groups.into_iter().map(|(name, dates)| {
+            let named_date = old.and_then(|old| old.holidays.iter().find(|holiday| holiday.name == name))
+                .and_then(|holiday| holiday.named_date.clone()).filter(|date| dates.contains(date));
+            Holiday { name, dates, named_date }
+        }).collect();
+        let mut annual = Annual {
+            schema_version: 1, year, revision: old.map_or(1, |annual| annual.revision),
+            from: format!("{year}-01-01"), to: format!("{year}-12-31"),
+            version: format!("NateScarlet/holiday-cn {year}（jsDelivr）"),
+            source_url: self.papers[0].clone(), verified_at: checked_on.into(), holidays, makeup_workdays,
+        };
+        annual.validate()?;
+        if let Some(old) = old {
+            if annual.holidays == old.holidays && annual.makeup_workdays == old.makeup_workdays && annual.source_url == old.source_url {
+                return Ok(old.clone());
+            }
+            annual.revision = old.revision.checked_add(1).ok_or_else(|| invalid("节假日本地修订号已达上限"))?;
+        }
+        Ok(annual)
+    }
 }
 
 fn merge(snapshot: &Snapshot, years: Vec<Annual>) -> AppResult<Snapshot> {
@@ -206,7 +270,7 @@ fn persist_metadata(connection: &Connection, state: &CalendarState) -> AppResult
 impl CalendarState {
     pub fn bundled() -> Self {
         let annual = Annual::parse(include_bytes!("../../data/holidays/2026.json")).expect("valid bundled annual calendar");
-        Self { snapshot: Snapshot { years: vec![annual], ..Snapshot::default() }, ..Self::default() }
+        Self { snapshot: Snapshot { years: vec![annual], ..Snapshot::default() }, source: BASE.into() }
     }
 
     pub fn load(connection: &Connection) -> AppResult<Self> {
@@ -216,11 +280,14 @@ impl CalendarState {
             if let Ok(mut cached) = serde_json::from_str::<Self>(&json) {
                 cached.snapshot.years = state.snapshot.years;
                 cached.snapshot.checking = false;
-                // Revalidate persisted manifests; corrupt metadata must never authorize a path.
-                if cached.manifest.as_ref().is_some_and(|manifest| validate_manifest(&serde_json::to_vec(manifest).unwrap_or_default()).is_err()) {
-                    cached.manifest = None;
-                    cached.snapshot.available_years.clear();
+                // Old self-hosted manifest metadata is ignored; only validated annual caches remain.
+                cached.snapshot.available_years.clear();
+                if cached.source != BASE {
+                    cached.snapshot.last_attempt_at = None;
+                    cached.snapshot.last_success_at = None;
+                    cached.snapshot.last_error = None;
                 }
+                cached.source = BASE.into();
                 state = cached;
             } else { state.snapshot.last_error = Some("本地节假日更新状态无效，已保留内置数据".into()); }
         }
@@ -236,6 +303,7 @@ impl CalendarState {
                 Err(error) => state.snapshot.last_error = Some(format!("本地节假日缓存无效，已保留其他有效数据：{error}")),
             }
         }
+        state.snapshot.available_years = state.snapshot.years.iter().map(|annual| annual.year).collect();
         Ok(state)
     }
 
@@ -244,30 +312,29 @@ impl CalendarState {
         if self.snapshot.checking { return Ok(None); }
         let recent = self.snapshot.last_attempt_at.as_deref().and_then(|value| DateTime::parse_from_rfc3339(value).ok())
             .is_some_and(|last| now.signed_duration_since(last).num_seconds() < 86400);
-        let new_requested = self.manifest.as_ref().is_some_and(|manifest| requested.iter().any(|year| {
-            !self.attempted_years.contains(year) && manifest.years.iter().any(|entry| entry.year == *year)
-                && !self.snapshot.years.iter().any(|annual| annual.year == *year)
-        }));
-        if !force && recent && !new_requested { return Ok(None); }
-        let cached_manifest = if !force && recent { self.manifest.clone() } else { None };
+        if !force && recent { return Ok(None); }
+        let mut targets = requested.into_iter().collect::<BTreeSet<_>>();
+        targets.extend(self.snapshot.years.iter().map(|annual| annual.year));
+        targets.extend([now.year(), now.year() + 1].into_iter().filter(|year| (1900..=2200).contains(year)));
+        let requested = match (targets.first(), targets.last()) {
+            (Some(&first), Some(&last)) => (first..=last).collect(),
+            _ => Vec::new(),
+        };
         let mut next = self.clone();
-        next.attempted_years.extend(requested.iter().copied());
+        next.source = BASE.into();
         next.snapshot.last_attempt_at = Some(now.to_rfc3339());
         next.snapshot.last_error = None;
         next.snapshot.checking = true;
         persist_metadata(connection, &next)?;
         *self = next;
-        Ok(Some(UpdateJob { snapshot: self.snapshot.clone(), manifest: cached_manifest, requested, verify_existing: force }))
+        Ok(Some(UpdateJob { snapshot: self.snapshot.clone(), requested, checked_on: now.date_naive().to_string() }))
     }
 
     pub fn finish(&mut self, connection: &mut Connection, result: AppResult<Downloaded>, now: DateTime<Utc>) -> Snapshot {
         let outcome = result.and_then(|downloaded| {
             let mut next = self.clone();
             next.snapshot = merge(&self.snapshot, downloaded.years.clone())?;
-            next.snapshot.available_years = downloaded.manifest.years.iter().map(|entry| entry.year).collect();
-            next.snapshot.available_years.sort_unstable();
-            next.attempted_years = next.snapshot.available_years.iter().copied().collect();
-            next.manifest = Some(downloaded.manifest);
+            next.snapshot.available_years = next.snapshot.years.iter().map(|annual| annual.year).collect();
             next.snapshot.last_success_at = Some(now.to_rfc3339());
             next.snapshot.last_error = None;
             next.snapshot.checking = false;
@@ -290,15 +357,16 @@ impl CalendarState {
     }
 }
 
-fn fetch_body(client: &reqwest::blocking::Client, url: &str, timeout: Duration) -> AppResult<Vec<u8>> {
-    let response = client.get(url).timeout(timeout).send()
-        .and_then(reqwest::blocking::Response::error_for_status).map_err(|error| invalid(error.to_string()))?;
+fn fetch_body(client: &reqwest::blocking::Client, url: &str, timeout: Duration) -> AppResult<Option<Vec<u8>>> {
+    let response = client.get(url).timeout(timeout).send().map_err(|error| invalid(error.to_string()))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND { return Ok(None); }
+    let response = response.error_for_status().map_err(|error| invalid(error.to_string()))?;
     if !response.status().is_success() { return Err(invalid("节假日下载拒绝重定向")); }
     if response.content_length().is_some_and(|size| size > BODY_LIMIT as u64) { return Err(invalid("节假日响应超过大小限制")); }
     let mut body = Vec::new();
     response.take((BODY_LIMIT + 1) as u64).read_to_end(&mut body).map_err(|error| invalid(error.to_string()))?;
     if body.len() > BODY_LIMIT { return Err(invalid("节假日响应超过大小限制")); }
-    Ok(body)
+    Ok(Some(body))
 }
 
 impl UpdateJob {
@@ -308,38 +376,35 @@ impl UpdateJob {
         self.download_with(|path, remaining| fetch_body(&client, &format!("{BASE}{path}"), remaining))
     }
 
-    pub(crate) fn download_with(self, mut fetch: impl FnMut(&str, Duration) -> AppResult<Vec<u8>>) -> AppResult<Downloaded> {
+    pub(crate) fn download_with(self, mut fetch: impl FnMut(&str, Duration) -> AppResult<Option<Vec<u8>>>) -> AppResult<Downloaded> {
         let started = Instant::now();
-        let mut get = |path: &str| -> AppResult<Vec<u8>> {
+        let mut packets = BTreeMap::new();
+        let mut requested = self.requested.iter().copied().collect::<BTreeSet<_>>();
+        if let Some(&last) = requested.last() { if last < 2200 { requested.insert(last + 1); } }
+        for year in requested {
             let remaining = TIMEOUT.checked_sub(started.elapsed()).filter(|left| !left.is_zero()).ok_or_else(|| invalid("节假日更新超时"))?;
-            let body = fetch(path, remaining)?;
+            let body = fetch(&format!("{year}.json"), remaining)?;
             if started.elapsed() > TIMEOUT { return Err(invalid("节假日更新超时")); }
-            if body.len() > BODY_LIMIT { return Err(invalid("节假日响应超过大小限制")); }
-            Ok(body)
-        };
-        let manifest = match self.manifest { Some(manifest) => manifest, None => validate_manifest(&get("index.json")?)? };
-        let mut entries = manifest.years.clone();
-        let current = Utc::now().year();
-        entries.sort_by_key(|entry| (!self.requested.contains(&entry.year), entry.year != current, entry.year != current + 1, entry.year));
+            if let Some(body) = body { packets.insert(year, CdnAnnual::parse(&body, year)?); }
+        }
         let mut years = Vec::new();
-        for entry in entries {
-            if let Some(old) = self.snapshot.years.iter().find(|annual| annual.year == entry.year) {
-                if entry.revision < old.revision { return Err(invalid("节假日索引试图降级")); }
-                if entry.revision == old.revision {
-                    if entry.source_url != old.source_url || entry.verified_at != old.verified_at { return Err(invalid("同修订号索引元信息变化")); }
-                    if !self.verify_existing { continue; }
-                }
+        for year in self.requested {
+            let old = self.snapshot.years.iter().find(|annual| annual.year == year);
+            let adjacent = packets.get(&(year + 1));
+            if let Some(packet) = packets.get(&year) {
+                years.push(packet.annual(adjacent, old, &self.checked_on)?);
+            } else if let (Some(old), Some(adjacent)) = (old, adjacent) {
+                // A missing own-year file cannot suppress explicit updates to a covered December.
+                let mut days = old.holidays.iter().flat_map(|holiday| holiday.dates.iter().map(|date| CdnDay {
+                    name: holiday.name.clone(), date: date.clone(), is_off_day: true,
+                })).collect::<Vec<_>>();
+                days.extend(old.makeup_workdays.iter().map(|(date, name)| CdnDay { name: name.clone(), date: date.clone(), is_off_day: false }));
+                let cached = CdnAnnual { _schema: None, _id: None, year, papers: vec![old.source_url.clone()], days };
+                years.push(cached.annual(Some(adjacent), Some(old), &self.checked_on)?);
             }
-            // Only validated numeric annual paths reach the downloader. Fetch all missing
-            // published years so recurrence intervals cannot silently skip intermediate gaps.
-            let annual = Annual::parse(&get(&entry.path)?)?;
-            if annual.year != entry.year || annual.revision != entry.revision || annual.source_url != entry.source_url || annual.verified_at != entry.verified_at {
-                return Err(invalid("年度包与索引不匹配"));
-            }
-            years.push(annual);
         }
         merge(&self.snapshot, years.clone())?;
-        Ok(Downloaded { manifest, years })
+        Ok(Downloaded { years })
     }
 }
 

@@ -24,6 +24,11 @@ html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list {
   --task-card-deadline: #58667a;
   --task-card-icon: #65758b;
 }
+html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list { scrollbar-gutter: auto; }
+/* Keep the draggable hit area on the detail side of the list-edge divider. */
+html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger > .ledger-resize-handle::before,
+html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger > .ledger-resize-handle::after { left: 0; transform: none; }
+html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list .ledger-row.task-capsule-row { width: calc(100% - 20px); margin-right: 8px; }
 html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list .task-capsule-content { padding: 12px; }
 html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list .task-capsule-heading { flex-wrap: wrap; gap: 8px; }
 html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list .task-capsule-heading > strong {
@@ -92,6 +97,8 @@ html:root:not([data-mode="dark"]) .tasks-workspace .task-tag-filter > label { fo
 html:root:not([data-mode="dark"]) .tasks-workspace :is(button, a, input, select):focus-visible { outline: 2px solid #3168dc; outline-offset: 2px; }
 /* The composite search owns its focus ring; do not outline the inner input again. */
 html:root:not([data-mode="dark"]) .tasks-workspace .task-queue-search > input[type="search"]:focus-visible { outline: none; }
+html:root:not([data-mode="dark"]) .tasks-workspace .task-queue-search > svg { color: #91a2bb; }
+html:root:not([data-mode="dark"]) .tasks-workspace .task-queue-search > input[type="search"]::placeholder { color: #8a99ad; font-weight: 400; opacity: 1; }
 
 /* Creation, saved drafts and both editors: same quiet type, no input clamping. */
 html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-compact-body :is(.task-title-input, .recurring-title-field .recurring-modal-input) {

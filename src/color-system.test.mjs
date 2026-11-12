@@ -24,7 +24,7 @@ test("unset priorities render no timeline badge in full or compact blocks", () =
     assert.doesNotMatch(html, /priority-|未设|无优先级/);
     assert.match(html, /单日任务/);
   }
-  for (const [priority, label, short] of [["urgent", "P0 紧急", "P0"], ["high", "P1 高优先级", "P1"], ["medium", "P2 中优先级", "P2"], ["low", "P3 低优先级", "P3"]]) {
+  for (const [priority, label, short] of [["urgent", "P0", "P0"], ["high", "P1", "P1"], ["medium", "P2", "P2"], ["low", "P3", "P3"]]) {
     const html = renderToStaticMarkup(context.TimelineTaskFacts({ type: "multi", priority }));
     assert.match(html, new RegExp(`priority-${priority}`));
     assert.ok(html.includes(`timeline-fact-full">${label}</span>`));

@@ -45,7 +45,7 @@ test("new tasks default to P1 and the shared selector offers P0 through P3 in or
   const h = harness();
   assert.equal(h.context.emptyNewTaskForm().priority, "high");
   const view = h.render();
-  assert.deepEqual(view.options.map(n => n.props.children[0].props.children[1].props.children), ["P0 紧急", "P1 高优先级", "P2 中优先级", "P3 低优先级"]);
+  assert.deepEqual(view.options.map(n => n.props.children[0].props.children[1].props.children), ["P0", "P1", "P2", "P3"]);
   assert.deepEqual(view.options.map(n => n.props["aria-selected"]), [false, true, false, false]);
   assert.equal(view.options[1].props.children[1].props.children[0].props.children, "默认");
   assert.ok(view.options.filter((_, index) => index !== 1).every(n => n.props.children[1].props.children[0] === false));
@@ -56,7 +56,7 @@ test("new tasks default to P1 and the shared selector offers P0 through P3 in or
 test("legacy null displays P1 without writing or changing the task form", () => {
   const h = harness(null);
   const view = h.render();
-  assert.equal(view.trigger.props["aria-label"], "优先级：P1 高优先级");
+  assert.equal(view.trigger.props["aria-label"], "优先级：P1");
   assert.equal(view.options[1].props["aria-selected"], true);
   h.effects.forEach(fn => fn());
   assert.equal(h.form.priority, null);

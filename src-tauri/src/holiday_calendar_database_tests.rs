@@ -11,15 +11,16 @@ fn synthetic(year: i32) -> Value {
         "makeupWorkdays":[[format!("{year}-01-02"),"TEST ONLY makeup"]]})
 }
 fn apply(db: &mut Database, packets: &[Value]) -> HolidaySnapshot {
-    let job = db.begin_holiday_update(vec![],true).unwrap().unwrap();
-    let index = json!({"schemaVersion":1,"years":packets.iter().map(|packet| json!({
-        "year":packet["year"],"revision":packet["revision"],"path":format!("{}.json",packet["year"]),
-        "sourceUrl":packet["sourceUrl"],"verifiedAt":packet["verifiedAt"]
-    })).collect::<Vec<_>>()});
+    let years=packets.iter().map(|packet|packet["year"].as_i64().unwrap() as i32).collect();
+    let job = db.begin_holiday_update(years,true).unwrap().unwrap();
     let result = job.download_with(|path,_| {
-        if path=="index.json" { return Ok(serde_json::to_vec(&index).unwrap()); }
-        let packet=packets.iter().find(|packet| path==format!("{}.json",packet["year"])).unwrap();
-        Ok(serde_json::to_vec(packet).unwrap())
+        let Some(packet)=packets.iter().find(|packet| path==format!("{}.json",packet["year"])) else { return Ok(None); };
+        let mut days=Vec::new();
+        for holiday in packet["holidays"].as_array().unwrap() {
+            for date in holiday["dates"].as_array().unwrap() { days.push(json!({"name":holiday["name"],"date":date,"isOffDay":true})); }
+        }
+        for pair in packet["makeupWorkdays"].as_array().unwrap() { days.push(json!({"name":pair[1],"date":pair[0],"isOffDay":false})); }
+        Ok(Some(serde_json::to_vec(&json!({"year":packet["year"],"papers":[packet["sourceUrl"]],"days":days})).unwrap()))
     });
     db.finish_holiday_update(result)
 }

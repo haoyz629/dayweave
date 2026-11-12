@@ -285,6 +285,7 @@ export function TaskTagFilter({ id, tags, value, onChange }: { id: string; tags:
   const [visibleCount, setVisibleCount] = useState(Infinity);
   const [promotedTag, setPromotedTag] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
   const options = uniqueTags([...(matchesTag(tags, promotedTag) ? [promotedTag] : []), ...tags, value]);
 
   useLayoutEffect(() => {
@@ -294,8 +295,19 @@ export function TaskTagFilter({ id, tags, value, onChange }: { id: string; tags:
       const buttons = Array.from(list!.querySelectorAll<HTMLButtonElement>(".task-tag-filter-chip"));
       const first = buttons[0];
       if (!first) return;
-      const twoRows = first.offsetHeight * 2 + Number.parseFloat(getComputedStyle(list!).rowGap);
-      const count = buttons.filter((button) => button.offsetTop - first.offsetTop + button.offsetHeight <= twoRows + .5).length;
+      const gap = Number.parseFloat(getComputedStyle(list!).columnGap);
+      const widths = buttons.map((button) => button.offsetWidth);
+      const width = list!.clientWidth;
+      const total = widths.reduce((sum, size) => sum + size, 0) + gap * (buttons.length - 1);
+      const available = total <= width ? width : width - toggleRef.current!.offsetWidth - gap;
+      let used = 0;
+      let count = 0;
+      for (const size of widths) {
+        if (count && used + gap + size > available + .5) break;
+        used += (count ? gap : 0) + size;
+        count++;
+      }
+      count = Math.max(Math.min(2, buttons.length), count);
       setVisibleCount(count);
       if (!expanded && buttons.slice(count).includes(document.activeElement as HTMLButtonElement)) first.focus();
     }
@@ -303,26 +315,25 @@ export function TaskTagFilter({ id, tags, value, onChange }: { id: string; tags:
     const observer = new ResizeObserver(measure);
     observer.observe(list);
     return () => observer.disconnect();
-  }, [tags, value, expanded, promotedTag]);
+  }, [tags, value, promotedTag, expanded]);
 
   if (!options.length) return null;
   const hasOverflow = visibleCount < options.length + 1;
-  return <div className={`task-tag-filter${expanded ? " is-expanded" : ""}`}>
-      <div ref={listRef} id={id} className="task-tag-filter-options" role="group" aria-label="标签筛选">
-      {["", ...options].map((tag, index) => {
-        const clipped = !expanded && index >= visibleCount;
-        const selected = tag ? Boolean(value) && matchesTag([tag], value) : !value;
-        return <button key={tagKey(tag)} type="button" className={`task-tag-filter-chip${!tag ? " is-all" : ""}${clipped ? " is-clipped" : ""}`} data-tag-color={colorFor(definitions, tag)} aria-label={tag || "全部标签"} aria-pressed={selected} aria-hidden={clipped || undefined} tabIndex={clipped ? -1 : 0} title={tag || "全部标签"} onClick={() => {
-          if (expanded && tag && index >= visibleCount) setPromotedTag(tag);
-          onChange(tag);
-        }}>
-          <span>{tag || "全部"}</span>
-        </button>;
-      })}
+  function chip(tag: string, clipped = false, promote = false) {
+    const selected = tag ? Boolean(value) && matchesTag([tag], value) : !value;
+    return <button key={tagKey(tag)} type="button" className={`task-tag-filter-chip${!tag ? " is-all" : ""}${clipped ? " is-clipped" : ""}`} data-tag-color={colorFor(definitions, tag)} aria-label={tag || "全部标签"} aria-pressed={selected} aria-hidden={clipped || undefined} tabIndex={clipped ? -1 : 0} title={tag || "全部标签"} onClick={() => {
+      if (promote) setPromotedTag(tag);
+      onChange(tag);
+    }}>
+      <span>{tag || "全部"}</span>
+    </button>;
+  }
+  return <div className={`task-tag-filter${expanded && hasOverflow ? " is-expanded" : ""}`} role="group" aria-label="标签筛选">
+    <div ref={listRef} id={id} className="task-tag-filter-options">
+      {["", ...options].map((tag, index) => chip(tag, !expanded && index >= visibleCount, expanded && Boolean(tag) && index >= visibleCount))}
+      <button ref={toggleRef} type="button" className={`task-tag-filter-more${!hasOverflow ? " is-unused" : ""}`} aria-hidden={!hasOverflow || undefined} tabIndex={hasOverflow ? 0 : -1} aria-expanded={expanded && hasOverflow} aria-controls={id} onClick={() => setExpanded((current) => !current)}>
+        {expanded ? "收起" : `+${Math.max(0, options.length + 1 - visibleCount)} 展开`}
+      </button>
     </div>
-    {(hasOverflow || expanded) && <button type="button" className="task-tag-filter-more" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded((current) => !current)}>
-      {expanded ? "收起标签" : `展开全部标签（${options.length}）`}
-      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d={expanded ? "m4 10 4-4 4 4" : "m4 6 4 4 4-4"} /></svg>
-    </button>}
   </div>;
 }

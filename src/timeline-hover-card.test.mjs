@@ -33,17 +33,17 @@ test("task tooltip separates only nonempty priority and status details", () => {
   const reviewOutcomeCopy = { completed: "完成", incomplete: "未完成" };
   const hint = "上下拖动调整时间·点击精确编辑";
   const cases = [
-    { task: { priority: "urgent" }, expected: "P0 紧急" },
-    { task: { priority: "medium" }, expected: "P2 中优先级" },
-    { task: { priority: "high" }, expected: "P1 高优先级" },
-    { task: { priority: "low" }, expected: "P3 低优先级" },
+    { task: { priority: "urgent" }, expected: "P0" },
+    { task: { priority: "medium" }, expected: "P2" },
+    { task: { priority: "high" }, expected: "P1" },
+    { task: { priority: "low" }, expected: "P3" },
     { task: { priority: null }, expected: "" },
     { task: undefined, expected: "" },
-    { task: { priority: "medium" }, draggable: true, expected: `P2 中优先级 · ${hint}` },
+    { task: { priority: "medium" }, draggable: true, expected: `P2 · ${hint}` },
     { task: undefined, draggable: true, expected: hint },
-    { task: { priority: "medium" }, effectiveOutcome: "incomplete", expected: "P2 中优先级 · 本次未完成 · 已记录" },
+    { task: { priority: "medium" }, effectiveOutcome: "incomplete", expected: "P2 · 本次未完成 · 已记录" },
     { task: undefined, effectiveOutcome: "completed", expected: "本次完成 · 已记录" },
-    { task: { priority: "medium" }, block: { review: { outcome: "incomplete", followup_action: "continue" } }, expected: "P2 中优先级 · 未完成 · 继续" },
+    { task: { priority: "medium" }, block: { review: { outcome: "incomplete", followup_action: "continue" } }, expected: "P2 · 未完成 · 继续" },
     { task: undefined, block: { review: { outcome: "completed", followup_action: null } }, expected: "完成 · 已记录" }
   ];
   for (const { task, draggable = false, block = {}, effectiveOutcome = null, expected } of cases) {

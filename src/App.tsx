@@ -1164,16 +1164,11 @@ function TaskScheduleEditor({ form, disabled, compact = false, estimateId, allow
   </div>
   {openPicker && createPortal(
     <div className="schedule-picker-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSchedulePicker(); }}>
-      <div className="schedule-picker-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="schedule-picker-title" tabIndex={-1}>
+      <div className="schedule-picker-dialog manual-time-picker" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="schedule-picker-title" tabIndex={-1}>
         <header className="schedule-picker-header">
           <div><h2 id="schedule-picker-title">时间范围</h2><p>点选一天，或连续点选两个日期；较早的日期自动作为开始日。</p></div>
           <div className="schedule-picker-header-actions">{pickerTimeChanged && <button type="button" className="schedule-picker-reset" onClick={resetSchedulePicker}>重置时间</button>}<button type="button" className="schedule-picker-clear" onClick={clearSchedulePicker}>清除时间</button><button type="button" className="schedule-picker-close" aria-label="关闭时间范围" onClick={closeSchedulePicker}><Icon name="close" size={18} /></button></div>
         </header>
-        <div className="schedule-picker-boundaries schedule-picker-rows apple-schedule-rows">
-          {renderBoundaryCard("start", "开始", openPicker.earliest_start_date)}
-          {renderBoundaryCard("end", "结束", openPicker.due_date)}
-          <span id="schedule-picker-time-input-help" className="sr-only">可输入 9、930 或 09:30，精确到 1 分钟。</span>
-        </div>
         <div className="schedule-picker-body">
           <section className="schedule-picker-calendar" aria-label="选择日期">
             <header><strong>{calendarYear}年{calendarMonth}月</strong><div><button type="button" aria-label="上个月" onClick={() => shiftPickerMonth(-1)}><Icon name="chevron-left" size={17} /></button><button type="button" aria-label="下个月" onClick={() => shiftPickerMonth(1)}><Icon name="chevron-right" size={17} /></button></div></header>
@@ -1185,6 +1180,11 @@ function TaskScheduleEditor({ form, disabled, compact = false, estimateId, allow
           </section>
           <section className="schedule-picker-range-panel" aria-label="调整时间范围">
             <header><div><strong>调整时间范围</strong><span>{pickerSpanDays && pickerSpanDays > 1 ? `跨 ${pickerSpanDays} 天` : pickerDurationLabel}</span></div></header>
+            <div className="schedule-picker-boundaries schedule-picker-rows apple-schedule-rows">
+              {renderBoundaryCard("start", "开始", openPicker.earliest_start_date)}
+              {renderBoundaryCard("end", "结束", openPicker.due_date)}
+              <span id="schedule-picker-time-input-help" className="sr-only">可输入 9、930 或 09:30，精确到 1 分钟。</span>
+            </div>
             {pickerSpanDays === null ? <p className="schedule-picker-range-error" role="alert">结束日期不能早于开始日期，请先在左侧调整日期。</p> : <BlockEditorTimeRangeRail
               start={openPicker.earliest_start_time}
               end={openPicker.due_time}
@@ -1193,7 +1193,7 @@ function TaskScheduleEditor({ form, disabled, compact = false, estimateId, allow
               maxMinute={pickerEndMinuteOffset + 23 * 60 + 59}
               minimumDuration={MIN_TASK_WORKLOAD_MINUTES}
               disabled={disabled}
-              describedBy="schedule-picker-range-help"
+              presetsOnly
               showPresets={pickerSpanDays === 1}
               onChange={updatePickerRange}
             />}
@@ -1434,31 +1434,31 @@ function RecurringValidityPicker({ startsOn, endsOn, displayTime = "", displayDu
     </section>;
   }
   return createPortal(<div className="schedule-picker-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <div className="schedule-picker-dialog recurring-schedule-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="recurring-validity-title" tabIndex={-1}>
+    <div className="schedule-picker-dialog recurring-schedule-dialog manual-time-picker" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="recurring-validity-title" tabIndex={-1}>
       <header className="schedule-picker-header">
         <div><h2 id="recurring-validity-title">有效日期范围</h2><p>点选一天，或连续点选两个日期；较早的日期自动作为开始日。</p></div>
         <div className="schedule-picker-header-actions"><button type="button" className="schedule-picker-close" aria-label="关闭时间范围" onClick={onClose}><Icon name="close" size={18} /></button></div>
       </header>
-      <div className="schedule-picker-boundaries schedule-picker-rows apple-schedule-rows">
-        {renderBoundary("start", "开始", draftStartsOn)}
-        {renderBoundary("end", "结束", draftEndsOn)}
-        <span id="recurring-time-input-help" className="sr-only">可输入 9、930 或 09:30；结束时间可到当天 24:00。</span>
-      </div>
       <div className="schedule-picker-body">
         <section className="schedule-picker-calendar" aria-label="选择日期">
           <header><strong>{calendarYear}年{calendarMonth}月</strong><div><button type="button" aria-label="上个月" onClick={() => shiftPickerMonth(-1)}><Icon name="chevron-left" size={17} /></button><button type="button" aria-label="下个月" onClick={() => shiftPickerMonth(1)}><Icon name="chevron-right" size={17} /></button></div></header>
           <div className="apple-date-weekdays" aria-hidden="true">{["一", "二", "三", "四", "五", "六", "日"].map((day) => <span key={day}>{day}</span>)}</div>
           <ScheduleDateGrid cells={cells} today={todayDate} start={draftStartsOn} end={draftEndsOn} range={range} onSelect={handleDateClick} onHover={setHoverDate} />
+          <footer aria-live="polite"><strong>{!draftEndsOn ? dates.dateAnchor ? "长期有效，可再选一天设置结束日期" : "已选长期有效，点击日期调整开始日" : draftStartsOn === draftEndsOn ? dates.dateAnchor ? "已选单日，可再选一天组成多日范围" : "已选单日，点击日期可重新选择" : dates.dateAnchor ? "已选多日，点击新日期后自动排序" : "已选多日，点击日期可重新选择"}</strong></footer>
           <div className="schedule-validity-presets" role="group" aria-label="有效期限快捷选项">
             <button type="button" className={!draftEndsOn ? "is-active" : ""} aria-pressed={!draftEndsOn} onClick={() => applyValidityPreset("open")}>长期有效</button>
             {[30, 90, 180, 365].map((days, index) => <button key={days} type="button" onClick={() => applyValidityPreset("days", days)}>{["1 个月", "3 个月", "半年", "1 年"][index]}</button>)}
             <button type="button" onClick={() => applyValidityPreset("year_end")}>至今年底</button>
           </div>
-          <footer aria-live="polite"><strong>{!draftEndsOn ? dates.dateAnchor ? "长期有效，可再选一天设置结束日期" : "已选长期有效，点击日期调整开始日" : draftStartsOn === draftEndsOn ? dates.dateAnchor ? "已选单日，可再选一天组成多日范围" : "已选单日，点击日期可重新选择" : dates.dateAnchor ? "已选多日，点击新日期后自动排序" : "已选多日，点击日期可重新选择"}</strong></footer>
         </section>
         <section className="schedule-picker-range-panel" aria-label="调整时间范围">
           <header><div><strong>调整时间范围</strong><span>{timeError ? "每次任务" : formatWorkloadMinutes(timeInput.display_duration_minutes!)}</span></div></header>
-          <BlockEditorTimeRangeRail start={railRange.start} end={railRange.end} minimumDuration={1} maxMinute={24 * 60} allowMidnightEnd describedBy="recurring-picker-range-help" onChange={updateTimeRange} />
+          <div className="schedule-picker-boundaries schedule-picker-rows apple-schedule-rows">
+            {renderBoundary("start", "开始", draftStartsOn)}
+            {renderBoundary("end", "结束", draftEndsOn)}
+            <span id="recurring-time-input-help" className="sr-only">可输入 9、930 或 09:30；结束时间可到当天 24:00。</span>
+          </div>
+          <BlockEditorTimeRangeRail start={railRange.start} end={railRange.end} minimumDuration={1} maxMinute={24 * 60} allowMidnightEnd presetsOnly onChange={updateTimeRange} />
           <div className="schedule-occurrence-preview"><strong>近期发生预览</strong><p>{previewDates.length ? previewDates.slice(0, 3).map(pickerDateLabel).join("、") : previewForm.frequency === "weekdays" ? "暂无可确认的发生日期；请检查相关年份的节假日数据或调整规则。" : "当前设置没有可发生日期，请调整频率或有效开始日期。"}</p></div>
           {previewForm.frequency === "weekdays" && <HolidayCoverageNotice from={draftStartsOn} to={draftEndsOn || shiftDateValue(draftStartsOn, 365)} />}
         </section>
@@ -3647,7 +3647,7 @@ function TaskWorkspace({
             </div>
             <div className="task-queue-search">
               <Icon name="search" size={16} />
-              <input type="search" aria-label="搜索当前任务视图" placeholder="搜索任务" value={search} onChange={(event) => setSearch(event.target.value)} />
+              <input type="search" aria-label="搜索当前任务视图" placeholder="搜索任务名称、标签或备注" value={search} onChange={(event) => setSearch(event.target.value)} />
               {search && <button type="button" aria-label="清除搜索" onClick={() => setSearch("")}><Icon name="close" size={14} /></button>}
               <div className="task-filter-control" ref={filterMenuRef}>
                 <button ref={filterTriggerRef} className={`queue-filter-button${filterMenuOpen ? " is-open" : ""}${view !== "open" || search ? " is-filtered" : ""}`} type="button" aria-label={`筛选任务，当前为${taskViewCopy[view]}`} aria-haspopup="dialog" aria-expanded={filterMenuOpen} aria-controls={filterMenuOpen ? "task-filter-menu" : undefined} onClick={() => setFilterMenuOpen((open) => !open)}><Icon name="filter" size={18} /></button>
@@ -4406,6 +4406,7 @@ function BlockEditorTimeRangeRail({
   describedBy,
   showPresets = true,
   inputsOnly = false,
+  presetsOnly = false,
   allowMidnightEnd = false
 }: {
   start: string;
@@ -4421,6 +4422,7 @@ function BlockEditorTimeRangeRail({
   describedBy?: string;
   showPresets?: boolean;
   inputsOnly?: boolean;
+  presetsOnly?: boolean;
   allowMidnightEnd?: boolean;
 }) {
   const railStep = 5;
@@ -4714,15 +4716,15 @@ function BlockEditorTimeRangeRail({
   }
 
   return <div className="time-range-rail block-editor">
-    {inputsOnly ? <TaskTimeRangeFields startInput={renderTimeInput("start")} endInput={renderTimeInput("end")} duration={durationMinutes} maxDuration={endDomainMax - safeStartMinute} disabled={disabled} showPresets={showPresets} onDuration={setDuration} /> : <div className="time-range-values block-editor-values" aria-label="选择开始和结束时间">
+    {!presetsOnly && (inputsOnly ? <TaskTimeRangeFields startInput={renderTimeInput("start")} endInput={renderTimeInput("end")} duration={durationMinutes} maxDuration={endDomainMax - safeStartMinute} disabled={disabled} showPresets={showPresets} onDuration={setDuration} /> : <div className="time-range-values block-editor-values" aria-label="选择开始和结束时间">
       <label className={highlightedEdge === "start" ? "is-active" : ""}><span><i className="time-range-marker start" aria-hidden="true" />开始</span>{renderTimeInput("start")}</label>
       <span className="time-range-connector" aria-hidden="true"><Icon name="chevron-right" size={14} /></span>
       <label className={highlightedEdge === "end" ? "is-active" : ""}><span><i className="time-range-marker end" aria-hidden="true" />结束</span>{renderTimeInput("end")}</label>
-    </div>}
-    {!inputsOnly && describedBy && <small id={describedBy} className="sr-only">{collapsedPresentation
+    </div>)}
+    {!presetsOnly && !inputsOnly && describedBy && <small id={describedBy} className="sr-only">{collapsedPresentation
       ? <>拖动两侧端点<CopySeparator />中间不可拖动</>
       : <>手写 1 分钟<CopySeparator />时间轴与方向键 5 分钟<CopySeparator />最短 {minimumDuration} 分钟</>}</small>}
-    {!inputsOnly && <div className="time-rail-surface">
+    {!presetsOnly && !inputsOnly && <div className="time-rail-surface">
       {collapsedPresentation ? <div className="time-rail-scale collapsed" aria-hidden="true">
         <span className="time-rail-scale-zone start"><i>{displayClock(collapsedPresentation.startWindow.start)}</i><strong>{displayClock(safeStartMinute)}</strong><i>{displayClock(collapsedPresentation.startWindow.end)}</i></span>
         <em>···</em>

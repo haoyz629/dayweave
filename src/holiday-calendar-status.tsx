@@ -25,6 +25,7 @@ export function HolidayCalendarSettings() {
       <button type="button" className="quiet-button" disabled={busy} onClick={() => void check()}>{busy ? "正在检查…" : "检查节假日更新"}</button>
     </div>
     <p>启动后后台检查，自动检查间隔至少 24 小时；已下载数据可离线使用。尚未收录的年份不会预测调休。</p>
+    <p>数据源：NateScarlet/holiday-cn（经 jsDelivr 分发）。这是第三方整理数据，正式安排以国务院公告为准。</p>
     <p>缺失年份的工作时间暂按每周设置；按法定工作日重复的事项将在相关年份补齐后恢复推演。</p>
     {(snapshot.lastError || message || busy) && <p className={snapshot.lastError ? "holiday-update-error" : ""} role="status">{busy ? "正在获取已发布的年度安排，原有数据继续可用…" : snapshot.lastError || message}</p>}
     <small>只下载公共日历文件，不上传任务、日程或个人设置。</small>

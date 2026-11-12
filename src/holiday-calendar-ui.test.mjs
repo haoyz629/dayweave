@@ -29,6 +29,9 @@ test("actual holiday settings show coverage and offline/privacy boundaries witho
   assert.match(html, /检查节假日更新/);
   assert.match(html, /离线使用/);
   assert.match(html, /不上传任务/);
+  assert.match(html, /NateScarlet\/holiday-cn/);
+  assert.match(html, /jsDelivr/);
+  assert.match(html, /第三方整理数据/);
   assert.doesNotMatch(html, /type="submit"|自动重排/);
 });
 

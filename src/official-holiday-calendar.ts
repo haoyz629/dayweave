@@ -136,7 +136,7 @@ export function holidayYearMessage(year: number, data = snapshot) {
   if (data.years.some((item) => item.year === year)) return "";
   if (data.checking) return `正在检查并更新 ${year} 年节假日安排…`;
   if (!data.lastError && data.lastSuccessAt && !data.availableYears.includes(year)) {
-    return `${year} 年放假与调休安排尚未收录，公布并收录后将自动更新。`;
+    return `${year} 年放假与调休安排在数据源中尚未收录，稍后可检查更新。`;
   }
   return `暂未取得 ${year} 年节假日数据。`;
 }

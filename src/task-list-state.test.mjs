@@ -50,7 +50,7 @@ test("capsule puts tags after priority in its heading and only shows AI attribut
   state.TaskTagList = ({ tags }) => React.createElement("span", { className: "task-list-tags" }, tags.join("、"));
   for (const sourceType of ["manual", "ai_assistant"]) {
     const markup = renderToStaticMarkup(state.TaskCapsuleContent({ title: "一个很长的任务标题", priority: "medium", tags: ["开发", "产品"], sourceType, status: "已安排" }));
-    assert.match(markup, /task-capsule-heading[\s\S]*P2 中优先级<\/span><span class="task-list-tags">开发、产品<\/span>/);
+    assert.match(markup, /task-capsule-heading[\s\S]*P2<\/span><span class="task-list-tags">开发、产品<\/span>/);
     assert.doesNotMatch(markup, /手动创建|source-manual/);
     assert.equal(markup.includes('aria-label="AI 创建"'), sourceType === "ai_assistant");
     assert.match(markup, /title="一个很长的任务标题"/);

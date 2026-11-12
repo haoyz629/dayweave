@@ -2,26 +2,16 @@ import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { validateHolidayYear } from "../src/official-holiday-calendar.ts";
 
+// These files are bundled offline fallbacks, not a remotely published index.
 const directory = new URL("../data/holidays/", import.meta.url);
-const readJson = async (path) => {
-  const text = await readFile(new URL(path, directory), "utf8");
-  assert.ok(Buffer.byteLength(text) <= 256 * 1024, `${path}: 数据过大`);
-  return JSON.parse(text);
-};
-const index = await readJson("index.json");
-assert.equal(index.schemaVersion, 1, "不支持的索引结构版本");
-assert.ok(Array.isArray(index.years) && index.years.length <= 301, "年度索引无效");
-const seen = new Set();
-for (const entry of index.years) {
-  assert.ok(!seen.has(entry.year), "重复年度");
-  seen.add(entry.year);
-  assert.equal(entry.path, `${entry.year}.json`, "年度路径必须固定，不允许外部地址");
-  const data = await readJson(entry.path);
+const files = (await readdir(directory)).filter((name) => /^\d{4}\.json$/.test(name)).sort();
+assert.ok(files.length > 0, "未找到内置年度数据");
+for (const name of files) {
+  const text = await readFile(new URL(name, directory), "utf8");
+  assert.ok(Buffer.byteLength(text) <= 256 * 1024, `${name}: 数据过大`);
+  const data = JSON.parse(text);
   validateHolidayYear(data);
-  for (const key of ["year", "revision", "sourceUrl", "verifiedAt"]) assert.equal(data[key], entry[key], `${entry.path}: ${key} 与索引不符`);
-  console.log(`${data.year} revision ${data.revision}: ${data.holidays.reduce((sum, group) => sum + group.dates.length, 0)} 放假日、${data.makeupWorkdays.length} 补班日，校验通过`);
+  assert.equal(name, `${data.year}.json`, "内置年度文件名与内容不符");
+  console.log(`${data.year} revision ${data.revision}: ${data.holidays.reduce((sum, group) => sum + group.dates.length, 0)} 放假日、${data.makeupWorkdays.length} 补班日，内置兜底校验通过`);
 }
-for (const name of await readdir(directory)) {
-  if (/^\d{4}\.json$/.test(name)) assert.ok(seen.has(Number(name.slice(0, 4))), `${name} 未加入索引`);
-}
-console.log("发布结构校验完成；官方通知内容仍需维护者人工逐项核对。");
+console.log("内置数据校验完成；在线更新直接读取 jsDelivr 上的 holiday-cn 年度 JSON，不使用自有索引。");

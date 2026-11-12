@@ -1,7 +1,7 @@
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { Priority } from "./tauri";
 
-export const priorityCopy = { urgent: "P0 紧急", high: "P1 高优先级", medium: "P2 中优先级", low: "P3 低优先级" } as const;
+export const priorityCopy = { urgent: "P0", high: "P1", medium: "P2", low: "P3" } as const;
 
 export function TaskPrioritySelector({ id, value, disabled = false, onChange }: {
   id: string;

@@ -205,26 +205,66 @@ test("flat filter hides empty catalogs but preserves a selected legacy tag", () 
   assert.equal(byClass(filter, "task-tag-filter-chip")[2].props["aria-pressed"], true);
 });
 
-test("flat filter stays compact, has no tag icon and gives All a persistent background and selection", () => {
-  const filter = createHost().filter({ tags: ["开发", "设计"] });
-  const group = byClass(filter, "task-tag-filter-options")[0];
-  assert.equal(group.props["aria-label"], "标签筛选");
-  assert.equal(group.props["aria-labelledby"], undefined);
-  assert.equal(byClass(filter, "task-tag-filter-label").length, 0);
+test("compact filter keeps text-only chips and a persistent All surface in one wrapping group", () => {
+  const filter = createHost().filter({ tags: ["开发", "设计", "阅读"] });
+  assert.equal(filter.tree.props["aria-label"], "标签筛选");
   const chips = byClass(filter, "task-tag-filter-chip");
-  assert.equal(nodes(filter.tree, node => node.type === "svg").length, 0);
-  assert.equal(chips[0].props.children.props.children, "全部");
-  assert.equal(chips[0].props["aria-label"], "全部标签");
-  assert.equal(nodes(group, node => node.type === "svg").length, 0);
+  assert.equal(nodes(chips[0], node => node.type === "span")[0].props.children, "全部");
   assert.ok(chips.every(chip => chip.props.children.type === "span"));
+  assert.equal(chips[0].props["aria-label"], "全部标签");
+  assert.equal(nodes(filter.tree, node => node.type === "i").length, 0);
+  assert.equal(byClass(filter, "task-tag-filter-caption").length, 0);
+  assert.equal(byClass(filter, "task-tag-filter-more")[0].props.tabIndex, -1);
   const css = readFileSync(new URL("./task-tags.css", import.meta.url), "utf8");
-  assert.match(css, /\.task-tag-filter-options[^}]*gap: 6px; max-height: 58px/);
-  assert.match(css, /\.task-tag-filter-chip \{[^}]*height: 26px;[^}]*border-radius: 8px/);
-  assert.match(css, /\.task-tag-filter-chip\[aria-pressed="true"\] \{ background: color-mix\(in srgb, currentColor 8%, white\); \}/);
-  assert.match(css, /\.task-tag-filter-chip\.is-all \{[^}]*background: var\(--jx-surface\)/);
-  assert.match(css, /\.task-tag-filter-chip\.is-all\[aria-pressed="true"\] \{ border-color: var\(--jx-ink-soft\);[^}]*background: color-mix\(in srgb, var\(--jx-ink\) 12%, white\)/);
+  assert.match(css, /\.task-tag-filter-options[^}]*flex-wrap: wrap;[^}]*gap: 6px/);
+  assert.match(css, /\.task-tag-filter-chip \{[^}]*height: 28px;[^}]*padding: 3px 8px;[^}]*border-radius: 8px/);
+  assert.match(css, /\.task-tag-filter-chip\.is-all \{ border-color: #d3ddea; color: #42566e; background: #e7edf5; \}/);
+  assert.match(css, /\.task-tag-filter-chip\[aria-pressed="true"\] \{ border-color: var\(--jx-focus\);[^}]*var\(--jx-focus\) 14%, white/);
+  assert.match(css, /\.task-tag-filter-more[^}]*width: 72px; height: 28px/);
+  assert.doesNotMatch(css, /task-tag-filter-(?:dot|caption|header|toggle|expanded|extra-options)/);
+  assert.match(css, /\.task-tag-filter-chip\.is-clipped[^}]*position: absolute;[^}]*visibility: hidden/);
+  assert.equal(nodes(filter.tree, node => node.type === "svg").length, 0);
   assert.doesNotMatch(css, /\.task-tag-filter-chip[^}]*box-shadow/);
-  assert.doesNotMatch(css, /\.task-tag-filter-chip\[aria-pressed="true"\][^}]*text-decoration/);
+});
+
+test("unified filter expands exactly its hidden chips, restores the default range and retains overflow selection", () => {
+  const host = createHost();
+  const filter = host.filter({ tags: ["开发", "设计", "阅读"] });
+  // The small hook host skips layout; provide the measured All + first tag capacity.
+  filter.slots[3].value = 2;
+  filter.render();
+  const chips = () => byClass(filter, "task-tag-filter-chip");
+  const visible = () => chips().filter(node => !node.props["aria-hidden"]).map(node => node.props.title);
+  const toggle = () => byClass(filter, "task-tag-filter-more")[0];
+  assert.deepEqual(chips().map(node => node.props.title), ["全部标签", "开发", "设计", "阅读"]);
+  assert.deepEqual(chips().map(node => node.props.tabIndex), [0, 0, -1, -1]);
+  assert.deepEqual(visible(), ["全部标签", "开发"]);
+  assert.equal(toggle().props.children, "+2 展开");
+  toggle().props.onClick(); filter.render();
+  assert.equal(toggle().props.children, "收起");
+  assert.equal(toggle().props["aria-expanded"], true);
+  assert.equal(toggle().props["aria-controls"], "filter");
+  assert.deepEqual(visible(), ["全部标签", "开发", "设计", "阅读"]);
+  assert.deepEqual(chips().map(node => node.props.tabIndex), [0, 0, 0, 0]);
+  assert.equal(nodes(byClass(filter, "task-tag-filter-options")[0], node => node.type === "button").length, 5);
+  toggle().props.onClick(); filter.render();
+  assert.deepEqual(visible(), ["全部标签", "开发"]);
+  assert.equal(toggle().props.children, "+2 展开");
+  toggle().props.onClick(); filter.render();
+  chips()[1].props.onClick(); filter.render();
+  assert.deepEqual(chips().map(node => node.props.title), ["全部标签", "开发", "设计", "阅读"]);
+  chips()[3].props.onClick(); filter.render();
+  assert.deepEqual(chips().map(node => node.props.title), ["全部标签", "阅读", "开发", "设计"]);
+  toggle().props.onClick(); filter.render();
+  assert.deepEqual(visible(), ["全部标签", "阅读"]);
+  assert.equal(chips()[1].props["aria-pressed"], true);
+  assert.deepEqual(host.calls.create, []);
+});
+
+test("task search weakens only its light-mode placeholder and icon", () => {
+  const css = readFileSync(new URL("./task-comfort.css", import.meta.url), "utf8");
+  assert.match(css, /:not\(\[data-mode="dark"\]\) .tasks-workspace .task-queue-search > svg \{ color: #91a2bb; \}/);
+  assert.match(css, /input\[type="search"\]::placeholder \{ color: #8a99ad; font-weight: 400; opacity: 1; \}/);
 });
 
 test("picker footer retains counts and limit messages without the save hint", async () => {

@@ -200,7 +200,7 @@ test("ordinary tasks use one recycle-bin path instead of a cancellation state", 
   assert.doesNotMatch(appSource, /type TaskView = .*"cancelled"/);
   assert.equal(appSource.includes("不再进行"), false);
   assert.equal(appSource.includes("task-more-actions"), false);
-  assert.match(appSource, /\{ label: "历史与维护", items: \["not_completed", "done", "deleted"\] \}/);
+  assert.match(appSource, /const taskStatusFilterOrder: TaskView\[\] = \["scheduled", "draft", "recurring", "open", "not_completed", "done", "deleted"\]/);
   assert.match(appSource, /className="task-compact-trash" disabled=\{busy\} onClick=\{\(\) => requestTaskChange\(\{ kind: "trash" \}\)\}/);
   assert.equal(stylesSource.includes("status-row-cancelled"), false);
   assert.equal(stylesSource.includes("terminal-task-status.cancelled"), false);
@@ -593,7 +593,8 @@ test("execution records live in timeline dialogs, not a separate Today subview",
   const navigation = appSource.match(/const navigation:[\s\S]*?\n\];/)?.[0] ?? "";
   assert.match(navigation, /label: "今日"/);
   assert.match(navigation, /label: "任务"/);
-  assert.match(navigation, /label: "设置"/);
+  assert.doesNotMatch(navigation, /label: "设置"/);
+  assert.match(appSource, /onOpenSettings=\{\(\) => setSettingsOpen\(true\)\}/);
   assert.doesNotMatch(navigation, /label: "复盘"/);
   assert.doesNotMatch(appSource, /today-section-tabs|todaySection|<ReviewPage|复盘与记录/);
   assert.match(appSource, /normalizeTodayNavigation\(intent.active\)/);
@@ -635,7 +636,7 @@ test("recurring items allow optional per-occurrence completion without changing 
   assert.match(appSource, /未勾选不会自动记为未完成/);
   assert.match(appSource, /className=\{`timeline-event recurring-event/);
   assert.match(appSource, /<RecurringScopeConfirmation/);
-  assert.match(appSource, /按规则展示，可记录每次完成/);
+  assert.match(appSource, /aria-checked=\{createItemType === "recurring"\} onClick=\{\(\) => requestCreateItemType\("recurring"\)\}/);
   assert.doesNotMatch(appSource, /到期展示，复盘时处理/);
 });
 
@@ -644,8 +645,8 @@ test("Escape returns to month only when no floating dialog is open", () => {
   assert.match(appSource, /\[todayView, selection, Boolean\(timelineTooltip\), visible\]/);
 });
 
-test("task filter and empty states share type icons and concise copy", () => {
-  assert.match(appSource, /filter-option-\$\{item\}[^\n]*name=\{taskViewIcon\[item\]\}/);
+test("task status filters are flat chips and empty states keep concise copy", () => {
+  assert.match(appSource, /id="task-status-filter"[^>]*task-tag-filter-options[^>]*statusFilterExpanded/);
   assert.match(appSource, /className="ledger-empty"><Icon name=\{taskViewIcon\[view\]\}/);
   assert.match(appSource, /className="inspector-empty"><Icon name=\{taskViewIcon\[view\]\}/);
   assert.match(appSource, /const taskEmptyCopy: Record<TaskView, string>/);

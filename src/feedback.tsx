@@ -12,13 +12,14 @@ export function ToastViewport() {
   return createPortal(<div id="feedback-toast-viewport" className="feedback-toast-viewport" />, document.body);
 }
 
-export function Toast({ title, description, tone = "info", actions = [], duration, onDismiss }: {
+export function Toast({ title, description, tone = "info", actions = [], duration, onDismiss, container }: {
   title: string;
   description?: string;
   tone?: "success" | "info" | "error";
   actions?: { label: string; onClick: () => void }[];
   duration: number;
   onDismiss: () => void;
+  container?: HTMLElement | null;
 }) {
   const element = useRef<HTMLDivElement>(null);
   const dismiss = useRef(onDismiss);
@@ -44,7 +45,7 @@ export function Toast({ title, description, tone = "info", actions = [], duratio
     resume();
     return pause;
   }, [title, description, duration]);
-  const host = document.getElementById("feedback-toast-viewport");
+  const host = container === undefined ? document.getElementById("feedback-toast-viewport") : container;
   if (!host) return null;
   return createPortal(<div ref={element} className={`feedback-toast ${tone}${actions.length ? " has-actions" : ""}`} role={tone === "error" ? "alert" : "status"}
     onMouseEnter={pause} onMouseLeave={resume} onFocus={pause} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) resume(); }}>

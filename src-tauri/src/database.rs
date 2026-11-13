@@ -35,6 +35,9 @@ mod database_recurring;
 mod database_recurring_execution;
 pub use database_recurring_execution::RecurringExecutionEventDto;
 
+#[path = "database_reminder.rs"]
+mod database_reminder;
+pub use database_reminder::DueReminderSnooze;
 pub struct Database {
     connection: Connection,
     holiday_calendar: CalendarState,
@@ -236,13 +239,21 @@ pub struct UndoEntryDto {
     pub status: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TaskBlockNotificationDto {
     pub block_id: String,
+    pub task_id: String,
     pub task_title: String,
+    pub task_notes: Option<String>,
+    pub task_priority: Option<String>,
+    pub task_tags: Vec<String>,
     pub starts_at: String,
+    pub ends_at: String,
+    pub event_at: String,
+    pub is_end: bool,
+    #[serde(default)]
+    pub schedule_revision: Option<String>,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct PlanUndoBlock {
     id: String,
@@ -1516,73 +1527,11 @@ impl Database {
     }
 
     pub fn get_task(&self, task_id: &str) -> AppResult<TaskDto> {
-        self.connection
-            .query_row(
-                "SELECT task.id, task.title, task.notes, task.priority, task.earliest_start_at, task.due_at, task.estimated_minutes,
-                        earliest_start_date, earliest_start_time, due_date, due_time,
-                        total_workload_minutes, remaining_workload_minutes, actual_minutes,
-                        source_type, migration_review_required,
-                        splittable, status, deleted_at, created_at, task.updated_at,
-                        COALESCE((
-                            SELECT SUM(CAST(ROUND((julianday(pb.ends_at) - julianday(pb.starts_at)) * 1440) AS INTEGER))
-                            FROM plan_blocks pb
-                            JOIN daily_plans dp ON dp.id = pb.daily_plan_id
-                            WHERE pb.task_id = task.id
-                              AND dp.status = 'confirmed'
-                              AND NOT EXISTS (SELECT 1 FROM review_entries review WHERE review.plan_block_id = pb.id)
-                        ), 0),
-                        COALESCE((
-                            SELECT json_group_array(scheduled_date) FROM (
-                                SELECT DISTINCT substr(pb.starts_at, 1, 10) AS scheduled_date
-                                FROM plan_blocks pb
-                                JOIN daily_plans dp ON dp.id = pb.daily_plan_id
-                                WHERE pb.task_id = task.id AND dp.status = 'confirmed'
-                                ORDER BY scheduled_date
-                            )
-                        ), '[]'),
-                        COALESCE((
-                            SELECT json_group_array(name) FROM (
-                                SELECT tag.name AS name FROM tags tag
-                                JOIN task_tags relation ON relation.tag_id = tag.id
-                                WHERE relation.task_id = task.id ORDER BY tag.name COLLATE NOCASE
-                            )
-                        ), '[]'),
-                        COALESCE(substr(task.earliest_start_at, 1, 10) = substr(task.due_at, 1, 10), 0)
-                        AND ((task.actual_minutes > 0 AND NOT EXISTS(SELECT 1 FROM review_entries permission
-                            WHERE permission.task_id = task.id AND permission.followup_action IN ('schedule','wait','stop'))) OR EXISTS(
-                            SELECT 1 FROM plan_blocks fact WHERE fact.task_id = task.id
-                            AND NOT EXISTS(SELECT 1 FROM review_entries resolved WHERE resolved.plan_block_id = fact.id
-                                AND resolved.followup_action IN ('schedule','wait','stop'))
-                            AND (fact.execution_status <> 'planned' OR fact.execution_captured_at IS NOT NULL
-                                OR COALESCE(fact.actual_minutes, 0) > 0
-                                OR EXISTS(SELECT 1 FROM review_entries review WHERE review.plan_block_id = fact.id))
-                        ))
-                        , task.result_date, task.result_ends_at
-                        , task.status IN ('open', 'scheduled') AND task.deleted_at IS NULL AND COALESCE((
-                            SELECT COALESCE(review.outcome, fact.execution_status) IN ('not_started', 'partial', 'blocked', 'cancelled')
-                                AND NOT EXISTS (
-                                    SELECT 1 FROM plan_blocks pending JOIN daily_plans future ON future.id = pending.daily_plan_id
-                                    WHERE pending.task_id = task.id AND future.status = 'confirmed' AND future.plan_date >= ?2
-                                        AND pending.starts_at > fact.starts_at AND pending.execution_status = 'planned'
-                                        AND pending.execution_captured_at IS NULL AND COALESCE(pending.actual_minutes, 0) = 0
-                                        AND NOT EXISTS (SELECT 1 FROM review_entries resolved WHERE resolved.plan_block_id = pending.id)
-                                )
-                            FROM plan_blocks fact JOIN daily_plans recorded ON recorded.id = fact.daily_plan_id
-                            LEFT JOIN review_entries review ON review.plan_block_id = fact.id
-                            WHERE fact.task_id = task.id AND recorded.status = 'confirmed'
-                                AND COALESCE(review.outcome, fact.execution_status) <> 'planned'
-                            ORDER BY fact.starts_at DESC, fact.id LIMIT 1
-                        ), 0)
-                 FROM tasks task WHERE task.id = ?1",
-                params![task_id, shanghai_today()],
-                task_dto_from_row,
-            )
-            .optional()?
-            .ok_or_else(|| AppError::NotFound(format!("任务 {task_id}")))
+        load_task_dto_in_transaction(&self.connection, task_id)
     }
 
     pub fn get_task_metadata(&self, task_id: &str) -> AppResult<TaskMetadataDto> {
-        self.get_task(task_id)?;
+        let task = self.get_task(task_id)?;
         let mut statement = self.connection.prepare(
             "SELECT tag.name FROM tags tag
              JOIN task_tags relation ON relation.tag_id = tag.id
@@ -1611,7 +1560,7 @@ impl Database {
             },
         ).optional()?;
         let (completion_date, completion_ends_at) = database_results::candidate_context(&self.connection, task_id)?;
-        let completion_backfill_allowed = database_results::can_backfill_completion(&self.connection, &self.get_task(task_id)?)?;
+        let completion_backfill_allowed = database_results::can_backfill_completion(&self.connection, &task)?;
         let completion_recorded_at = database_results::historical_completion_recorded_at(&self.connection, task_id)?;
         database_followup::enrich_metadata(&self.connection, TaskMetadataDto { task_id: task_id.to_string(), tags, recurrence,
             latest_execution: None, completion_date, completion_ends_at, completion_backfill_allowed, completion_recorded_at,
@@ -1980,19 +1929,6 @@ impl Database {
         Ok(())
     }
 
-    pub fn claim_daily_notification(&mut self, notification_type: &str, notification_date: &str) -> AppResult<bool> {
-        let transaction = self.connection.transaction()?;
-        let timestamp = now();
-        let changed = transaction.execute(
-            "INSERT OR IGNORE INTO notification_states
-                (id, notification_type, notification_date, status, created_at, updated_at)
-             VALUES (?1, ?2, ?3, 'sent', ?4, ?4)",
-            params![Uuid::new_v4().to_string(), notification_type, notification_date, timestamp],
-        )?;
-        transaction.commit()?;
-        Ok(changed == 1)
-    }
-
     pub fn claim_due_task_block_notifications(&mut self, lead_minutes: i64) -> AppResult<Vec<TaskBlockNotificationDto>> {
         self.claim_due_task_block_notifications_at(lead_minutes, &now())
     }
@@ -2010,25 +1946,33 @@ impl Database {
         let transaction = self.connection.transaction()?;
         let candidates = {
             let mut statement = transaction.prepare(
-                "SELECT block.id, task.title, block.starts_at, plan.plan_date
-                 FROM plan_blocks block
-                 JOIN daily_plans plan ON plan.id = block.daily_plan_id
-                 JOIN tasks task ON task.id = block.task_id
-                 WHERE plan.status = 'confirmed' AND block.execution_status = 'planned'
-                   AND task.status NOT IN ('done','deleted')
-                   AND julianday(block.starts_at) > julianday(?1)
-                   AND julianday(block.starts_at) <= julianday(?2)
-                 ORDER BY block.starts_at, block.id",
+                "SELECT block.id, task.id, task.title, task.notes, task.priority,
+                        (SELECT group_concat(name, ' · ') FROM (SELECT tag.name AS name FROM task_tags relation JOIN tags tag ON tag.id = relation.tag_id WHERE relation.task_id = task.id ORDER BY tag.name)),
+                        block.starts_at, block.ends_at, block.starts_at, 0, plan.plan_date, (SELECT revision FROM task_block_reminder_revisions WHERE block_id = block.id)
+                 FROM plan_blocks block JOIN daily_plans plan ON plan.id = block.daily_plan_id JOIN tasks task ON task.id = block.task_id
+                 WHERE plan.status = 'confirmed' AND block.execution_status = 'planned' AND task.status NOT IN ('done','deleted')
+                   AND julianday(block.starts_at) > julianday(?1) AND julianday(block.starts_at) <= julianday(?2)
+                 UNION ALL
+                 SELECT block.id, task.id, task.title, task.notes, task.priority,
+                        (SELECT group_concat(name, ' · ') FROM (SELECT tag.name AS name FROM task_tags relation JOIN tags tag ON tag.id = relation.tag_id WHERE relation.task_id = task.id ORDER BY tag.name)),
+                        block.starts_at, block.ends_at, block.ends_at, 1, plan.plan_date, (SELECT revision FROM task_block_reminder_revisions WHERE block_id = block.id)
+                 FROM plan_blocks block JOIN daily_plans plan ON plan.id = block.daily_plan_id JOIN tasks task ON task.id = block.task_id
+                 WHERE plan.status = 'confirmed' AND block.execution_status = 'planned' AND task.status NOT IN ('done','deleted')
+                   AND julianday(block.starts_at) <= julianday(?1) AND julianday(block.ends_at) > julianday(?1) AND julianday(block.ends_at) <= julianday(?2)",
             )?;
             let rows = statement.query_map(params![current_time, cutoff], |row| Ok((
-                TaskBlockNotificationDto { block_id: row.get(0)?, task_title: row.get(1)?, starts_at: row.get(2)? },
-                row.get::<_, String>(3)?,
+                TaskBlockNotificationDto {
+                    block_id: row.get(0)?, task_id: row.get(1)?, task_title: row.get(2)?, task_notes: row.get(3)?,
+                    task_priority: row.get(4)?, task_tags: row.get::<_, Option<String>>(5)?.unwrap_or_default().split(" · ").filter(|tag| !tag.is_empty()).map(str::to_owned).collect(),
+                    starts_at: row.get(6)?, ends_at: row.get(7)?, event_at: row.get(8)?, is_end: row.get(9)?, schedule_revision: row.get(11)?,
+                },
+                row.get::<_, String>(10)?,
             )))?;
             rows.collect::<Result<Vec<_>, _>>()?
         };
         let mut claimed = Vec::new();
         for (candidate, plan_date) in candidates {
-            let notification_type = format!("task_block:{}", candidate.block_id);
+            let notification_type = format!("task_block:{}:{}:{}", candidate.block_id, if candidate.is_end { "end" } else { "start" }, candidate.event_at);
             let changed = transaction.execute(
                 "INSERT OR IGNORE INTO notification_states
                     (id, notification_type, notification_date, status, created_at, updated_at)
@@ -6275,6 +6219,8 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (30, database_recurring_execution::LIFECYCLE_MIGRATION),
     (31, holiday_calendar::MIGRATION),
     (32, ""), // Priority CHECK constraints are rebuilt transactionally in Rust.
+    (33, database_reminder::MIGRATION),
+    (34, database_reminder::REVISION_MIGRATION),
 ];
 
 #[cfg(test)]
@@ -6346,6 +6292,39 @@ mod tests {
     fn remove_input(date: &str, block: &PlanBlockDto) -> PlanBlockRemove {
         PlanBlockRemove { plan_date: date.into(), block_id: block.id.clone(),
             expected_starts_at: block.starts_at.clone(), expected_ends_at: block.ends_at.clone() }
+    }
+
+    #[test]
+    fn task_read_paths_preserve_dto_metadata_and_not_found_errors() {
+        let _clock = TestToday::new("2026-11-12");
+        let mut database = Database::in_memory().unwrap();
+        let date = shanghai_today();
+        let single = create_direct_task(&mut database, "单日详情", &date);
+        let cross = create_waiting_cross_day_task(&mut database, &date);
+        database.include_plan_task(include_input(&cross, &date, "14:00", "15:00")).unwrap();
+        for id in [&single.id, &cross.id] {
+            database.set_task_tags(id, vec!["工作".into(), "项目".into()]).unwrap();
+        }
+        for deleted in [false, true] {
+            if deleted { database.soft_delete_manual_task(&single.id, true).unwrap(); }
+            let listed = database.list_tasks(true, None).unwrap();
+            for id in [&single.id, &cross.id] {
+                let detail = database.get_task(id).unwrap();
+                let listed_task = listed.iter().find(|task| &task.id == id).unwrap();
+                assert_eq!(serde_json::to_value(&detail).unwrap(), serde_json::to_value(listed_task).unwrap());
+                assert_eq!(detail.tags.len(), 2);
+                let metadata = database.get_task_metadata(id).unwrap();
+                assert_eq!(metadata.tags, detail.tags);
+                assert_eq!(metadata.completion_backfill_allowed,
+                    database_results::can_backfill_completion(&database.connection, &detail).unwrap());
+                let transaction = database.connection.unchecked_transaction().unwrap();
+                let transactional = load_task_dto_in_transaction(&transaction, id).unwrap();
+                assert_eq!(serde_json::to_value(&detail).unwrap(), serde_json::to_value(transactional).unwrap());
+                transaction.rollback().unwrap();
+            }
+        }
+        assert!(matches!(database.get_task("missing"), Err(AppError::NotFound(message)) if message == "任务 missing"));
+        assert!(matches!(database.get_task_metadata("missing"), Err(AppError::NotFound(message)) if message == "任务 missing"));
     }
 
     #[test]
@@ -9487,6 +9466,16 @@ mod tests {
         assert_eq!(claimed[0].task_title, "九点开始的任务");
         assert!(database.claim_due_task_block_notifications_at(5, "2026-09-01T08:56:00+08:00").unwrap().is_empty());
         assert!(database.claim_due_task_block_notifications_at(0, "2026-09-01T08:55:00+08:00").unwrap().is_empty());
+        let block_id = &claimed[0].block_id;
+        database.connection.execute("UPDATE plan_blocks SET starts_at = ?1, ends_at = ?2 WHERE id = ?3", params!["2026-09-01T16:00:00+08:00", "2026-09-01T17:00:00+08:00", block_id]).unwrap();
+        let moved = database.claim_due_task_block_notifications_at(3, "2026-09-01T15:57:00+08:00").unwrap();
+        assert_eq!(moved.len(), 1);
+        assert!(!moved[0].is_end);
+        assert!(database.claim_due_task_block_notifications_at(3, "2026-09-01T15:58:00+08:00").unwrap().is_empty());
+        let ending = database.claim_due_task_block_notifications_at(3, "2026-09-01T16:57:00+08:00").unwrap();
+        assert_eq!(ending.len(), 1);
+        assert!(ending[0].is_end);
+        assert!(database.claim_due_task_block_notifications_at(3, "2026-09-01T16:58:00+08:00").unwrap().is_empty());
     }
 
 }

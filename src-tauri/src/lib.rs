@@ -2,6 +2,7 @@
 
 mod ai;
 mod database;
+mod desktop_notifications;
 mod domain;
 mod error;
 mod holiday_calendar;
@@ -32,8 +33,6 @@ use tauri::{
     AppHandle, Emitter, Manager, State, Window, WindowEvent,
 };
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-use tauri_plugin_notification::NotificationExt;
 
 struct AppState {
     database: Mutex<Database>,
@@ -511,28 +510,12 @@ fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<bool, String> 
 }
 
 #[tauri::command]
-fn set_global_shortcut(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    shortcut: String,
-) -> Result<String, String> {
-    let shortcut = shortcut.trim();
-    if shortcut.is_empty() || shortcut.chars().count() > 80 {
-        return Err("全局快捷键不能为空且不能超过 80 个字符".into());
-    }
-    app.global_shortcut().unregister_all().map_err(|error| error.to_string())?;
-    app.global_shortcut().register(shortcut).map_err(|error| error.to_string())?;
-    with_database(&state, |database| database.set_ui_setting("ui.desktop.shortcut", shortcut))?;
-    Ok(shortcut.to_owned())
+fn send_test_notification(app: AppHandle) -> Result<(), String> {
+    desktop_notifications::show(&app, "提醒已准备好", "之后的任务提醒会显示在这里。", None, false)
 }
 
-#[tauri::command]
-fn send_test_notification(app: AppHandle) -> Result<(), String> {
-    app.notification().builder()
-        .title("今序 · Dayweave 提醒可用")
-        .body("这是一条本机 Windows 通知测试，不会调用 AI。")
-        .show()
-        .map_err(|error| error.to_string())
+fn single_instance_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri_plugin_single_instance::init(|app, _args, _cwd| show_main_window(app))
 }
 
 fn show_main_window(app: &AppHandle) {
@@ -561,9 +544,8 @@ fn set_app_window_title(window: tauri::WebviewWindow, title: String) -> Result<(
     window.set_title(&title).map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-fn set_app_logo_mode(app: AppHandle, mode: String) -> Result<(), String> {
-    let icon = app_logo(&mode)?;
+fn initialize_app_logo(app: AppHandle) -> Result<(), String> {
+    let icon = app_logo("light")?;
     if let Some(window) = app.get_webview_window("main") {
         window.set_icon(icon.clone()).map_err(|error| error.to_string())?;
         // Tauri's Windows set_icon updates ICON_SMALL only; the taskbar uses ICON_BIG.
@@ -572,7 +554,7 @@ fn set_app_logo_mode(app: AppHandle, mode: String) -> Result<(), String> {
             let hwnd = window.hwnd().map_err(|error| error.to_string())?.0 as isize;
             let taskbar_app = app.clone();
             window.run_on_main_thread(move || {
-                taskbar_app.state::<taskbar_icon::TaskbarIcons>().set_for_window(hwnd, &mode);
+                taskbar_app.state::<taskbar_icon::TaskbarIcons>().set_for_window(hwnd, "light");
             }).map_err(|error| error.to_string())?;
         }
     }
@@ -607,46 +589,50 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
 
 fn launch_reminder_worker(app: AppHandle) {
     thread::spawn(move || loop {
-        let local = chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).expect("fixed offset"));
-        let date = local.format("%Y-%m-%d").to_string();
-        let minute = local.format("%H:%M").to_string();
-        let (title, body, should_notify, task_blocks) = if let Some(state) = app.try_state::<AppState>() {
+        let (task_blocks, snoozed) = if let Some(state) = app.try_state::<AppState>() {
             match state.database.lock() {
                 Ok(mut database) => {
-                    let evening_enabled = database.get_ui_setting("ui.reminder.evening_enabled").ok().flatten().as_deref() != Some("false");
-                    let evening_time = database.get_ui_setting("ui.reminder.evening_time").ok().flatten().unwrap_or_else(|| "21:30".into());
-                    let morning_enabled = database.get_ui_setting("ui.reminder.morning_enabled").ok().flatten().as_deref() != Some("false");
-                    let morning_time = database.get_ui_setting("ui.reminder.morning_time").ok().flatten().unwrap_or_else(|| "08:30".into());
                     let task_lead = database.get_ui_setting("ui.reminder.task_lead").ok().flatten()
                         .and_then(|value| value.parse::<i64>().ok()).unwrap_or(5);
                     let task_blocks = database.claim_due_task_block_notifications(task_lead).unwrap_or_default();
-                    if evening_enabled && minute >= evening_time {
-                        let kind = "evening_review";
-                        ("可以回顾今天的执行情况了", "打开今序的“今日 → 复盘与记录”，按需补充结果和详情。", database.claim_daily_notification(kind, &date).unwrap_or(false), task_blocks)
-                    } else if morning_enabled && minute >= morning_time {
-                        let kind = "morning_plan";
-                        ("今天准备怎么安排？", "打开今序主动生成或调整今天的计划；提醒不会自动调用 AI。", database.claim_daily_notification(kind, &date).unwrap_or(false), task_blocks)
-                    } else {
-                        ("", "", false, task_blocks)
-                    }
+                    let snoozed = database.claim_due_task_block_reminder_snoozes(&chrono::Utc::now().to_rfc3339()).unwrap_or_default();
+                    (task_blocks, snoozed)
                 }
-                Err(_) => ("", "", false, Vec::new()),
+                Err(_) => (Vec::new(), Vec::new()),
             }
-        } else { ("", "", false, Vec::new()) };
-        if should_notify {
-            let _ = app.notification().builder().title(title).body(body).show();
-        }
+        } else { (Vec::new(), Vec::new()) };
         for block in task_blocks {
-            let starts_at = chrono::DateTime::parse_from_rfc3339(&block.starts_at)
-                .map(|value| value.with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).expect("fixed offset")).format("%H:%M").to_string())
-                .unwrap_or_else(|_| "即将".into());
-            let _ = app.notification().builder()
-                .title(format!("{} 开始：{}", starts_at, block.task_title))
-                .body("打开今序查看今日时间线；提醒不会自动改变任务状态。")
-                .show();
+            show_task_reminder(&app, block, false);
         }
-        thread::sleep(Duration::from_secs(30));
+        for delayed in snoozed {
+            show_task_reminder(&app, delayed.reminder, true);
+        }
+        thread::sleep(Duration::from_secs(15));
     });
+}
+
+fn show_task_reminder(app: &AppHandle, block: database::TaskBlockNotificationDto, is_snoozed: bool) {
+    match desktop_notifications::task_reminder(&block.block_id, &block.task_id, &block.task_title, block.task_notes.as_deref(), block.task_priority.as_deref(), &block.task_tags, &block.starts_at, &block.ends_at, &block.event_at, block.is_end, chrono::Utc::now()) {
+        Ok((title, body, _)) => if let Err(error) = desktop_notifications::show(app, &title, &body, Some(block), is_snoozed) {
+            eprintln!("任务块提醒发送失败：{error}");
+        },
+        Err(error) => eprintln!("任务块提醒无效：{error}"),
+    }
+}
+
+pub(crate) fn snooze_task_block_reminder(app: &AppHandle, reminder: database::TaskBlockNotificationDto) -> Result<(), String> {
+    let state = app.try_state::<AppState>().ok_or_else(|| "提醒数据库尚未就绪".to_string())?;
+    let mut database = state.database.lock().map_err(|_| "提醒数据库暂不可用".to_string())?;
+    if !database.snooze_task_block_reminder(&reminder, &chrono::Utc::now().to_rfc3339()).map_err(|error| error.to_string())? {
+        return Err("这条提醒已经延后过".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn complete_task_block_reminder(app: &AppHandle, reminder: &database::TaskBlockNotificationDto) -> Result<bool, String> {
+    let state = app.try_state::<AppState>().ok_or_else(|| "提醒数据库尚未就绪".to_string())?;
+    let mut database = state.database.lock().map_err(|_| "提醒数据库暂不可用".to_string())?;
+    database.complete_task_block_reminder(reminder).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -935,12 +921,10 @@ fn apply_confirmed_ai_proposal(
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(single_instance_plugin())
         .manage(ReviewCloseGuard(AtomicBool::new(false)))
         .plugin(tauri_plugin_autostart::Builder::new().app_name(legacy::AUTOSTART_NAME).build())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app, _shortcut, event| {
-            if event.state == ShortcutState::Pressed { show_main_window(app); }
-        }).build())
         .plugin(tauri_plugin_opener::init())
         .setup(|application| {
             let data_dir = application.path().app_data_dir()?;
@@ -956,16 +940,10 @@ pub fn run() {
             application.manage(taskbar_icon::TaskbarIcons::new().map_err(std::io::Error::other)?);
             setup_tray(application)?;
             let app_handle = application.handle().clone();
-            let logo_mode = application.state::<AppState>().database.lock().ok()
-                .and_then(|database| database.get_ui_setting("ui.appearance.mode").ok().flatten())
-                .filter(|mode| mode == "dark")
-                .unwrap_or_else(|| "light".into());
-            set_app_logo_mode(app_handle.clone(), logo_mode).map_err(std::io::Error::other)?;
-            if let Some(shortcut) = application.state::<AppState>().database.lock().ok()
-                .and_then(|database| database.get_ui_setting("ui.desktop.shortcut").ok().flatten())
-                .or_else(|| Some("Ctrl+Alt+Space".into()))
-            {
-                let _ = application.global_shortcut().register(shortcut.as_str());
+            initialize_app_logo(app_handle.clone()).map_err(std::io::Error::other)?;
+            #[cfg(windows)]
+            if let Err(error) = desktop_notifications::initialize(&app_handle, &application.path().app_local_data_dir()?.join("notifications")) {
+                eprintln!("Windows 通知初始化失败：{error}");
             }
             launch_holiday_worker(app_handle.clone());
             launch_reminder_worker(app_handle);
@@ -1029,7 +1007,6 @@ pub fn run() {
             apply_undo,
             get_ui_setting,
             set_ui_setting,
-            set_app_logo_mode,
             set_app_window_title,
             get_ai_connection_settings,
             save_ai_connection_settings,
@@ -1047,7 +1024,6 @@ pub fn run() {
             stop_ai_run,
             get_autostart_enabled,
             set_autostart_enabled,
-            set_global_shortcut,
             send_test_notification,
             update_manual_task,
             transition_manual_task,

@@ -23,7 +23,8 @@ function renderSettings(availability, availabilityError = null) {
     useEffect: React.useEffect,
     useRef: React.useRef,
     Logo: () => null,
-    TimeRangeRail: () => null,
+    Icon: () => null,
+    BlockEditorTimeRangeRail: () => null,
     HolidayCalendarSettings: () => null
   });
   vm.runInContext(code, context);
@@ -32,8 +33,7 @@ function renderSettings(availability, availabilityError = null) {
     availabilityError,
     onSaved() {},
     onReload() {},
-    onNotify() {},
-    onDirtyChange() {}
+    onClose() {}
   }));
 }
 
@@ -50,24 +50,22 @@ test("application no longer imports or calls AI APIs or mounts the assistant", (
   assert.doesNotMatch(app, /assistant-orb|assistant-popover|ui\.ai\.current_conversation/);
 });
 
-test("settings renders five non-AI categories and defaults to working time", () => {
+test("settings renders three non-AI sections in one preferences modal", () => {
   const html = renderSettings({ weekdays: [1, 2, 3, 4, 5], workday_start: "09:00", workday_end: "18:00" });
-  const nav = html.match(/<nav aria-label="设置分类">(.*?)<\/nav>/)?.[1];
-  assert.ok(nav);
-  assert.equal((nav.match(/<button\b/g) || []).length, 5);
-  assert.match(nav, /^<button[^>]*class="active"[^>]*aria-current="location"[^>]*>工作时间<\/button>/);
-  for (const id of ["work", "reminder", "appearance", "desktop", "privacy"]) {
+  assert.match(html, /<dialog[^>]*class="settings-dialog"/);
+  assert.doesNotMatch(html, /设置分类/);
+  for (const id of ["settings-work-title", "settings-reminder-title", "settings-system-title"]) {
     assert.ok(html.includes(`id="${id}"`));
   }
   assert.doesNotMatch(html, /AI|访问密钥|API Key|测试连接|保存连接|id="ai"/);
-  assert.match(html, /按设定时间发送通知，不会自动更改任务或计划。/);
-  assert.match(html, /发送测试通知/);
+  assert.match(html, /0–60 分钟，0 表示关闭/);
+  assert.match(html, /测试通知/);
 });
 
 test("settings keeps its working-time loading and retry states without AI configuration", () => {
-  assert.match(renderSettings(null), /正在载入日计划偏好/);
+  assert.match(renderSettings(null), /正在加载工作时间/);
   const failed = renderSettings(null, "无法读取本地数据");
-  assert.match(failed, /日计划偏好暂时无法打开/);
+  assert.match(failed, /工作时间暂时无法加载/);
   assert.match(failed, /重试/);
   assert.doesNotMatch(settings.getText(source), /aiSettings|aiDirty|aiBusy|aiForm|AiConnection|\bAI\b/);
   assert.match(settings.getText(source), /const dirty = availabilityDirty \|\| preferencesDirty/);

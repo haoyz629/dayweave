@@ -70,7 +70,6 @@ fn legacy_database(connection: Connection) -> Database {
         connection.execute_batch(sql).unwrap();
         connection.execute("INSERT INTO schema_migrations VALUES (?1,'legacy')", [version]).unwrap();
     }
-    // Populate both parents and children, including CASCADE and SET NULL references.
     for (id, priority) in [("high", Some("high")), ("medium", Some("medium")), ("low", Some("low")), ("none", None)] {
         connection.execute("INSERT INTO tasks (id,title,notes,priority,status,estimated_minutes,
             total_workload_minutes,remaining_workload_minutes,created_at,updated_at)
@@ -113,14 +112,16 @@ fn rows(connection: &Connection, sql: &str) -> Vec<Vec<Value>> {
 
 fn data(connection: &Connection) -> Vec<(String, Vec<Vec<Value>>)> {
     rows(connection, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-        AND name <> 'schema_migrations' ORDER BY name").into_iter().map(|row| {
+        AND name NOT IN ('schema_migrations','task_block_reminder_snoozes','task_block_reminder_revisions') ORDER BY name").into_iter().map(|row| {
         let Value::Text(name) = &row[0] else { panic!("table name"); };
         (name.clone(), rows(connection, &format!("SELECT rowid,* FROM \"{name}\" ORDER BY rowid")))
     }).collect()
 }
 
 fn schema(connection: &Connection) -> Vec<Vec<Value>> {
-    rows(connection, "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name")
+    rows(connection, "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'
+        AND tbl_name NOT LIKE 'task_block_reminder_snoozes%' AND tbl_name != 'task_block_reminder_revisions'
+        AND name NOT LIKE 'invalidate_task_block_reminders_on_%' ORDER BY type,name")
         .into_iter().map(|row| row.into_iter().map(|value| match value {
             Value::Text(sql) => Value::Text(sql.replace("\"tasks\"", "tasks").replace("\"task_drafts\"", "task_drafts")),
             other => other,

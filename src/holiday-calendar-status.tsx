@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { requestHolidayUpdate, useHolidayCalendar } from "./holiday-calendar-sync";
-import { holidayYearMessage, missingHolidayYears } from "./official-holiday-calendar";
+import { getHolidayCalendarSnapshot, holidayYearMessage, missingHolidayYears } from "./official-holiday-calendar";
 import "./holiday-calendar.css";
 
-export function HolidayCalendarSettings() {
+export function HolidayCalendarSettings({ compact = false, onResult }: { compact?: boolean; onResult?: (message: string, error?: boolean) => void } = {}) {
   const snapshot = useHolidayCalendar();
   const [manualBusy, setManualBusy] = useState(false);
   const [message, setMessage] = useState("");
   const savingRef = useRef(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const busy = manualBusy || snapshot.checking;
   async function check() {
     if (savingRef.current || snapshot.checking) return;
@@ -16,19 +17,29 @@ export function HolidayCalendarSettings() {
     setMessage("");
     try {
       await requestHolidayUpdate([], true);
-      setMessage("检查已结束；已保存的任务与执行记录不会随节假日更新而移动。");
+      const error = getHolidayCalendarSnapshot().lastError;
+      const result = error || "检查完成，已有任务和执行记录不受节假日更新影响。";
+      if (onResult) onResult(result, Boolean(error));
+      else setMessage(result);
     } finally { savingRef.current = false; setManualBusy(false); }
   }
   const checkedAt = snapshot.lastSuccessAt ? new Date(snapshot.lastSuccessAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false }) : "尚未成功检查";
-  return <div className="holiday-calendar-settings" aria-label="法定节假日数据">
-    <div className="holiday-calendar-heading"><div><h3>法定节假日数据</h3><p>已覆盖 {snapshot.years.map((data) => data.year).join("、")} 年；最近成功检查：{checkedAt}</p></div>
-      <button type="button" className="quiet-button" disabled={busy} onClick={() => void check()}>{busy ? "正在检查…" : "检查节假日更新"}</button>
-    </div>
-    <p>启动后后台检查，自动检查间隔至少 24 小时；已下载数据可离线使用。尚未收录的年份不会预测调休。</p>
-    <p>数据源：NateScarlet/holiday-cn（经 jsDelivr 分发）。这是第三方整理数据，正式安排以国务院公告为准。</p>
-    <p>缺失年份的工作时间暂按每周设置；按法定工作日重复的事项将在相关年份补齐后恢复推演。</p>
-    {(snapshot.lastError || message || busy) && <p className={snapshot.lastError ? "holiday-update-error" : ""} role="status">{busy ? "正在获取已发布的年度安排，原有数据继续可用…" : snapshot.lastError || message}</p>}
-    <small>只下载公共日历文件，不上传任务、日程或个人设置。</small>
+  const details = <>
+    <p>已覆盖 {snapshot.years.map((data) => data.year).join("、")} 年；最近成功检查：{checkedAt}</p>
+    <ul>
+      <li>自动检查更新，已下载日历可离线使用。</li>
+      <li>缺失年份按每周设置安排，不推测调休。</li>
+      <li>法定工作日重复事项待对应年份补齐后恢复推演。</li>
+    </ul>
+    <small>日历仅供排班参考，以国务院公告为准；更新不影响已有任务和执行记录。</small>
+  </>;
+  const updateButton = <button type="button" className="quiet-button" disabled={busy} onClick={() => void check()}>{busy ? "正在检查…" : compact ? "检查更新" : "检查节假日更新"}</button>;
+  return <div className={`holiday-calendar-settings${compact ? " is-compact" : ""}`} aria-label="法定节假日数据">
+    {compact ? <>
+      <div className="settings-dialog-row"><span className="settings-field-copy"><strong>法定节假日排班</strong></span><div className="settings-holiday-actions"><button type="button" className="settings-text-button" aria-expanded={detailsOpen} aria-controls="settings-holiday-details" onClick={() => setDetailsOpen(!detailsOpen)}>{detailsOpen ? "收起详情" : "查看详情"}</button>{updateButton}</div></div>
+      {detailsOpen && <div id="settings-holiday-details" className="settings-holiday-details">{details}</div>}
+    </> : <><div className="holiday-calendar-heading"><h3>法定节假日数据</h3>{updateButton}</div>{details}</>}
+    {(busy || (!onResult && (snapshot.lastError || message))) && <p className={!busy && snapshot.lastError ? "holiday-update-error" : ""} role="status">{busy ? "正在获取已发布的年度安排，原有数据继续可用…" : snapshot.lastError || message}</p>}
   </div>;
 }
 

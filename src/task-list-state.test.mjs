@@ -15,12 +15,14 @@ import { CopySeparator } from "./copy-separator.test-helper.mjs";
 const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const functions = new Map(), expressions = new Map();
-let capsule, editableCompletionButton;
+let capsule, editableCompletionButton, statusFilter;
 function collect(node) {
   if (ts.isFunctionDeclaration(node) && ["taskMatchesView", "taskIsEditable", "TaskCapsuleFact", "TaskCapsuleContent", "CompletedTaskDetails", "DeletedTaskDetails", "RecycleBinActions", "TaskPageHeader", "TaskDetailContent", "TaskDetailResources", "taskDisplayHistory", "TaskStatusHistory", "TaskCompletionDialog"].includes(node.name?.text)) functions.set(node.name.text, node.getText(source));
-  if (ts.isVariableDeclaration(node) && ["statusCopy", "taskViewCopy", "taskViewGroups", "taskEmptyCopy", "counts"].includes(node.name.getText(source))) expressions.set(node.name.getText(source), node.initializer.getText(source));
+  if (ts.isFunctionDeclaration(node) && node.name?.text === "taskStatusFilterCapacity") functions.set(node.name.text, node.getText(source));
+  if (ts.isVariableDeclaration(node) && ["statusCopy", "taskViewCopy", "taskEmptyCopy", "counts", "taskStatusFilterOrder", "taskStatusFilterCollapsedCount"].includes(node.name.getText(source))) expressions.set(node.name.getText(source), node.initializer.getText(source));
   if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(source) === "TaskCapsuleContent" && node.attributes.properties.some(attr => attr.name?.getText(source) === "statusTone" && attr.initializer?.getText(source) === "{taskListStatus(task)}")) capsule = node.getText(source);
   if (ts.isJsxElement(node) && node.openingElement.tagName.getText(source) === "button" && node.getText(source).includes('className="task-compact-complete"') && node.getText(source).includes('requestTaskChange({ kind: "transition", status: "done" })')) editableCompletionButton = node.getText(source);
+  if (ts.isJsxElement(node) && node.openingElement.tagName.getText(source) === "div" && node.openingElement.attributes.properties.some(attr => attr.name?.getText(source) === "aria-label" && attr.initializer?.getText(source) === '"任务状态筛选"')) statusFilter = node.getText(source);
   ts.forEachChild(node, collect);
 }
 collect(source);
@@ -35,7 +37,9 @@ function harness(tasks = []) {
     useMemo: fn => fn(), useState: React.useState, useRef: React.useRef, Icon: () => null, TaskTagList: () => null, TaskCapsuleFact: () => null,
     TimelineHoverCopyButton: ({ field }) => React.createElement("button", { "aria-label": field === "url" ? "复制任务链接" : "复制任务备注" }),
     splitTaskNotes, taskResourceUrl, formatWorkloadMinutes, recycleCleanupMessage,
-    priorityCopy, taskTimingFact: () => null, today: "2026-10-20",
+    priorityCopy, taskTimingFact: () => null, today: "2026-10-20", statusFilterExpanded: false, setStatusFilterExpanded: () => {},
+    view: "scheduled", search: "",
+    statusFilterVisibleCount: 3, statusFilterHiddenCount: 4, statusFilterRef: { current: null }, statusFilterToggleRef: { current: null },
     ConfirmationDialog: ({ children, initialFocus, ...props }) => React.createElement("section", props, children)
   };
   const context = vm.createContext(state);
@@ -45,12 +49,15 @@ function harness(tasks = []) {
 }
 const original = { id: "original", title: "原任务", tags: [], notes: null, priority: "medium", estimated_minutes: 60, earliest_start_date: "2026-10-20", earliest_start_time: "09:00", due_date: "2026-10-20", due_time: "10:00", created_at: "2026-10-20T08:00:00+08:00", deleted_at: null, status: "scheduled", is_incomplete: true, execution_locked: true, result_date: null };
 
-test("capsule puts tags after priority in its heading and only shows AI attribution", () => {
+test("capsule keeps tags in its heading and puts priority beside bottom timing with only AI attribution", () => {
   const { state } = harness();
   state.TaskTagList = ({ tags }) => React.createElement("span", { className: "task-list-tags" }, tags.join("、"));
   for (const sourceType of ["manual", "ai_assistant"]) {
-    const markup = renderToStaticMarkup(state.TaskCapsuleContent({ title: "一个很长的任务标题", priority: "medium", tags: ["开发", "产品"], sourceType, status: "已安排" }));
-    assert.match(markup, /task-capsule-heading[\s\S]*P2<\/span><span class="task-list-tags">开发、产品<\/span>/);
+    const markup = renderToStaticMarkup(state.TaskCapsuleContent({ title: "一个很长的任务标题", priority: "medium", tags: ["开发", "产品"], sourceType, timing: "今天 09:00—10:00", status: "已安排" }));
+    const heading = markup.slice(0, markup.indexOf('<span class="task-capsule-footer">'));
+    assert.match(heading, /task-capsule-heading[\s\S]*<span class="task-list-tags">开发、产品<\/span>/);
+    assert.doesNotMatch(heading, /priority-badge/);
+    assert.match(markup, /task-capsule-footer"><span class="task-capsule-facts"><span class="priority-badge priority-medium">P2<\/span><span[^>]*>今天 09:00—10:00<\/span>/);
     assert.doesNotMatch(markup, /手动创建|source-manual/);
     assert.equal(markup.includes('aria-label="AI 创建"'), sourceType === "ai_assistant");
     assert.match(markup, /title="一个很长的任务标题"/);
@@ -67,7 +74,7 @@ test("unfinished is a separate filter with exclusive counts, not open or schedul
     assert.equal(state.taskMatchesView(task, "draft"), false);
     assert.equal(state.taskMatchesView(task, "recurring"), false);
   }
-  assert.ok(state.taskViewGroups.some(group => group.items.includes("not_completed")));
+  assert.ok(state.taskStatusFilterOrder.includes("not_completed"));
   assert.equal(state.taskViewCopy.not_completed, "未完成");
   assert.equal(state.taskEmptyCopy.not_completed, "暂无未完成任务");
 });
@@ -581,4 +588,128 @@ test("task cards and details retain each legacy priority and show P0 through P3"
     assert.ok(details.includes(label));
     assert.ok(details.includes(`priority-${priority}`));
   }
+});
+
+test("flat status filters expose all views with common states first and guarded selection", () => {
+  const { state, context } = harness([original]);
+  const calls = [];
+  state.view = "scheduled";
+  state.requestTaskChange = change => calls.push({ ...change });
+  assert.ok(statusFilter, "production flat filter exists");
+  const tree = vm.runInContext(compile(`(${statusFilter});`), context);
+  assert.equal(tree.props.role, "group");
+  const children = Array.from(tree.props.children);
+  assert.equal(children.length, 2, "chips and expand button render in one group");
+  const buttons = Array.from(children[0]);
+  const expand = children[1];
+  assert.deepEqual(buttons.map(button => button.key), ["scheduled", "draft", "recurring", "open", "not_completed", "done", "deleted"]);
+  assert.equal(buttons.filter(button => button.props["aria-pressed"]).length, 1);
+  assert.equal(buttons[0].props["aria-pressed"], true, "scheduled is first and selected");
+  assert.match(expand.props.className, /task-status-filter-more/);
+  assert.equal(expand.props.children, "+4 展开");
+  assert.deepEqual(buttons.filter(button => !button.props["aria-hidden"]).map(button => button.key), ["scheduled", "draft", "recurring"]);
+  assert.equal(buttons[2].props.children[0].props.children, "重复", "short recurring label saves first-row space");
+  assert.equal(state.taskViewCopy.recurring, "重复事项", "full view title stays unchanged");
+  assert.equal(buttons.find(button => button.key === "open").props.tabIndex, -1);
+  assert.equal(expand.props["aria-expanded"], false);
+  for (const button of buttons) {
+    assert.match(button.props.className, /task-tag-filter-chip/);
+    assert.match(button.props["aria-label"], /，\d+ 项任务$/);
+    button.props.onClick();
+  }
+  assert.deepEqual(calls, buttons.map(button => ({ kind: "view", view: button.key })));
+  assert.doesNotMatch(text, /filterMenuOpen|handleFilterMenuKeyDown|aria-label="视图与筛选"/);
+  assert.match(text, /type="search" aria-label="搜索当前任务视图"/);
+});
+
+test("status expansion preserves selection, hidden count and keyboard reachability for every view", () => {
+  const { state, context } = harness([original]);
+  state.requestTaskChange = () => {};
+  state.setStatusFilterExpanded = update => { state.statusFilterExpanded = update(state.statusFilterExpanded); };
+  const render = () => {
+    state.statusFilterHiddenCount = state.taskStatusFilterOrder.slice(state.statusFilterVisibleCount).filter(item => item !== state.view).length;
+    const tree = vm.runInContext(compile(`(${statusFilter});`), context);
+    return { group: tree, buttons: Array.from(tree.props.children[0]), toggle: tree.props.children[1] };
+  };
+  for (const view of ["scheduled", "draft", "recurring", "open", "not_completed", "done", "deleted"]) {
+    state.view = view;
+    state.statusFilterExpanded = false;
+    const collapsed = render();
+    const hidden = collapsed.buttons.filter(button => button.props["aria-hidden"]);
+    assert.equal(hidden.length, ["open", "not_completed", "done", "deleted"].includes(view) ? 3 : 4);
+    assert.equal(collapsed.toggle.props.children, `+${hidden.length} 展开`);
+    assert.equal(collapsed.toggle.props["aria-controls"], collapsed.group.props.id);
+    const selected = collapsed.buttons.filter(button => button.props["aria-pressed"]);
+    assert.equal(selected.length, 1);
+    assert.equal(selected[0].key, view);
+    assert.equal(selected[0].props["aria-hidden"], undefined);
+    for (const button of collapsed.buttons) {
+      const clipped = Boolean(button.props["aria-hidden"]);
+      assert.equal(button.props.className.includes("is-clipped"), clipped);
+      assert.equal(button.props.tabIndex, clipped ? -1 : 0);
+    }
+    collapsed.toggle.props.onClick();
+    const expanded = render();
+    assert.equal(expanded.buttons.length, 7);
+    assert.ok(expanded.buttons.every(button => !button.props["aria-hidden"] && button.props.tabIndex === 0));
+    assert.equal(expanded.toggle.props["aria-expanded"], true);
+    assert.equal(expanded.toggle.props.children, "收起");
+    expanded.toggle.props.onClick();
+    const snapshot = filter => filter.buttons.map(button => [button.key, button.props.className, button.props["aria-hidden"], button.props["aria-pressed"], button.props.tabIndex]);
+    const restored = render();
+    assert.deepEqual(snapshot(restored), snapshot(collapsed), "collapse restores the original range and selection");
+    assert.equal(restored.toggle.props.children, collapsed.toggle.props.children);
+  }
+});
+
+test("status labels and counts keep intrinsic widths in a wrapping filter", () => {
+  const css = readFileSync(new URL("./task-tags.css", import.meta.url), "utf8");
+  assert.match(css, /\.task-status-filter \{[^}]*flex-wrap: wrap/);
+  assert.match(css, /\.task-status-filter-chip \{[^}]*gap: 2px;[^}]*flex: none/);
+  assert.match(css, /\.task-status-filter-chip > span:first-child \{[^}]*flex: none;[^}]*overflow: visible/);
+  assert.match(css, /\.task-status-filter-chip \.task-status-filter-count \{[^}]*flex: none;[^}]*overflow: visible;[^}]*font-size: 11px/);
+  assert.match(css, /\.task-status-filter-more:focus-visible/);
+  assert.match(css, /\.task-status-filter:not\(\.is-expanded\):has\(> \.task-status-filter-more:not\(\.is-unused\)\) \{[^}]*padding-right: 78px/);
+  assert.match(css, /\.task-status-filter:not\(\.is-expanded\) \.task-status-filter-more:not\(\.is-unused\) \{[^}]*position: absolute; top: 0; right: 0/);
+  assert.doesNotMatch(css, /\.task-tag-filter\.is-expanded \.task-tag-filter-chip \{[^}]*flex: 1/);
+});
+
+test("status capacity reveals a monotonic prefix and reserves the selected status at every width", () => {
+  const { state } = harness();
+  for (const widths of [[72, 52, 52, 72, 72, 72, 72], [84, 64, 64, 84, 84, 84, 84]]) {
+    for (let selected = 0; selected < widths.length; selected++) {
+      let previous = 0;
+      for (let width = 220; width <= 850; width++) {
+        const count = state.taskStatusFilterCapacity(widths, width, 72, 6, selected);
+        assert.ok(count >= previous && count <= 7);
+        previous = count;
+        const shown = widths.filter((_, index) => index < count || index === selected);
+        const used = shown.reduce((sum, size) => sum + size, 0) + (shown.length - 1) * 6;
+        assert.ok(used + (count < 7 ? 78 : 0) <= width + .5);
+        if (count < 7) {
+          const next = widths.filter((_, index) => index <= count || index === selected);
+          assert.ok(next.reduce((sum, size) => sum + size, 0) + (next.length - 1) * 6 + 78 > width + .5);
+        }
+      }
+      assert.equal(previous, 7);
+    }
+  }
+});
+
+test("all statuses fit without an expand entry or hidden keyboard targets", () => {
+  const { state, context } = harness();
+  state.statusFilterVisibleCount = 7;
+  state.statusFilterHiddenCount = 0;
+  const tree = vm.runInContext(compile(`(${statusFilter});`), context);
+  assert.ok(tree.props.children[0].every(button => !button.props["aria-hidden"]));
+  const toggle = tree.props.children[1];
+  assert.ok(toggle.props.className.includes("is-unused"));
+  assert.equal(toggle.props["aria-hidden"], true);
+  assert.equal(toggle.props.tabIndex, -1);
+  assert.equal(toggle.props["aria-expanded"], false);
+});
+
+test("task labels have no count calculation while status counts remain", () => {
+  assert.doesNotMatch(text, /countTaskTags|tagFilterCounts|counts=\{tagFilterCounts\}/);
+  assert.match(statusFilter, /className="task-status-filter-count"/);
 });

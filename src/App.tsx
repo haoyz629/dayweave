@@ -14,8 +14,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { ConfirmationDialog, Toast, ToastViewport } from "./feedback";
-import { Logo, logoUrl } from "./logo";
 import { AppTitlebar } from "./app-titlebar";
+import "./settings-dialog.css";
 import { CopySeparator, SeparatedCopy } from "./copy-separator";
 import { compactBlockDuration, recurringBlockDisplay, taskBlockType, taskBlockTypeLabels, TaskBlockType } from "./task-block-display";
 import { TimelineTaskCreate, TimelineCreateRange } from "./timeline-task-create";
@@ -28,17 +28,15 @@ import { weekDatesFor, weekHeading } from "./week-timeline-model";
 import { recurringTimeBlockIssue, recurringOccurrenceInput, recurringChangeIssue, recurringTimeRange, recurringClockRange, recurringRangeInput, RecurringScheduleChange, RecurringEditScope } from "./recurring-schedule";
 import { RecurringScopeConfirmation } from "./recurring-scope-confirmation";
 import { canCaptureRecurringResult } from "./review-workflow";
-import { setAppLogoMode, setAppWindowTitle } from "./tauri";
+import { onReminderActivated, ReminderAction, setAppWindowTitle } from "./tauri";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import navTodayIcon from "./assets/nav-today.svg";
 import navTasksIcon from "./assets/nav-tasks.svg";
-import navSettingsIcon from "./assets/nav-settings.svg";
 import taskCreateIcon from "./assets/task-create.svg";
 import recurringIcon from "./assets/recurring.svg";
 import {
   AvailabilitySettings,
   applyUndo,
-  CalendarEvent,
   completeTask,
   confirmCreationDraft,
   importLegacyRecurringDraft,
@@ -85,7 +83,6 @@ import {
   saveAvailabilitySettings,
   sendTestNotification,
   setAutostartEnabled,
-  setGlobalShortcut,
   saveExecutionCapture,
   clearExecutionCapture,
   resolveTaskExecution,
@@ -119,13 +116,11 @@ import {
   continuousTimeScaleMarks,
   constrainTimeRange,
   focusedTimeRangePresentation,
-  focusedTimeRangeWindow,
   normalizeClockInput,
   sanitizeTimeInput,
   selectDateRange,
   selectTaskDateBoundary,
   taskDateRangeIncludesHistory,
-  shiftTimeRangeFromStart,
   timeRangePresentationCanReuse,
   timeRangePresentationContains,
   TimeRangeEdge
@@ -148,7 +143,7 @@ import {
 import { syncFormCommonFields } from "./create-type-switch";
 import { joinTaskNotes, splitTaskNotes, taskResourceUrl } from "./task-notes";
 import { canCaptureTaskResult, normalizeTodayNavigation } from "./review-workflow";
-import { executionResultForOutcome, taskExecutionResolution, timelineTaskCompletionAction, timelineTaskDialogState, taskResultEditable, resultWindowOpen, resultToday, taskNextActionLabels, ExecutionResult, ExecutionOutcome, visibleTaskScheduleBlocks, taskListStatus, TaskListStatus } from "./task-result";
+import { executionResultForOutcome, taskExecutionResolution, timelineTaskCompletionAction, timelineTaskDialogState, taskResultEditable, resultToday, taskNextActionLabels, ExecutionResult, ExecutionOutcome, visibleTaskScheduleBlocks, taskListStatus, TaskListStatus } from "./task-result";
 import { historicalTaskCreationError, isHistoricalResultDate, historicalBlockCompletionLocked, historicalTaskCompletionLocked, HISTORY_COMPLETION_LOCKED_MESSAGE, HISTORICAL_TASK_CREATION_NOTE } from "./task-result";
 import { independentTaskDraft } from "./task-followup";
 import { TaskTagEditor, TaskTagFilter, TaskTagList } from "./task-tag-editor";
@@ -163,18 +158,16 @@ type IconName =
 const navigation: { label: string; icon: IconName; asset: string; description: string }[] = [
   { label: "今日", icon: "today", asset: navTodayIcon, description: "月历与日计划" },
   { label: "任务", icon: "tasks", asset: navTasksIcon, description: "草稿与任务管理" },
-  { label: "设置", icon: "settings", asset: navSettingsIcon, description: "工作方式与连接" }
 ];
 
-const slots = ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"];
 type TaskView = "draft" | "recurring" | TaskListStatus;
 type CreateItemType = "task" | "recurring";
 type LedgerResizeSession = { pointerId: number; startX: number; startWidth: number };
 type TimelineReturnContext = { date: string; blockId?: string; taskId?: string; occurrenceId?: string };
 type TaskSeed = Pick<Task, "title" | "priority" | "tags">;
-type NavigationIntent = { active: string; date?: string; taskView?: TaskView; createTask?: boolean; taskId?: string; recurringItemId?: string; taskSeed?: TaskSeed; timelineReturnContext?: TimelineReturnContext };
+type NavigationIntent = { active: string; date?: string; taskView?: TaskView; createTask?: boolean; taskId?: string; completeOnOpen?: boolean; recurringItemId?: string; taskSeed?: TaskSeed; timelineReturnContext?: TimelineReturnContext };
 type PlanLeaveIntent = { kind: "navigation"; intent: NavigationIntent } | { kind: "date"; date: string };
-type TaskViewRequest = { view?: TaskView; createTask?: boolean; taskId?: string; recurringItemId?: string; taskSeed?: TaskSeed };
+type TaskViewRequest = { view?: TaskView; createTask?: boolean; taskId?: string; recurringItemId?: string; taskSeed?: TaskSeed; completeOnOpen?: boolean };
 type PendingTaskChange =
   | { kind: "select"; taskId: string; edit?: boolean }
   | { kind: "select-recurring"; itemId: string }
@@ -219,7 +212,7 @@ const TASK_QUEUE_VIEW_SETTING = "ui.task_queue_view";
 const TASK_LEDGER_LIST_MIN_WIDTH = 320;
 const TASK_LEDGER_INSPECTOR_MIN_WIDTH = 380;
 const TASK_LEDGER_HANDLE_WIDTH = 14;
-const TASK_LEDGER_LIST_DEFAULT_WIDTH = 340;
+const TASK_LEDGER_LIST_DEFAULT_WIDTH = 400;
 const SHELL_SIDEBAR_COLLAPSED_SETTING = "ui.shell_sidebar_collapsed";
 const MIN_TASK_BLOCK_MINUTES = 15;
 const COMPACT_TASK_BLOCK_THRESHOLD_MINUTES = 30;
@@ -467,20 +460,6 @@ function shiftDateValue(date: string, days: number) {
   return shanghaiDateValue(value);
 }
 
-function dayBounds(date: string) {
-  const next = new Date(`${date}T00:00:00+08:00`);
-  next.setUTCDate(next.getUTCDate() + 1);
-  return {
-    start: `${date}T00:00:00+08:00`,
-    end: `${shanghaiDateValue(next)}T00:00:00+08:00`
-  };
-}
-
-function allDayDraftBounds(date: string) {
-  const bounds = dayBounds(date);
-  return { starts_at: bounds.start.slice(0, 16), ends_at: bounds.end.slice(0, 16) };
-}
-
 function timeLabel(value: string) {
   return value.slice(11, 16);
 }
@@ -491,10 +470,6 @@ function timeRangeLabel(startsAt: string, endsAt: string) {
 
 function timeRangeDurationMinutes(startsAt: string, endsAt: string) {
   return Math.round((new Date(endsAt).getTime() - new Date(startsAt).getTime()) / 60000);
-}
-
-function durationLabel(startsAt: string, endsAt: string) {
-  return `${timeRangeDurationMinutes(startsAt, endsAt)} 分钟`;
 }
 
 function shortTaskBlockClass(startsAt: string, endsAt: string) {
@@ -575,12 +550,24 @@ const taskViewIcon: Record<TaskView, IconName> = {
   deleted: "trash"
 };
 
-const taskViewGroups: { label: string; items: TaskView[] }[] = [
-  { label: "常用", items: ["open", "scheduled"] },
-  { label: "工作流", items: ["recurring", "draft"] },
-  { label: "历史与维护", items: ["not_completed", "done", "deleted"] }
-];
+const taskStatusFilterOrder: TaskView[] = ["scheduled", "draft", "recurring", "open", "not_completed", "done", "deleted"];
+const taskStatusFilterCollapsedCount = 3;
 
+function taskStatusFilterCapacity(widths: number[], width: number, toggleWidth: number, gap: number, selectedIndex: number) {
+  const total = widths.reduce((sum, size) => sum + size, 0) + gap * (widths.length - 1);
+  if (total <= width + .5) return widths.length;
+  const available = width - toggleWidth - gap;
+  let used = 0;
+  let count = 0;
+  for (let index = 0; index < widths.length; index++) {
+    const next = used + (count ? gap : 0) + widths[index];
+    const selectedSpace = selectedIndex > index ? widths[selectedIndex] + gap : 0;
+    if (next + selectedSpace > available + .5) break;
+    used = next;
+    count++;
+  }
+  return count;
+}
 const taskEmptyCopy: Record<TaskView, string> = {
   draft: "暂无待确认草稿",
   recurring: "暂无重复事项",
@@ -723,19 +710,6 @@ function taskDraftTimingFact(draft: TaskDraftInput, today: string) {
     ? "今天"
     : new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric" }).format(new Date(`${date}T00:00:00+08:00`));
   return `${draft.due_date ? "截止" : "最早"} ${dateLabel}${time ? ` ${time}` : ""}`;
-}
-
-function recurrenceForForm(form: NewTaskForm): RecurrenceInput {
-  const startsOn = form.earliest_start_date || form.due_date || shanghaiDateValue();
-  const weekday = new Date(`${startsOn}T00:00:00+08:00`).getDay() || 7;
-  return {
-    frequency: "weekly",
-    interval_value: 1,
-    weekdays: [weekday],
-    month_day: Number(startsOn.slice(8, 10)),
-    starts_on: startsOn,
-    ends_on: null
-  };
 }
 
 function WorkloadTimeDigits({ minutes }: { minutes: number | null | undefined }) {
@@ -1288,12 +1262,6 @@ function TaskEditorRegions({
   </>;
 }
 
-function weekdayLabel(dateStr: string): string {
-  if (!dateStr) return "";
-  const day = new Date(`${dateStr}T00:00:00+08:00`).getDay();
-  return ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][day] ?? "";
-}
-
 function isoWeekParts(dateKey: string) {
   const thursday = new Date(`${dateKey}T00:00:00Z`);
   thursday.setUTCDate(thursday.getUTCDate() + 4 - (thursday.getUTCDay() || 7));
@@ -1789,176 +1757,6 @@ function RecurringItemEditor({ form, disabled, idPrefix, autoFocusTitle = false,
   </div>;
 }
 
-function RecurringModalDialog({
-  form,
-  isEditing,
-  busy,
-  draftSaving,
-  hasDraft,
-  isDirty,
-  autosaveArmed,
-  createItemType,
-  canSaveDraft,
-  canSubmit,
-  onRequestCreateItemType,
-  onChange,
-  onSaveDraft,
-  onSubmit,
-  onClose,
-}: {
-  form: RecurringItemForm;
-  isEditing: boolean;
-  busy: boolean;
-  draftSaving: boolean;
-  hasDraft: boolean;
-  isDirty: boolean;
-  autosaveArmed: boolean;
-  createItemType: "task" | "recurring";
-  canSaveDraft: boolean;
-  canSubmit: boolean;
-  onRequestCreateItemType?: (type: "task" | "recurring") => void;
-  onChange: (form: RecurringItemForm) => void;
-  onSaveDraft: () => void;
-  onSubmit: () => void;
-  onClose: () => void;
-}) {
-  const draftNoticeText = draftSaving
-    ? "正在保存草稿…"
-    : isDirty
-      ? autosaveArmed
-        ? "将在停止输入后自动保存"
-        : "已保留输入，继续编辑后才会自动保存"
-      : "草稿已保存";
-
-  return createPortal(
-    <div
-      className="recurring-modal-backdrop"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget && !busy) {
-          onClose();
-        }
-      }}
-    >
-      <main
-        className="recurring-event-modal"
-        data-purpose="repeat-event-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={isEditing ? "编辑重复事项" : "事项与重复安排高级配置"}
-      >
-        <div className="recurring-modal-body">
-          {/* BEGIN: TypeSelectionHeader */}
-          <section className="recurring-type-selection-header" data-purpose="task-type-toggle" data-autosaving={draftSaving && !busy}>
-            {/* 普通任务卡片 */}
-            <button
-              type="button"
-              className={`recurring-type-card${createItemType === "task" ? " is-active" : ""}`}
-              onClick={() => onRequestCreateItemType?.("task")}
-              disabled={busy || draftSaving}
-            >
-              <div className="recurring-type-icon">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path d="M4 6h16M4 12h10M4 18h7" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-                </svg>
-              </div>
-              <div className="recurring-type-text">
-                <div className="recurring-type-name">普通任务</div>
-                <div className="recurring-type-hint">创建后自动安排，跨日按每日投入分配</div>
-              </div>
-            </button>
-
-            {/* 重复事项卡片 */}
-            <button
-              type="button"
-              className={`recurring-type-card${createItemType === "recurring" ? " is-active" : ""}`}
-              onClick={() => onRequestCreateItemType?.("recurring")}
-              disabled={busy || draftSaving}
-            >
-              <div className="recurring-type-icon is-recurring">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" />
-                </svg>
-              </div>
-              <div className="recurring-type-text">
-                <div className="recurring-type-name">重复事项</div>
-                <div className="recurring-type-hint">按规则展示，可记录每次完成</div>
-              </div>
-            </button>
-          </section>
-          {/* END: TypeSelectionHeader */}
-
-          <RecurringItemEditor
-            form={form}
-            disabled={busy}
-            idPrefix={isEditing ? "edit-recurring" : "new-recurring"}
-            autoFocusTitle
-            compact
-            isCreating={!isEditing}
-            onChange={onChange}
-          />
-        </div>
-
-        {/* BEGIN: ModalFooter */}
-        <footer className="recurring-modal-footer" data-purpose="modal-actions">
-          <div className="recurring-modal-draft-status">
-            <span className="recurring-modal-pulse-dot" />
-            <span className="recurring-modal-draft-text">{draftNoticeText}</span>
-          </div>
-          <div className="recurring-modal-actions-group">
-            <button
-              type="button"
-              className="recurring-modal-btn-round"
-              aria-label="取消"
-              title="取消"
-              disabled={busy || draftSaving}
-              onClick={onClose}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-              </svg>
-            </button>
-
-            <button
-              type="button"
-              className="recurring-modal-btn-round"
-              aria-label={draftSaving ? "正在保存草稿…" : (hasDraft && !isDirty) ? "草稿已保存" : "保存草稿"}
-              title={draftSaving ? "正在保存草稿…" : (hasDraft && !isDirty) ? "草稿已保存" : "保存草稿"}
-              disabled={busy || draftSaving || !canSaveDraft}
-              onClick={onSaveDraft}
-            >
-              {draftSaving ? (
-                <span className="loader" style={{ width: 14, height: 14 }} />
-              ) : (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-                </svg>
-              )}
-            </button>
-
-            <button
-              type="button"
-              className="recurring-modal-btn-primary"
-              disabled={busy || !canSubmit}
-              onClick={onSubmit}
-            >
-              {busy ? (
-                <span className="loader" style={{ width: 14, height: 14 }} />
-              ) : (
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path d={isEditing ? "M5 13l4 4L19 7" : "M12 4v16m8-8H4"} strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" />
-                </svg>
-              )}
-              <span>{busy ? "正在保存…" : isEditing ? "保存修改" : "创建重复事项"}</span>
-            </button>
-          </div>
-        </footer>
-        {/* END: ModalFooter */}
-      </main>
-    </div>,
-    document.body
-  );
-}
-
 function TaskCapsuleFact({ icon, label }: { icon: IconName; label: string }) {
   const deadline = label.startsWith("截止 ");
   return <span className={deadline ? "task-capsule-deadline" : undefined} title={label} aria-label={label}><Icon name={deadline ? "clock" : icon} size={13} />{deadline ? label.slice(3) : label}</span>;
@@ -2001,7 +1799,6 @@ function TaskCapsuleContent({
       <strong title={title}>{title}</strong>
       <span className="task-capsule-heading-meta">
         {typeLabel && <span className={`task-type-badge${variant === "recurring" ? " recurring" : ""}`}>{typeLabel}</span>}
-        {priority && <span className={`priority-badge priority-${priority}`}>{priorityCopy[priority]}</span>}
         <TaskTagList tags={tags} />
         {sourceType === "ai_assistant" && <span className="task-source-icon source-ai_assistant" role="img" aria-label="AI 创建" title="AI 创建"><Icon name="sparkle" size={13} /></span>}
       </span>
@@ -2009,6 +1806,7 @@ function TaskCapsuleContent({
     {visibleNotes && <span className="task-capsule-notes" title={visibleNotes}>{visibleNotes}</span>}
     <span className="task-capsule-footer">
       <span className="task-capsule-facts">
+        {priority && <span className={`priority-badge priority-${priority}`}>{priorityCopy[priority]}</span>}
         {facts.map((fact, index) => <TaskCapsuleFact key={`${fact.icon}-${fact.label}-${index}`} {...fact} />)}
         {timing && <TaskCapsuleFact icon="calendar" label={timing} />}
         {minutes !== null && minutes !== undefined && <span><Icon name="clock" size={13} />{minutes} 分钟</span>}
@@ -2414,11 +2212,14 @@ function TaskWorkspace({
   onReturnToTimeline: (context: TimelineReturnContext) => void;
   onOpenToday: (date?: string, taskId?: string) => void;
 }) {
-  const [view, setView] = useState<TaskView>("open");
+  const [view, setView] = useState<TaskView>("scheduled");
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState("");
-  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
-  const [filterMenuPlacement, setFilterMenuPlacement] = useState({ left: 0, top: 0, width: 0, maxHeight: 0 });
+  const [statusFilterExpanded, setStatusFilterExpanded] = useState(false);
+  const [statusFilterVisibleCount, setStatusFilterVisibleCount] = useState(taskStatusFilterCollapsedCount);
+  const statusFilterRef = useRef<HTMLDivElement>(null);
+  const statusFilterToggleRef = useRef<HTMLButtonElement>(null);
+  const statusFilterHiddenCount = taskStatusFilterOrder.slice(statusFilterVisibleCount).filter(item => item !== view).length;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ManualTaskUpdate | null>(null);
   const [compactTaskEditorDismissed, setCompactTaskEditorDismissed] = useState(false);
@@ -2462,9 +2263,6 @@ function TaskWorkspace({
   const [pendingEndRecurringItem, setPendingEndRecurringItem] = useState<RecurringItem | null>(null);
   const [pendingTrashRecurringItem, setPendingTrashRecurringItem] = useState<RecurringItem | null>(null);
   const preferredSelection = useRef<string | null>(null);
-  const filterMenuRef = useRef<HTMLDivElement>(null);
-  const filterTriggerRef = useRef<HTMLButtonElement>(null);
-  const filterPopupRef = useRef<HTMLElement>(null);
   const ledgerRef = useRef<HTMLDivElement>(null);
   const ledgerResizeSession = useRef<LedgerResizeSession | null>(null);
   const [ledgerListWidth, setLedgerListWidth] = useState<number | null>(null);
@@ -2486,6 +2284,10 @@ function TaskWorkspace({
   const [taskViewReady, setTaskViewReady] = useState(false);
   const [recycleNow, setRecycleNow] = useState(() => Date.now());
   const availableTags = useMemo(() => uniqueTags([...tasks.flatMap((task) => task.tags), ...recurringItems.flatMap((item) => item.tags), ...taskDrafts.flatMap((item) => item.tags)]).sort((a, b) => a.localeCompare(b, "zh-CN")), [tasks, recurringItems, taskDrafts]);
+
+  useLayoutEffect(() => {
+    ledgerRef.current?.querySelector(".task-ledger-scroll")?.scrollTo({ top: 0 });
+  }, [view, search, tagFilter]);
 
   useEffect(() => {
     if (!requestedView || handledRequestedView.current === requestedView) return;
@@ -2519,6 +2321,7 @@ function TaskWorkspace({
         setSelectedId(target.id);
         setDraft(draftForTask(target));
         setCompactTaskEditorDismissed(false);
+        if (requestedView.completeOnOpen) { setCompletionNote(""); setCompletionError(null); setPendingCompletion(true); }
         handledRequestedView.current = requestedView;
         taskViewInitialized.current = true;
         setTaskViewReady(true);
@@ -2557,62 +2360,8 @@ function TaskWorkspace({
       taskViewInitialized.current = true;
       setTaskViewReady(true);
     }
-    setFilterMenuOpen(false);
   }, [requestedView, tasks, recurringItems]);
 
-  useEffect(() => {
-    if (!filterMenuOpen) return;
-    function closeFilterMenu(event: PointerEvent) {
-      if (!filterMenuRef.current?.contains(event.target as Node) && !filterPopupRef.current?.contains(event.target as Node)) setFilterMenuOpen(false);
-    }
-    function closeFilterMenuWithKeyboard(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") {
-        setFilterMenuOpen(false);
-        filterTriggerRef.current?.focus();
-        event.preventDefault();
-      }
-    }
-    window.addEventListener("pointerdown", closeFilterMenu);
-    window.addEventListener("keydown", closeFilterMenuWithKeyboard);
-    return () => {
-      window.removeEventListener("pointerdown", closeFilterMenu);
-      window.removeEventListener("keydown", closeFilterMenuWithKeyboard);
-    };
-  }, [filterMenuOpen]);
-
-  useLayoutEffect(() => {
-    if (!filterMenuOpen) return;
-    function positionFilterMenu() {
-      const list = filterMenuRef.current?.closest(".task-ledger-list")?.getBoundingClientRect();
-      const searchBar = filterMenuRef.current?.closest(".task-queue-search")?.getBoundingClientRect();
-      if (!list || !searchBar) return;
-      const width = Math.min(340, list.width - 24, window.innerWidth - 24);
-      const top = searchBar.bottom + 2;
-      setFilterMenuPlacement({
-        left: list.right - 12 - width,
-        top,
-        width,
-        maxHeight: window.innerHeight - top - 16
-      });
-    }
-    positionFilterMenu();
-    filterPopupRef.current?.querySelector<HTMLButtonElement>('[role="radio"][aria-checked="true"]')?.focus();
-    window.addEventListener("resize", positionFilterMenu);
-    window.addEventListener("scroll", positionFilterMenu, true);
-    return () => {
-      window.removeEventListener("resize", positionFilterMenu);
-      window.removeEventListener("scroll", positionFilterMenu, true);
-    };
-  }, [filterMenuOpen]);
-
-  function handleFilterMenuKeyDown(event: React.KeyboardEvent<HTMLElement>) {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-    const options = Array.from(filterPopupRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []);
-    const current = options.indexOf(document.activeElement as HTMLButtonElement);
-    const next = (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
-    options[next]?.focus();
-    event.preventDefault();
-  }
 
   const visibleTasks = useMemo(() => tasks.filter((task) => taskMatchesView(task, view)
     && matchesTag(task.tags, tagFilter) && matchesTaggedSearch(task, search)), [tasks, view, search, tagFilter]);
@@ -2942,22 +2691,41 @@ function TaskWorkspace({
     done: tasks.filter((task) => taskMatchesView(task, "done")).length,
     deleted: tasks.filter((task) => taskMatchesView(task, "deleted")).length + recurringItems.filter((item) => item.deleted_at).length
   }), [tasks, taskDrafts, recurringItems]);
+
+  useLayoutEffect(() => {
+    const list = statusFilterRef.current;
+    const toggle = statusFilterToggleRef.current;
+    if (!list || !toggle) return;
+    function measure() {
+      const buttons = Array.from(list!.querySelectorAll<HTMLButtonElement>(".task-status-filter-chip"));
+      const selectedIndex = taskStatusFilterOrder.indexOf(view);
+      const count = taskStatusFilterCapacity(buttons.map(button => button.offsetWidth), list!.clientWidth,
+        toggle!.offsetWidth, Number.parseFloat(getComputedStyle(list!).columnGap), selectedIndex);
+      setStatusFilterVisibleCount(count);
+      if ((!statusFilterExpanded && buttons.some((button, index) => index >= count && index !== selectedIndex && button === document.activeElement))
+        || (count === buttons.length && toggle === document.activeElement)) buttons[selectedIndex]?.focus();
+    }
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [counts, view, statusFilterExpanded]);
   const showUnsavedCreateCapsule = creating && view === "draft"
     && !persistedNewTaskDraft;
 
   useEffect(() => {
     if (loading || taskViewInitialized.current || requestedView) return;
     taskViewInitialized.current = true;
-    const operationalViews: TaskView[] = ["open", "scheduled", "not_completed"];
+    const operationalViews: TaskView[] = ["scheduled", "open", "not_completed"];
     void getUiSetting(TASK_QUEUE_VIEW_SETTING).then((stored) => {
       if (handledRequestedView.current) return;
       const preferred = stored && Object.hasOwn(taskViewCopy, stored) ? stored as TaskView : null;
-      const next = preferred ?? operationalViews.find((candidate) => counts[candidate] > 0) ?? "open";
+      const next = preferred ?? operationalViews.find((candidate) => counts[candidate] > 0) ?? "scheduled";
       setView(next);
       setTaskViewReady(true);
     }).catch(() => {
       if (handledRequestedView.current) return;
-      setView(operationalViews.find((candidate) => counts[candidate] > 0) ?? "open");
+      setView(operationalViews.find((candidate) => counts[candidate] > 0) ?? "scheduled");
       setTaskViewReady(true);
     });
   }, [loading, requestedView, counts]);
@@ -3204,10 +2972,6 @@ function TaskWorkspace({
   async function handleManualSaveDraft() {
     if (busy || draftSaving) return;
     if (await persistCurrentTaskDraft(true)) setSuccessToast({ id: Date.now(), message: "草稿已保存" });
-  }
-
-  async function keepCurrentDraft() {
-    await handleManualSaveDraft();
   }
 
   async function transition(target: TaskStatus, note: string | null = null) {
@@ -3649,30 +3413,16 @@ function TaskWorkspace({
               <Icon name="search" size={16} />
               <input type="search" aria-label="搜索当前任务视图" placeholder="搜索任务名称、标签或备注" value={search} onChange={(event) => setSearch(event.target.value)} />
               {search && <button type="button" aria-label="清除搜索" onClick={() => setSearch("")}><Icon name="close" size={14} /></button>}
-              <div className="task-filter-control" ref={filterMenuRef}>
-                <button ref={filterTriggerRef} className={`queue-filter-button${filterMenuOpen ? " is-open" : ""}${view !== "open" || search ? " is-filtered" : ""}`} type="button" aria-label={`筛选任务，当前为${taskViewCopy[view]}`} aria-haspopup="dialog" aria-expanded={filterMenuOpen} aria-controls={filterMenuOpen ? "task-filter-menu" : undefined} onClick={() => setFilterMenuOpen((open) => !open)}><Icon name="filter" size={18} /></button>
-                {filterMenuOpen && createPortal(<section id="task-filter-menu" ref={filterPopupRef} className="task-filter-menu" role="dialog" aria-label="视图与筛选" style={filterMenuPlacement} onKeyDown={handleFilterMenuKeyDown}>
-                  <header className="filter-menu-heading">
-                    <div className="filter-menu-title"><strong>视图与筛选</strong></div>
-                  </header>
-                  <div className="filter-menu-options" role="radiogroup" aria-label="任务类型">
-                    {taskViewGroups.map((group) => <div className="filter-menu-group" role="group" aria-label={group.label} key={group.label}>
-                      <span className="filter-menu-caption">{group.label}</span>
-                      {group.items.map((item) => (
-                        <button key={item} type="button" role="radio" aria-checked={view === item} onClick={() => { requestTaskChange({ kind: "view", view: item }); setFilterMenuOpen(false); }}>
-                          <span className={`filter-option-icon filter-option-${item}`}><Icon name={taskViewIcon[item]} size={16} /></span>
-                          <span className="filter-option-copy"><strong>{taskViewCopy[item]}</strong></span>
-                          <span className="filter-option-meta"><em>{counts[item]}</em>{view === item && <Icon name="check" size={15} />}</span>
-                        </button>
-                      ))}
-                    </div>)}
-                  </div>
-                  <footer className="filter-menu-footer"><span><kbd>↑↓</kbd> 导航</span><CopySeparator /><span><kbd>↵</kbd> 选择</span><span className="filter-menu-footer-close"><kbd>Esc</kbd> 关闭</span></footer>
-                </section>, document.body)}
-              </div>
+            </div>
+            <div ref={statusFilterRef} id="task-status-filter" className={`task-status-filter task-tag-filter-options${statusFilterExpanded && statusFilterHiddenCount ? " is-expanded" : ""}`} role="group" aria-label="任务状态筛选">
+              {taskStatusFilterOrder.map((item, index) => { const clipped = !statusFilterExpanded && index >= statusFilterVisibleCount && item !== view; return <button key={item} type="button" className={`task-tag-filter-chip task-status-filter-chip${clipped ? " is-clipped" : ""}`} aria-pressed={view === item} aria-label={`${taskViewCopy[item]}，${counts[item]} 项任务`} aria-hidden={clipped || undefined} tabIndex={clipped ? -1 : 0} onClick={() => void requestTaskChange({ kind: "view", view: item })}>
+                <span>{item === "recurring" ? "重复" : taskViewCopy[item]}</span><span className="task-status-filter-count" aria-hidden="true">{counts[item]}</span>
+              </button>; })}
+              <button ref={statusFilterToggleRef} type="button" className={`task-status-filter-more${!statusFilterHiddenCount ? " is-unused" : ""}`} aria-hidden={!statusFilterHiddenCount || undefined} tabIndex={statusFilterHiddenCount ? 0 : -1} aria-expanded={statusFilterExpanded && Boolean(statusFilterHiddenCount)} aria-controls="task-status-filter" onClick={() => setStatusFilterExpanded(current => !current)}>{statusFilterExpanded ? "收起" : `+${statusFilterHiddenCount} 展开`}</button>
             </div>
             <TaskTagFilter id="task-tag-filter" tags={availableTags} value={tagFilter} onChange={setTagFilter} />
           </header>
+          <div className="task-ledger-scroll">
           {showUnsavedCreateCapsule && (
             <div className={`ledger-row selected task-ledger-row task-capsule-row capsule-type-${createItemType} status-row-draft`}>
               <button
@@ -3774,6 +3524,7 @@ function TaskWorkspace({
               </div>
             </div>
           ))}
+          </div>
         </div>
         <div className="ledger-resize-handle" role="separator" aria-label="调整任务列表与详情宽度；双击恢复默认宽度" aria-orientation="vertical" aria-valuemin={TASK_LEDGER_LIST_MIN_WIDTH} aria-valuemax={Math.round(ledgerMaximumWidth)} aria-valuenow={Math.round(currentLedgerListWidth())} tabIndex={0} onDoubleClick={resetLedgerWidth} onPointerDown={startLedgerResize} onPointerMove={moveLedgerResize} onPointerUp={endLedgerResize} onPointerCancel={endLedgerResize} onKeyDown={resizeLedgerWithKeyboard} />
         <aside className="task-inspector" aria-label="任务详情">
@@ -3959,13 +3710,6 @@ function calendarCells(monthKey: string) {
       inMonth: date.getUTCMonth() === month - 1
     };
   });
-}
-
-function fullDateLabel(date: string, today: string) {
-  if (date === today) return "今日安排";
-  return new Intl.DateTimeFormat("zh-CN", {
-    timeZone: "Asia/Shanghai", month: "long", day: "numeric", weekday: "long"
-  }).format(new Date(`${date}T00:00:00+08:00`));
 }
 
 function taskUnreservedMinutes(task: Task) {
@@ -4187,209 +3931,6 @@ function nonWorkingSegments(availability: AvailabilitySettings | null, date: str
   if (workdayStart > 0) segments.push({ start: 0, end: workdayStart });
   if (workdayEnd < 24 * 60) segments.push({ start: workdayEnd, end: 24 * 60 });
   return segments;
-}
-
-function TimeRangeRail({
-  start, end, onChange, segments = [], minMinute = 0, maxMinute = 23 * 60 + 45,
-  startLabel = "开始", endLabel = "结束", disabled = false, describedBy,
-  showInputs = true, showPreference = true, minimumDuration = MIN_TASK_BLOCK_MINUTES,
-  focusedWindow = false
-}: {
-  start: string;
-  end: string;
-  onChange: (next: { start: string; end: string }) => void;
-  segments?: TimeRailSegment[];
-  minMinute?: number;
-  maxMinute?: number;
-  startLabel?: string;
-  endLabel?: string;
-  disabled?: boolean;
-  describedBy?: string;
-  showInputs?: boolean;
-  showPreference?: boolean;
-  minimumDuration?: number;
-  focusedWindow?: boolean;
-}) {
-  const trackRef = useRef<HTMLDivElement>(null);
-  const startHandleRef = useRef<HTMLSpanElement>(null);
-  const endHandleRef = useRef<HTMLSpanElement>(null);
-  const dragRef = useRef<{ pointerId: number; edge: TimeRangeEdge; grabOffset: number; separated: boolean } | null>(null);
-  const [draggingHandle, setDraggingHandle] = useState<TimeRangeEdge | null>(null);
-  const startMinute = clockMinutes(start);
-  const endMinute = clockMinutes(end);
-  const safeStartMinute = Math.max(minMinute, Math.min(startMinute, maxMinute - minimumDuration, endMinute - minimumDuration));
-  const safeEndMinute = Math.min(maxMinute, Math.max(endMinute, minMinute + minimumDuration, safeStartMinute + minimumDuration));
-  const editingInputRef = useRef<TimeRangeEdge | null>(null);
-  const startInputDurationRef = useRef(Math.max(minimumDuration, safeEndMinute - safeStartMinute));
-  const [inputValues, setInputValues] = useState(() => ({
-    start: minutesClock(safeStartMinute),
-    end: minutesClock(safeEndMinute)
-  }));
-  const focusedWindowRef = useRef<{ start: number; end: number } | null>(null);
-  useEffect(() => {
-    setInputValues((current) => {
-      const next = {
-        start: editingInputRef.current === "start" ? current.start : minutesClock(safeStartMinute),
-        end: editingInputRef.current === "end" ? current.end : minutesClock(safeEndMinute)
-      };
-      return next.start === current.start && next.end === current.end ? current : next;
-    });
-  }, [safeStartMinute, safeEndMinute]);
-  if (focusedWindow && (
-    !focusedWindowRef.current
-    || safeStartMinute < focusedWindowRef.current.start
-    || safeEndMinute > focusedWindowRef.current.end
-  )) {
-    focusedWindowRef.current = focusedTimeRangeWindow({ start: safeStartMinute, end: safeEndMinute }, minMinute, maxMinute);
-  }
-  const visibleWindow = focusedWindow
-    ? focusedWindowRef.current ?? focusedTimeRangeWindow({ start: safeStartMinute, end: safeEndMinute }, minMinute, maxMinute)
-    : { start: minMinute, end: maxMinute };
-  const railMinMinute = visibleWindow.start;
-  const railMaxMinute = visibleWindow.end;
-  const span = Math.max(minimumDuration, railMaxMinute - railMinMinute);
-  const position = (minute: number) => `${Math.max(0, Math.min(100, (minute - railMinMinute) / span * 100))}%`;
-  const handlesAreTight = (safeEndMinute - safeStartMinute) / span <= 0.08;
-  const handlesAreSeparated = draggingHandle ? Boolean(dragRef.current?.separated) : handlesAreTight;
-  const visibleSegments = segments.filter((segment) => segment.end > railMinMinute && segment.start < railMaxMinute);
-
-  function updateEdge(edge: TimeRangeEdge, value: number, minimum = railMinMinute, maximum = railMaxMinute) {
-    const next = constrainTimeRange(
-      edge,
-      value,
-      { start: safeStartMinute, end: safeEndMinute },
-      minimum,
-      maximum,
-      minimumDuration,
-      15
-    );
-    if (next.start === safeStartMinute && next.end === safeEndMinute) return;
-    onChange({ start: minutesClock(next.start), end: minutesClock(next.end) });
-  }
-
-  function updateStart(value: number) {
-    updateEdge("start", value);
-  }
-
-  function updateEnd(value: number) {
-    updateEdge("end", value);
-  }
-
-  function beginInput(edge: TimeRangeEdge) {
-    editingInputRef.current = edge;
-    if (edge === "start") startInputDurationRef.current = Math.max(minimumDuration, safeEndMinute - safeStartMinute);
-  }
-
-  function updateInput(edge: TimeRangeEdge, value: string) {
-    setInputValues((current) => ({ ...current, [edge]: value }));
-    if (!validDraftClock(value)) return;
-    const next = edge === "start"
-      ? shiftTimeRangeFromStart(
-        clockMinutes(value),
-        startInputDurationRef.current,
-        minMinute,
-        maxMinute,
-        minimumDuration,
-        15
-      )
-      : constrainTimeRange(
-        edge,
-        clockMinutes(value),
-        { start: safeStartMinute, end: safeEndMinute },
-        minMinute,
-        maxMinute,
-        minimumDuration,
-        15
-      );
-    setInputValues({ start: minutesClock(next.start), end: minutesClock(next.end) });
-    if (next.start === safeStartMinute && next.end === safeEndMinute) return;
-    if (focusedWindow) focusedWindowRef.current = focusedTimeRangeWindow(next, minMinute, maxMinute);
-    onChange({ start: minutesClock(next.start), end: minutesClock(next.end) });
-  }
-
-  function finishInput() {
-    editingInputRef.current = null;
-    setInputValues({ start: minutesClock(safeStartMinute), end: minutesClock(safeEndMinute) });
-  }
-
-  function pointerMinute(clientX: number, grabOffset: number) {
-    const track = trackRef.current;
-    if (!track) return null;
-    const bounds = track.getBoundingClientRect();
-    if (bounds.width <= 0) return null;
-    const ratio = Math.max(0, Math.min(1, (clientX - bounds.left - grabOffset) / bounds.width));
-    return railMinMinute + ratio * span;
-  }
-
-  function startPointerDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    if (disabled || event.button !== 0) return;
-    const track = trackRef.current;
-    const startHandle = startHandleRef.current;
-    const endHandle = endHandleRef.current;
-    if (!track || !startHandle || !endHandle) return;
-    event.preventDefault();
-    const startBounds = startHandle.getBoundingClientRect();
-    const endBounds = endHandle.getBoundingClientRect();
-    const clickedEndpoint = event.target instanceof Element ? event.target.closest<HTMLElement>(".time-rail-endpoint-card") : null;
-    const edge = clickedEndpoint?.classList.contains("start")
-      ? "start"
-      : clickedEndpoint?.classList.contains("end")
-        ? "end"
-        : closestTimeRangeEdge(
-          event.clientX,
-          startBounds.left + startBounds.width / 2,
-          endBounds.left + endBounds.width / 2
-        );
-    const handleBounds = edge === "start" ? startBounds : endBounds;
-    const handleCenter = handleBounds.left + handleBounds.width / 2;
-    const trackBounds = track.getBoundingClientRect();
-    const logicalMinute = edge === "start" ? safeStartMinute : safeEndMinute;
-    const logicalCenter = trackBounds.left + (logicalMinute - railMinMinute) / span * trackBounds.width;
-    const grabOffset = Math.abs(event.clientX - handleCenter) <= 14 ? event.clientX - logicalCenter : 0;
-    dragRef.current = { pointerId: event.pointerId, edge, grabOffset, separated: handlesAreTight };
-    setDraggingHandle(edge);
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const minute = pointerMinute(event.clientX, grabOffset);
-    if (minute !== null) updateEdge(edge, minute);
-  }
-
-  function movePointerDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    const minute = pointerMinute(event.clientX, drag.grabOffset);
-    if (minute !== null) updateEdge(drag.edge, minute);
-  }
-
-  function finishPointerDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    dragRef.current = null;
-    setDraggingHandle(null);
-  }
-
-  return <div className="time-range-rail">
-    {showInputs && <div className="time-range-values" aria-label="选择开始和结束时间">
-      <label><span>{startLabel}</span><input type="time" step={900} disabled={disabled} value={inputValues.start} aria-label={`输入${startLabel}`} aria-describedby={describedBy} onFocus={() => beginInput("start")} onChange={(event) => updateInput("start", event.target.value)} onBlur={finishInput} /></label>
-      <label><span>{endLabel}</span><input type="time" step={900} disabled={disabled} value={inputValues.end} aria-label={`输入${endLabel}`} aria-describedby={describedBy} onFocus={() => beginInput("end")} onChange={(event) => updateInput("end", event.target.value)} onBlur={finishInput} /></label>
-    </div>}
-    <div className="time-rail-surface">
-      <div className={`time-rail-track-wrap${handlesAreSeparated ? " handles-are-tight" : ""}${draggingHandle ? ` dragging-${draggingHandle}` : ""}${disabled ? " is-disabled" : ""}`} onPointerDown={startPointerDrag} onPointerMove={movePointerDrag} onPointerUp={finishPointerDrag} onPointerCancel={finishPointerDrag} onLostPointerCapture={finishPointerDrag}>
-        <div ref={trackRef} className="time-rail-track" aria-hidden="true">
-          {visibleSegments.map((segment, index) => <span key={`${segment.start}-${segment.end}-${index}`} className="time-rail-nonworking" aria-hidden="true" style={{ left: position(Math.max(segment.start, railMinMinute)), width: `calc(${position(Math.min(segment.end, railMaxMinute))} - ${position(Math.max(segment.start, railMinMinute))})` }} />)}
-          <span className="time-rail-selection" style={{ left: position(safeStartMinute), width: `calc(${position(safeEndMinute)} - ${position(safeStartMinute)})` }} />
-        </div>
-        <input className="time-rail-range start" type="range" min={railMinMinute} max={railMaxMinute} step={15} value={safeStartMinute} disabled={disabled} aria-label={`调整${startLabel}，15 分钟步进，最短 ${minimumDuration} 分钟`} aria-valuemax={safeEndMinute - minimumDuration} aria-describedby={describedBy} onChange={(event) => updateStart(Number(event.target.value))} />
-        <input className="time-rail-range end" type="range" min={railMinMinute} max={railMaxMinute} step={15} value={safeEndMinute} disabled={disabled} aria-label={`调整${endLabel}，15 分钟步进，最短 ${minimumDuration} 分钟`} aria-valuemin={safeStartMinute + minimumDuration} aria-describedby={describedBy} onChange={(event) => updateEnd(Number(event.target.value))} />
-        <div className="time-rail-handles" aria-hidden="true">
-          <span ref={startHandleRef} className="time-rail-handle start" style={{ left: position(safeStartMinute) }} />
-          <span ref={endHandleRef} className="time-rail-handle end" style={{ left: position(safeEndMinute) }} />
-        </div>
-      </div>
-      <div className="time-rail-scale" aria-hidden="true"><span>{minutesClock(railMinMinute)}</span><span>{minutesClock(Math.round((railMinMinute + span / 2) / 15) * 15)}</span><span>{minutesClock(railMaxMinute)}</span></div>
-      {showPreference && visibleSegments.length > 0 && <small className="time-rail-preference">浅色区间仅表示非工作时间，仍可安排。</small>}
-    </div>
-  </div>;
 }
 
 function BlockEditorTimeRangeRail({
@@ -5051,7 +4592,6 @@ function TodayPage({
   const selectedDateTitle = new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long", day: "numeric", timeZone: "Asia/Shanghai" })
     .format(new Date(`${selectedDate}T00:00:00+08:00`));
   const isPastDate = selectedDate < today;
-  const hasConfirmedPlan = Boolean(schedule?.plan_id);
   const axisStart = 0;
   const axisEnd = 24 * 60;
   const timelineHours = Array.from({ length: 25 }, (_, index) => index);
@@ -6634,104 +6174,81 @@ function TodayPage({
 }
 
 
-function SettingsPage({ availability, availabilityError, onSaved, onReload, onNotify, onDirtyChange }: {
+function SettingsPage({ availability, availabilityError, onSaved, onReload, onClose }: {
   availability: AvailabilitySettings | null;
   availabilityError: string | null;
   onSaved: (settings: AvailabilitySettings) => void;
   onReload: () => void;
-  onNotify: (label: string, message: string, icon?: IconName) => void;
-  onDirtyChange: (dirty: boolean) => void;
+  onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const applyingRef = useRef(false);
   const [draft, setDraft] = useState<AvailabilitySettings | null>(availability);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
-  const [activeCategory, setActiveCategory] = useState("work");
-  const [pendingCategory, setPendingCategory] = useState<string | null>(null);
-  const [reminders, setReminders] = useState({ morning: true, morningTime: "08:30", evening: true, eveningTime: "21:30", taskLead: 5 });
-  const [appearance, setAppearance] = useState({ theme: "default", mode: "light", fontSize: 15 });
-  const [desktop, setDesktop] = useState({ autostart: false, closeToTray: true, shortcut: "Ctrl+Alt+Space" });
-  const [preferenceBusy, setPreferenceBusy] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
+  const [taskLead, setTaskLead] = useState(5);
+  const [desktop, setDesktop] = useState({ autostart: false, closeToTray: true });
   const [preferenceMessage, setPreferenceMessage] = useState("");
-  const savedPreferences = useRef<{ reminders: typeof reminders; appearance: typeof appearance; desktop: typeof desktop } | null>(null);
-  const availabilityState = saving ? "正在保存" : availability ? "已加载" : availabilityError ? "暂时不可用" : "正在加载";
+  const [preferenceLoadAttempt, setPreferenceLoadAttempt] = useState(0);
+  const [feedbackHost, setFeedbackHost] = useState<HTMLDivElement | null>(null);
+  const [feedback, setFeedback] = useState<{ title: string; error: boolean; id: number } | null>(null);
+  const feedbackId = useRef(0);
+  const savedPreferences = useRef<{ taskLead: number; desktop: typeof desktop } | null>(null);
   const availabilityDirty = Boolean(draft && availability && JSON.stringify(draft) !== JSON.stringify(availability));
-  const preferencesDirty = Boolean(savedPreferences.current && JSON.stringify({ reminders, appearance, desktop }) !== JSON.stringify(savedPreferences.current));
+  const preferencesDirty = Boolean(savedPreferences.current && JSON.stringify({ taskLead, desktop }) !== JSON.stringify(savedPreferences.current));
   const dirty = availabilityDirty || preferencesDirty;
-  const settingsCategories = [["work", "工作时间"], ["reminder", "提醒"], ["appearance", "外观"], ["desktop", "Windows 集成"], ["privacy", "数据与隐私"]] as const;
+  const preferencesDisabled = saving || !savedPreferences.current;
+  const ready = Boolean(draft && availability && savedPreferences.current);
+
+  useEffect(() => {
+    const dialog = dialogRef.current!;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialog.showModal();
+    return () => {
+      dialog.close();
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+    };
+  }, []);
 
   useEffect(() => {
     setDraft(availability);
-    setSaveMessage("");
   }, [availability]);
 
   useEffect(() => {
     let active = true;
+    setPreferenceMessage("");
     void Promise.all([
-      getUiSetting("ui.reminder.morning_enabled"), getUiSetting("ui.reminder.morning_time"),
-      getUiSetting("ui.reminder.evening_enabled"), getUiSetting("ui.reminder.evening_time"),
-      getUiSetting("ui.reminder.task_lead"), getUiSetting("ui.appearance.theme"),
-      getUiSetting("ui.appearance.mode"), getUiSetting("ui.appearance.font_size"),
-      getUiSetting("ui.desktop.close_to_tray"), getUiSetting("ui.desktop.shortcut"),
-      getAutostartEnabled()
-    ]).then(([morningEnabled, morningTime, eveningEnabled, eveningTime, taskLead, theme, mode, fontSize, closeToTray, shortcut, autostart]) => {
+      getUiSetting("ui.reminder.task_lead"), getUiSetting("ui.desktop.close_to_tray"), getAutostartEnabled()
+    ]).then(([storedTaskLead, closeToTray, autostart]) => {
       if (!active) return;
-      const nextAppearance = { theme: theme || "default", mode: mode || "light", fontSize: Number(fontSize || 15) };
-      setAppearance(nextAppearance);
-      document.documentElement.dataset.theme = nextAppearance.theme;
-      document.documentElement.dataset.mode = nextAppearance.mode;
-      document.documentElement.style.setProperty("--app-font-size", `${nextAppearance.fontSize}px`);
-      const nextReminders = { morning: morningEnabled !== "false", morningTime: morningTime || "08:30", evening: eveningEnabled !== "false", eveningTime: eveningTime || "21:30", taskLead: Number(taskLead || 5) };
-      const nextDesktop = { autostart, closeToTray: closeToTray !== "false", shortcut: shortcut || "Ctrl+Alt+Space" };
-      setReminders(nextReminders);
+      const value = Number(storedTaskLead ?? 5);
+      const nextTaskLead = Number.isInteger(value) && value >= 0 && value <= 60 ? value : 5;
+      const nextDesktop = { autostart, closeToTray: closeToTray !== "false" };
+      savedPreferences.current = { taskLead: nextTaskLead, desktop: nextDesktop };
+      setTaskLead(nextTaskLead);
       setDesktop(nextDesktop);
-      savedPreferences.current = { reminders: nextReminders, appearance: nextAppearance, desktop: nextDesktop };
     }).catch((reason) => { if (active) setPreferenceMessage(uiErrorMessage(reason)); });
     return () => { active = false; };
-  }, []);
+  }, [preferenceLoadAttempt]);
 
-  useEffect(() => {
-    onDirtyChange(dirty);
-  }, [dirty, onDirtyChange]);
-
-  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
-
-  useEffect(() => () => {
-    const saved = savedPreferences.current?.appearance;
-    if (!saved) return;
-    document.documentElement.dataset.theme = saved.theme;
-    document.documentElement.dataset.mode = saved.mode;
-    document.documentElement.style.setProperty("--app-font-size", `${saved.fontSize}px`);
-  }, []);
-
-  function showCategory(category: string) {
-    setActiveCategory(category);
-    window.requestAnimationFrame(() => document.getElementById(category)?.scrollIntoView({ block: "start" }));
+  function showFeedback(title: string, error = false) {
+    setFeedback({ title, error, id: ++feedbackId.current });
   }
 
-  function requestCategory(category: string) {
-    if (category === activeCategory) {
-      showCategory(category);
-      return;
-    }
-    if (dirty) {
-      setPendingCategory(category);
-      return;
-    }
-    showCategory(category);
+  function requestClose() {
+    if (applyingRef.current) return;
+    if (dirty) setConfirmClose(true);
+    else onClose();
   }
 
-  function resolveCategoryNavigation(discard: boolean) {
-    const category = pendingCategory;
-    setPendingCategory(null);
-    if (!discard || !category) return;
-    setDraft(availability);
-    setSaveMessage("");
-    if (savedPreferences.current) {
-      setReminders(savedPreferences.current.reminders);
-      setDesktop(savedPreferences.current.desktop);
-      previewAppearance(savedPreferences.current.appearance);
-    }
-    showCategory(category);
+  function restoreDefaults() {
+    if (!ready || applyingRef.current) return;
+    setDraft({ weekdays: [1, 2, 3, 4, 5], workday_start: "09:00", workday_end: "18:00", makeup_workdays_as_workdays: true });
+    setTaskLead(5);
+    setDesktop({ autostart: false, closeToTray: true });
+    setSaveMessage("已恢复默认值，应用后生效");
+    setPreferenceMessage("");
   }
 
   function toggleWorkday(day: number) {
@@ -6749,87 +6266,103 @@ function SettingsPage({ availability, availabilityError, onSaved, onReload, onNo
     setSaveMessage("");
   }
 
-  async function submitAvailability(event: FormEvent) {
-    event.preventDefault();
-    if (!draft || saving) return;
-    if (draft.weekdays.length === 0) {
-      setSaveMessage("至少选择一个工作日。");
-      return;
-    }
-    setSaving(true);
-    setSaveMessage("正在保存工作时间…");
-    try {
-      const saved = await saveAvailabilitySettings(draft);
-      setDraft(saved);
-      setSaveMessage("日计划偏好已保存。");
-      onSaved(saved);
-      onNotify("工作时间已保存", "", "check");
-    } catch (reason) {
-      const message = planDraftErrorMessage(reason, null, shanghaiDateValue());
-      setSaveMessage(message);
-      onNotify("工作时间未保存", message, "review");
-    } finally {
-      setSaving(false);
-    }
+  async function submitAvailability() {
+    if (!draft || !availabilityDirty) return;
+    const saved = await saveAvailabilitySettings(draft);
+    setDraft(saved);
+    onSaved(saved);
   }
 
   async function savePreferences() {
-    if (preferenceBusy) return;
-    setPreferenceBusy(true);
-    setPreferenceMessage("正在保存本机偏好…");
+    const saved = savedPreferences.current;
+    if (!saved) return;
+    const writes: Promise<void>[] = [];
+    if (taskLead !== saved.taskLead) writes.push(setUiSetting("ui.reminder.task_lead", String(taskLead)).then(() => { saved.taskLead = taskLead; }));
+    if (desktop.closeToTray !== saved.desktop.closeToTray) writes.push(setUiSetting("ui.desktop.close_to_tray", String(desktop.closeToTray)).then(() => { saved.desktop.closeToTray = desktop.closeToTray; }));
+    if (desktop.autostart !== saved.desktop.autostart) writes.push(setAutostartEnabled(desktop.autostart).then(() => { saved.desktop.autostart = desktop.autostart; }));
+    const results = await Promise.allSettled(writes);
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
+  }
+
+  async function applySettings(closeAfter: boolean) {
+    if (applyingRef.current || !ready || !draft) return;
+    if (draft.weekdays.length === 0) { setSaveMessage("至少选择一个工作日"); return; }
+    if (!Number.isInteger(taskLead) || taskLead < 0 || taskLead > 60) {
+      setSaveMessage("提醒时间须为 0 到 60 分钟的整数，0 表示关闭");
+      return;
+    }
+    if (!dirty) { if (closeAfter) onClose(); return; }
+    applyingRef.current = true;
+    setSaving(true);
+    setSaveMessage("正在应用设置…");
+    setPreferenceMessage("");
     try {
-      await Promise.all([
-        setUiSetting("ui.reminder.morning_enabled", String(reminders.morning)),
-        setUiSetting("ui.reminder.morning_time", reminders.morningTime),
-        setUiSetting("ui.reminder.evening_enabled", String(reminders.evening)),
-        setUiSetting("ui.reminder.evening_time", reminders.eveningTime),
-        setUiSetting("ui.reminder.task_lead", String(reminders.taskLead)),
-        setUiSetting("ui.appearance.theme", appearance.theme),
-        setUiSetting("ui.appearance.mode", appearance.mode),
-        setUiSetting("ui.appearance.font_size", String(appearance.fontSize)),
-        setUiSetting("ui.desktop.close_to_tray", String(desktop.closeToTray)),
-        setGlobalShortcut(desktop.shortcut),
-        setAutostartEnabled(desktop.autostart)
-      ]);
-      setPreferenceMessage("提醒、外观和 Windows 集成设置已保存。");
-      savedPreferences.current = { reminders, appearance, desktop };
-      onNotify("设置已保存", "", "check");
-    } catch (reason) {
-      const message = uiErrorMessage(reason);
-      setPreferenceMessage(message);
-      onNotify("设置未保存", message, "review");
-    } finally { setPreferenceBusy(false); }
+      // These independent writes are not a transaction; retain each successful snapshot for retries.
+      const results = await Promise.allSettled([submitAvailability(), savePreferences()]);
+      const errors = results.flatMap((result, index) => result.status === "rejected" ? [`${index === 0 ? "工作时间" : "提醒与系统设置"}：${uiErrorMessage(result.reason)}`] : []);
+      if (errors.length) {
+        setSaveMessage(`部分设置未应用，请重试。${errors.join("；")}`);
+        showFeedback(`设置未全部应用：${errors.join("；")}`, true);
+        return;
+      }
+      setSaveMessage("设置已应用");
+      showFeedback("设置已应用");
+      if (closeAfter) onClose();
+    } finally { applyingRef.current = false; setSaving(false); }
   }
 
-  function previewAppearance(next: typeof appearance) {
-    setAppearance(next);
-    document.documentElement.dataset.theme = next.theme;
-    document.documentElement.dataset.mode = next.mode;
-    document.documentElement.style.setProperty("--app-font-size", `${next.fontSize}px`);
-  }
-
-  return <section className={`next-page settings-page${dirty || saving ? " has-floating-actions" : ""}`}>
-    <h1 className="sr-only">设置</h1>
-    <div className="settings-layout"><nav aria-label="设置分类">{settingsCategories.map(([category, label]) => <button key={category} type="button" className={activeCategory === category ? "active" : ""} aria-current={activeCategory === category ? "location" : undefined} onClick={() => requestCategory(category)}>{label}</button>)}</nav><div className="settings-sections">
-      <section id="work" className="availability-settings-section"><header><div><h2>工作时间偏好</h2><p>用于自动安排的优先起点和时间线参照，不限制手动安排。</p></div><span className={`setting-state${availability ? " connected" : ""}`}>{availabilityState}</span></header>
-        {availabilityError && !draft ? <div className="setting-load-error"><strong>日计划偏好暂时无法打开</strong><span>{availabilityError}</span><button type="button" className="quiet-button" onClick={onReload}>重试</button></div> : draft ? <form className="setting-availability-form" onSubmit={(event) => void submitAvailability(event)}>
-          <fieldset className="setting-weekdays"><legend>工作日</legend><div>{["一", "二", "三", "四", "五", "六", "日"].map((label, index) => <button key={label} type="button" aria-pressed={draft.weekdays.includes(index + 1)} disabled={saving} onClick={() => toggleWorkday(index + 1)}>周{label}</button>)}</div><label className="setting-makeup-workdays"><input type="checkbox" checked={draft.makeup_workdays_as_workdays ?? true} disabled={saving} onChange={(event) => { setDraft({ ...draft, makeup_workdays_as_workdays: event.target.checked }); setSaveMessage(""); }} />将调休补班日设为工作日</label><small>法定放假日自动作为非工作日；未勾选时，补班日按以上每周选择。非工作日使用更浅的网格背景，仍可安排事项。缺失年份暂按每周设置，不代表已核对法定安排。</small></fieldset>
-          <div className="setting-time-group"><div className="setting-time-heading"><div><h3>每日工作时间</h3><p>自动安排会优先从这段时间开始；其他时段同样可以安排。</p></div><strong>{draft.workday_start} – {draft.workday_end}</strong></div><TimeRangeRail start={draft.workday_start} end={draft.workday_end} startLabel="开始工作" endLabel="结束工作" disabled={saving} onChange={updateWorkdayRange} /></div>
-          {(availabilityDirty || saving) && <footer className="setting-save-bar" aria-label="未保存的更改"><strong role="status" className={saveMessage && !saveMessage.includes("已保存") && !saveMessage.includes("正在") ? "error" : ""}>{saving ? "正在保存到本机…" : draft.weekdays.length === 0 ? "至少选择一个工作日后才能保存。" : saveMessage || "有未保存的更改"}</strong><div className="draft-bar-actions"><button type="button" className="draft-reset" disabled={saving} onClick={() => { setDraft(availability); setSaveMessage(""); }}>撤销</button><button type="submit" className="draft-save" disabled={saving || draft.weekdays.length === 0}>{saving ? "保存中…" : "保存更改"}</button></div></footer>}
-        </form> : <div className="setting-loading"><span className="loader dark" />正在载入日计划偏好…</div>}
-        <HolidayCalendarSettings />
-      </section>
-      <section id="reminder"><header><div><h2>提醒</h2><p>按设定时间发送通知，不会自动更改任务或计划。</p></div><button type="button" className="quiet-button" onClick={() => void sendTestNotification().then(() => setPreferenceMessage("测试通知已发送。")).catch((reason) => setPreferenceMessage(uiErrorMessage(reason)))}>发送测试通知</button></header><div className="setting-row"><div><strong>晨间计划</strong><span>每日首次达到设定时间后提醒一次</span></div><div className="setting-inline-controls"><input type="time" value={reminders.morningTime} disabled={!reminders.morning} onChange={(event) => setReminders({ ...reminders, morningTime: event.target.value })} /><button type="button" role="switch" aria-checked={reminders.morning} className={`switch-control${reminders.morning ? " enabled" : ""}`} onClick={() => setReminders({ ...reminders, morning: !reminders.morning })}><span /></button></div></div><div className="setting-row"><div><strong>晚间复盘</strong><span>每日首次达到设定时间后提醒一次</span></div><div className="setting-inline-controls"><input type="time" value={reminders.eveningTime} disabled={!reminders.evening} onChange={(event) => setReminders({ ...reminders, eveningTime: event.target.value })} /><button type="button" role="switch" aria-checked={reminders.evening} className={`switch-control${reminders.evening ? " enabled" : ""}`} onClick={() => setReminders({ ...reminders, evening: !reminders.evening })}><span /></button></div></div><label className="setting-buffer">任务块开始前提醒<span><input type="number" min={0} max={60} step={5} value={reminders.taskLead} onChange={(event) => setReminders({ ...reminders, taskLead: Number(event.target.value) })} />分钟</span></label></section>
-      <section id="appearance"><header><div><h2>外观</h2><p>主题会即时预览，保存后随应用启动恢复。</p></div><span className="setting-state connected">可配置</span></header><div className="theme-options">{[["default", "默认"], ["github", "GitHub"], ["codex", "Codex"]].map(([value, label]) => <button key={value} type="button" aria-pressed={appearance.theme === value} onClick={() => previewAppearance({ ...appearance, theme: value })}><span className={`theme-swatch ${value}`} />{label}</button>)}</div>
-        <div className="setting-row"><div><strong>明暗模式</strong><span>切换界面明暗，应用 Logo 始终使用浅色版</span></div><select aria-label="明暗模式" value={appearance.mode} onChange={(event) => previewAppearance({ ...appearance, mode: event.target.value })}><option value="light">浅色</option><option value="dark">深色</option></select></div>
-        <div className="setting-row"><div><strong>应用 Logo</strong><span>所有主题、窗口、任务栏与托盘统一使用浅色 Logo</span></div><div className="logo-mode-previews"><span><Logo /><span>浅色<CopySeparator />所有主题</span></span></div></div>
-        <label className="setting-buffer">界面字号<span><input type="range" min={13} max={18} value={appearance.fontSize} onChange={(event) => previewAppearance({ ...appearance, fontSize: Number(event.target.value) })} />{appearance.fontSize}</span></label></section>
-      <section id="desktop"><header><div><h2>Windows 集成</h2><p>快捷唤起、开机启动和关闭到托盘。</p></div><span className="setting-state connected">已接入</span></header><div className="setting-row"><div><strong>开机启动</strong><span>登录 Windows 后自动启动今序</span></div><button type="button" role="switch" aria-checked={desktop.autostart} className={`switch-control${desktop.autostart ? " enabled" : ""}`} onClick={() => setDesktop({ ...desktop, autostart: !desktop.autostart })}><span /></button></div><div className="setting-row"><div><strong>关闭到托盘</strong><span>窗口关闭后仍在后台提供提醒</span></div><button type="button" role="switch" aria-checked={desktop.closeToTray} className={`switch-control${desktop.closeToTray ? " enabled" : ""}`} onClick={() => setDesktop({ ...desktop, closeToTray: !desktop.closeToTray })}><span /></button></div><label className="setting-buffer">全局快捷键<span><input value={desktop.shortcut} maxLength={80} onChange={(event) => setDesktop({ ...desktop, shortcut: event.target.value })} /></span><small>例如 Ctrl+Alt+Space；若已被其他应用占用，保存时会提示。</small></label></section>
-      <section id="privacy"><header><div><h2>数据与隐私</h2><p>任务、草稿、计划和历史都保存在这台电脑上。</p></div><span className="setting-state connected">仅存本机</span></header><div className="setting-row"><div><strong>本地数据</strong><span>由今序保存在这台电脑上；当前版本未加密</span></div></div><div className="setting-row"><div><strong>回收站</strong><span>普通任务和重复事项移入回收站后默认保留 30 天，过期内容会在启动时清理</span></div></div></section>
-      <footer className="settings-preference-footer"><span role="status">{preferenceMessage || (preferencesDirty ? "提醒、外观或 Windows 集成有未保存的更改。" : "提醒、外观和 Windows 集成已与本机设置一致。")}</span><button type="button" disabled={preferenceBusy || !preferencesDirty} onClick={() => void savePreferences()}>{preferenceBusy ? "保存中…" : "保存提醒与外观"}</button></footer>
-    </div></div>
-    {pendingCategory && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) resolveCategoryNavigation(false); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="settings-category-dialog-title" aria-describedby="settings-category-dialog-description" busy={false} tone="caution" onCancel={() => resolveCategoryNavigation(false)}><h2 id="settings-category-dialog-title">放弃未保存修改？</h2><p id="settings-category-dialog-description">设置中还有未保存内容。放弃后，日计划、提醒、外观和 Windows 偏好会恢复为本机当前值。</p><div className="dialog-actions"><button type="button" autoFocus onClick={() => resolveCategoryNavigation(false)}>继续编辑</button><button type="button" className="dialog-discard" onClick={() => resolveCategoryNavigation(true)}>放弃修改</button></div></ConfirmationDialog></div>}
-  </section>;
+  return <dialog ref={dialogRef} className="settings-dialog" aria-labelledby="settings-dialog-title" aria-modal="true" aria-busy={saving}
+    onCancel={(event) => { event.preventDefault(); requestClose(); }}
+    onKeyDown={(event) => {
+      event.stopPropagation();
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); return; }
+      if (event.key === "Tab" && !event.defaultPrevented && !confirmClose) {
+        const controls = [...event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), [tabindex='0']")].filter((control) => control.getClientRects().length > 0);
+        const target = event.shiftKey ? controls.at(-1) : controls[0];
+        if (document.activeElement === (event.shiftKey ? controls[0] : controls.at(-1))) {
+          event.preventDefault(); target?.focus();
+        }
+      }
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault(); event.stopPropagation();
+      if (confirmClose) setConfirmClose(false); else requestClose();
+    }} onClick={(event) => {
+      if (event.target !== event.currentTarget) return;
+      const bounds = event.currentTarget.getBoundingClientRect();
+      if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) requestClose();
+    }}>
+    <header className="settings-dialog-header"><button type="button" className="settings-text-button" disabled={!ready || saving} onClick={(event) => { restoreDefaults(); event.currentTarget.blur(); }}>恢复默认</button><h1 id="settings-dialog-title">偏好设置</h1><button type="button" className="settings-close-button" aria-label="关闭设置" disabled={saving} autoFocus onClick={requestClose}><Icon name="close" size={16} /></button></header>
+    <form className="settings-dialog-form" onSubmit={(event) => { event.preventDefault(); void applySettings(false); }}>
+      <div className="settings-dialog-content" tabIndex={0} role="region" aria-label="设置内容"><fieldset className="settings-dialog-fields" disabled={saving}>
+        <section className="settings-dialog-section" aria-labelledby="settings-work-title"><h2 id="settings-work-title">工作与日程</h2>
+          {availabilityError && !draft ? <div className="settings-load-error" role="alert"><span>工作时间暂时无法加载：{availabilityError}</span><button type="button" onClick={onReload}>重试</button></div> : draft ? <>
+            <div className="settings-dialog-row"><span className="settings-field-copy" id="settings-weekdays-label"><strong>常规工作日</strong></span><div className="settings-weekday-buttons" role="group" aria-labelledby="settings-weekdays-label">{["一", "二", "三", "四", "五", "六", "日"].map((label, index) => <button key={label} type="button" aria-label={`周${label}`} aria-pressed={draft.weekdays.includes(index + 1)} onClick={() => toggleWorkday(index + 1)}>{label}</button>)}</div></div>
+            <label className="settings-dialog-row settings-makeup-row"><span className="settings-field-copy"><strong>调休补班日</strong></span><span className="settings-checkbox-option"><input className="settings-makeup-checkbox" type="checkbox" aria-label="补班日计入工作日" checked={draft.makeup_workdays_as_workdays ?? true} onChange={(event) => { setDraft({ ...draft, makeup_workdays_as_workdays: event.target.checked }); setSaveMessage(""); }} /><span>计入工作日</span></span></label>
+            <div className="settings-dialog-row"><span className="settings-field-copy"><strong>每日工作时段</strong><small>优先安排时段，仍可手动调整</small></span><div className="settings-time-inputs"><BlockEditorTimeRangeRail start={draft.workday_start} end={draft.workday_end} inputsOnly showPresets={false} maxMinute={23 * 60 + 45} disabled={saving} onChange={updateWorkdayRange} /></div></div>
+          </> : <p role="status">正在加载工作时间…</p>}
+          <HolidayCalendarSettings compact onResult={showFeedback} />
+        </section>
+        <section className="settings-dialog-section" aria-labelledby="settings-reminder-title"><h2 id="settings-reminder-title">提醒与通知</h2>
+          <div className="settings-dialog-row">
+            <label className="settings-field-copy" htmlFor="settings-task-lead"><strong id="settings-reminder-label">任务块提前提醒</strong><small id="settings-reminder-help">开始前和结束前提醒，0–60 分钟，0 表示关闭</small></label>
+            <div className="settings-reminder-inputs"><span className="settings-minutes-input"><input id="settings-task-lead" type="number" inputMode="numeric" autoComplete="off" min={0} max={60} step={1} aria-describedby="settings-reminder-help" aria-labelledby="settings-reminder-label" value={Number.isNaN(taskLead) ? "" : taskLead} disabled={preferencesDisabled} onFocus={(event) => event.currentTarget.select()} onChange={(event) => { setTaskLead(event.target.value === "" ? NaN : Number(event.target.value)); setSaveMessage(""); }} /><span aria-hidden="true">分钟</span></span>
+              <button type="button" className="settings-test-button" disabled={saving} onClick={() => void sendTestNotification().then(() => showFeedback("测试通知已发送")).catch((reason) => showFeedback(uiErrorMessage(reason), true))}>测试通知</button>
+            </div>
+          </div>
+        </section>
+        <section className="settings-dialog-section" aria-labelledby="settings-system-title"><h2 id="settings-system-title">系统</h2>
+          <div className="settings-dialog-row"><span className="settings-field-copy"><strong>开机启动</strong><small>登录后在后台启动</small></span><button type="button" role="switch" aria-label="开机启动" aria-checked={desktop.autostart} disabled={preferencesDisabled} className={`switch-control${desktop.autostart ? " enabled" : ""}`} onClick={() => { setDesktop({ ...desktop, autostart: !desktop.autostart }); setSaveMessage(""); }}><span /></button></div>
+          <div className="settings-dialog-row"><span className="settings-field-copy"><strong>关闭到托盘</strong><small>关闭窗口后继续运行和提醒</small></span><button type="button" role="switch" aria-label="关闭到托盘" aria-checked={desktop.closeToTray} disabled={preferencesDisabled} className={`switch-control${desktop.closeToTray ? " enabled" : ""}`} onClick={() => { setDesktop({ ...desktop, closeToTray: !desktop.closeToTray }); setSaveMessage(""); }}><span /></button></div>
+        </section>
+        {!savedPreferences.current && preferenceMessage && <div className="settings-load-error" role="alert"><span>提醒与系统设置加载失败：{preferenceMessage}</span><button type="button" onClick={() => setPreferenceLoadAttempt((value) => value + 1)}>重试</button></div>}
+      </fieldset></div>
+      <footer className="settings-dialog-footer"><span className="settings-save-status" role="status">{saveMessage || preferenceMessage || (dirty ? "有未应用的修改" : !ready ? "正在加载设置…" : "")}</span><div className="settings-dialog-actions"><button type="button" className="settings-text-button" disabled={saving} onClick={requestClose}>关闭</button><button type="submit" disabled={saving || !ready || !dirty}>应用</button><button type="button" className="settings-apply-close" disabled={saving || !ready} onClick={() => void applySettings(true)}>{saving ? "正在应用…" : "应用并关闭"}</button></div></footer>
+    </form>
+    <div ref={setFeedbackHost} className="feedback-toast-viewport settings-feedback-viewport" />
+    {feedback && <Toast key={feedback.id} container={feedbackHost} title={feedback.title} tone={feedback.error ? "error" : "success"} duration={4000} onDismiss={() => setFeedback(null)} />}
+    {confirmClose && <div className="settings-discard-backdrop"><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="settings-leave-dialog-title" aria-describedby="settings-leave-dialog-description" tone="caution" onCancel={() => setConfirmClose(false)}><h2 id="settings-leave-dialog-title">放弃未应用的修改？</h2><p id="settings-leave-dialog-description">未应用的输入将被放弃，已成功应用的设置不会撤销。</p><div className="dialog-actions"><button type="button" onClick={() => setConfirmClose(false)}>继续编辑</button><button type="button" className="dialog-discard" onClick={onClose}>放弃修改</button></div></ConfirmationDialog></div>}
+  </dialog>;
 }
 
 export default function App() {
@@ -6846,9 +6379,10 @@ export default function App() {
   const [recurringItems, setRecurringItems] = useState<RecurringItem[]>([]);
   const [recurringOccurrences, setRecurringOccurrences] = useState<RecurringOccurrence[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
+  const tasksRequested = useRef(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
   const [taskEditorDirty, setTaskEditorDirty] = useState(false);
-  const [settingsEditorDirty, setSettingsEditorDirty] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<NavigationIntent | null>(null);
   const [pendingPlanLeave, setPendingPlanLeave] = useState<PlanLeaveIntent | null>(null);
   const [daySchedule, setDaySchedule] = useState<DaySchedule | null>(null);
@@ -6861,6 +6395,24 @@ export default function App() {
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
   const [requestedTaskView, setRequestedTaskView] = useState<TaskViewRequest | null>(null);
   const [timelineReturnContext, setTimelineReturnContext] = useState<TimelineReturnContext | null>(null);
+  const reminderNavigationRef = useRef<(event: ReminderAction) => void>(() => {});
+  reminderNavigationRef.current = ({ target, action }) => {
+    if (action === "completed") {
+      void Promise.all([refreshTasks(false), refreshSchedule(selectedDate, false)]).catch((reason) => setMessage(`任务已完成，刷新失败：${uiErrorMessage(reason)}`));
+    } else {
+      requestNavigation({ active: "今日", date: target.date, timelineReturnContext: { date: target.date, blockId: target.blockId } });
+    }
+  };
+
+  useEffect(() => {
+    let disposed = false;
+    let stopListening: (() => void) | undefined;
+    void onReminderActivated((event) => { if (!disposed) reminderNavigationRef.current(event); }).then((unlisten) => {
+      if (disposed) unlisten();
+      else stopListening = unlisten;
+    }).catch((reason) => { if (!disposed) setMessage(`提醒定位暂不可用：${uiErrorMessage(reason)}`); });
+    return () => { disposed = true; stopListening?.(); };
+  }, []);
   const workspaceRef = useRef<HTMLElement>(null);
   const previousPageRef = useRef(active);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -6943,49 +6495,17 @@ export default function App() {
   }, [holidayRevision]);
 
   useEffect(() => {
-    void refreshTasks();
     void refreshAvailability();
-    void Promise.all([
-      getUiSetting("ui.appearance.theme"),
-      getUiSetting("ui.appearance.mode"),
-      getUiSetting("ui.appearance.font_size")
-    ]).then(([theme, mode, fontSize]) => {
-      document.documentElement.dataset.theme = theme || "default";
-      document.documentElement.dataset.mode = mode || "light";
-      document.documentElement.style.setProperty("--app-font-size", `${Number(fontSize || 15)}px`);
-    }).catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    let previousMode = "";
-    let pending = Promise.resolve();
-    const syncLogo = () => {
-      if (!document.documentElement.dataset.mode) return;
-      const mode = document.documentElement.dataset.mode === "dark" ? "dark" : "light";
-      if (mode === previousMode) return;
-      previousMode = mode;
-      let favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-      if (!favicon) {
-        favicon = document.createElement("link");
-        favicon.rel = "icon";
-        document.head.append(favicon);
-      }
-      favicon.href = logoUrl(mode);
-      if ("__TAURI_INTERNALS__" in window) {
-        pending = pending.then(() => setAppLogoMode(mode)).catch((reason) => console.warn("应用图标更新失败", reason));
-      }
-    };
-    const observer = new MutationObserver(syncLogo);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-mode"] });
-    syncLogo();
-    return () => observer.disconnect();
+    document.documentElement.dataset.theme = "default";
+    document.documentElement.dataset.mode = "light";
   }, []);
 
   useEffect(() => {
     setPlanPreview(null);
     setPlanToast(null);
     setMessage("");
-    void Promise.all([refreshTasks(false), refreshSchedule(selectedDate)]);
+    void Promise.all([refreshTasks(!tasksRequested.current), refreshSchedule(selectedDate)]);
+    tasksRequested.current = true;
   }, [selectedDate]);
 
 
@@ -7145,11 +6665,11 @@ export default function App() {
     if (intent.date && intent.date !== selectedDate) {
       setScheduleLoading(true);
       setSelectedDate(intent.date);
-    } else if (intent.active === "今日" && (intent.timelineReturnContext?.taskId || intent.timelineReturnContext?.occurrenceId)) {
+    } else if (intent.active === "今日" && (intent.timelineReturnContext?.blockId || intent.timelineReturnContext?.taskId || intent.timelineReturnContext?.occurrenceId)) {
       void refreshSchedule(selectedDate);
     }
     setRequestedTaskView(intent.taskView || intent.createTask || intent.taskId || intent.recurringItemId || intent.taskSeed
-      ? { view: intent.taskView, createTask: intent.createTask, taskId: intent.taskId, recurringItemId: intent.recurringItemId, taskSeed: intent.taskSeed }
+      ? { view: intent.taskView, createTask: intent.createTask, taskId: intent.taskId, recurringItemId: intent.recurringItemId, taskSeed: intent.taskSeed, completeOnOpen: intent.completeOnOpen }
       : null);
     setTimelineReturnContext(intent.timelineReturnContext ?? null);
     const normalized = normalizeTodayNavigation(intent.active);
@@ -7167,10 +6687,6 @@ export default function App() {
       return;
     }
     if (active === "任务" && taskEditorDirty && (intent.active !== "任务" || Boolean(intent.taskView) || Boolean(intent.createTask) || Boolean(intent.taskId) || Boolean(intent.taskSeed))) {
-      setPendingNavigation(intent);
-      return;
-    }
-    if (active === "设置" && settingsEditorDirty && intent.active !== "设置") {
       setPendingNavigation(intent);
       return;
     }
@@ -7231,7 +6747,7 @@ export default function App() {
   const brandWeek = isoWeekParts(today);
 
   return <div className="desktop-app">
-    <AppTitlebar viewSlotRef={setHeaderViewSlot} onError={notifyWindowError} weekLabel={`${brandWeek.year} 第${brandWeek.week}周`} />
+    <AppTitlebar viewSlotRef={setHeaderViewSlot} onError={notifyWindowError} onOpenSettings={() => setSettingsOpen(true)} weekLabel={`${brandWeek.year} 第${brandWeek.week}周`} />
     <main className={`next-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
     <ToastViewport />
     {planToast && <Toast key={planToast.id} title={planToast.label} description={planToast.message} tone={planToast.icon === "check" ? "success" : planToast.icon === "review" ? "error" : "info"} duration={planToast.undoId || planToast.taskSeed ? 10_000 : planToast.icon === "review" ? 5200 : 2800} onDismiss={() => setPlanToast(null)} actions={[
@@ -7239,7 +6755,6 @@ export default function App() {
       ...(planToast.taskSeed ? [{ label: "新建任务", onClick: () => { requestNavigation({ active: "任务", taskSeed: planToast.taskSeed }); setPlanToast(null); } }] : [])
     ]} />}
     {pendingPlanLeave && planPreview && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !planBusy) void resolvePendingPlanLeave(false); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="plan-leave-dialog-title" aria-describedby="plan-leave-dialog-description" busy={planBusy} tone="caution" onCancel={() => void resolvePendingPlanLeave(false)}><h2 id="plan-leave-dialog-title">日计划草案尚未确认</h2><p id="plan-leave-dialog-description">{planPreview.plan_date} 的草案还没有加入正式日历。切换日期或视图前，请先确认，或丢弃草案并恢复其调整的任务时间。</p><div className="dialog-actions"><button type="button" autoFocus disabled={planBusy} onClick={() => void resolvePendingPlanLeave(false)}>继续编辑</button><button type="button" className="dialog-discard" disabled={planBusy} onClick={() => void resolvePendingPlanLeave(true)}>{planBusy ? "正在丢弃…" : "丢弃并继续"}</button></div></ConfirmationDialog></div>}
-    {active === "设置" && settingsEditorDirty && pendingNavigation && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) resolvePendingNavigation(false); }}><ConfirmationDialog role="alertdialog" aria-modal="true" aria-labelledby="settings-leave-dialog-title" aria-describedby="settings-leave-dialog-description" busy={false} tone="caution" onCancel={() => resolvePendingNavigation(false)}><h2 id="settings-leave-dialog-title">放弃未保存修改？</h2><p id="settings-leave-dialog-description">设置中还有未保存内容。离开后会恢复为上次保存的日计划、提醒、外观和 Windows 偏好。</p><div className="dialog-actions"><button type="button" autoFocus onClick={() => resolvePendingNavigation(false)}>继续编辑</button><button type="button" className="dialog-discard" onClick={() => resolvePendingNavigation(true)}>放弃修改</button></div></ConfirmationDialog></div>}
     <aside id="main-sidebar" className={`next-sidebar${mobileNavOpen ? " mobile-open" : ""}`} aria-label="主导航">
       <button className="next-create" type="button" aria-label="记一件事" aria-describedby={sidebarCollapsed ? "sidebar-tip-create" : undefined} onClick={() => requestNavigation({ active: "任务", createTask: true })}><img className="sidebar-create-icon" src={taskCreateIcon} alt="" width={20} height={20} /><span className="next-create-label">记一件事</span><span className="sidebar-tooltip" id="sidebar-tip-create" role="tooltip" aria-hidden="true"><strong>记一件事</strong><small>创建普通任务或重复事项</small></span></button>
       <nav>
@@ -7270,7 +6785,7 @@ export default function App() {
         </div>
       </div>}
       {active === "任务" && <TaskWorkspace tasks={tasks} recurringItems={recurringItems} loading={tasksLoading} error={tasksError} onReload={refreshTasks} onTaskCommitted={taskCommitted} onRecurringChanged={async () => { await Promise.all([refreshTasks(false), refreshSchedule(selectedDate, false)]); }} today={today} onDirtyChange={setTaskEditorDirty} externalNavigationRequest={pendingNavigation} onExternalNavigationResolved={resolvePendingNavigation} requestedView={requestedTaskView} timelineReturnContext={timelineReturnContext} onReturnToTimeline={(returnContext) => requestNavigation({ active: "今日", timelineReturnContext: returnContext })} onOpenToday={(date = today, taskId) => requestNavigation({ active: "今日", date, timelineReturnContext: taskId ? { date, taskId } : undefined })} />}
-      {active === "设置" && <SettingsPage availability={availability} availabilityError={availabilityError} onReload={() => void refreshAvailability()} onSaved={(settings) => { setAvailability(settings); setAvailabilityError(null); void refreshSchedule(selectedDate, false); }} onNotify={(label, toastMessage, icon) => setPlanToast({ id: Date.now(), label, message: toastMessage, icon })} onDirtyChange={setSettingsEditorDirty} />}
+      {settingsOpen && <SettingsPage availability={availability} availabilityError={availabilityError} onReload={() => void refreshAvailability()} onSaved={(settings) => { setAvailability(settings); setAvailabilityError(null); void refreshSchedule(selectedDate, false); }} onClose={() => setSettingsOpen(false)} />}
     </section>
     </main>
   </div>;

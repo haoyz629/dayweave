@@ -100,10 +100,10 @@ test("compact quick actions overlay the upper right without reserving a bottom r
   assert.equal((app.match(/<div className="ledger-row-actions"/g) || []).length, 4);
 });
 
-test("deadline icon, filter control and persisted list width keep their existing behavior", () => {
+test("deadline icon, flat filters and persisted list width keep their behavior", () => {
   assert.match(app, /<Icon name=\{deadline \? "clock" : icon\} size=\{13\}/);
-  assert.match(app, /className=\{`queue-filter-button/);
-  assert.match(app, /const TASK_LEDGER_LIST_DEFAULT_WIDTH = 340;/);
+  assert.match(app, /id="task-status-filter"[^>]*task-tag-filter-options[^>]*statusFilterExpanded/);
+  assert.match(app, /const TASK_LEDGER_LIST_DEFAULT_WIDTH = 400;/);
   assert.match(app, /const TASK_LEDGER_WIDTH_SETTING = "ui.task_ledger_list_width";/);
   for (const tone of ["open", "scheduled", "not_completed"]) {
     assert.ok(declarations(`${list} .task-capsule-status.status-${tone}`).color);
@@ -112,7 +112,16 @@ test("deadline icon, filter control and persisted list width keep their existing
 
 test("priority border colors are at least as specific as the compact badge border", () => {
   for (const priority of ["low", "medium", "high"]) {
-    const badge = declarations(`${list} .task-capsule-heading .priority-${priority}`);
+    const badge = declarations(`${list} .task-capsule-footer .priority-${priority}`);
     assert.equal(badge["border-color"], `var(--priority-${priority}-border)`);
+    assert.equal(declarations(`${list} .task-capsule-footer .priority-badge`).border, "1px solid");
+    assert.equal(approvedDeclarations(".task-capsule-footer .priority-badge").height, "24px");
   }
+});
+
+test("cards live in their own scrollport below the filter header so hover actions clip together", () => {
+  assert.match(app, /className="task-ledger-scroll">/);
+  assert.ok(app.indexOf('<header className="task-queue-header">') < app.indexOf('<div className="task-ledger-scroll">'));
+  const scroller = postcss.parse(css).nodes.reduce((acc, rule) => rule.type === "rule" && rule.selectors?.includes("html:root:not([data-mode=\"dark\"]) .tasks-workspace .task-ledger-scroll") ? [...acc, ...rule.nodes.filter(n => n.type === "decl").map(n => [n.prop, n.value])] : acc, []);
+  assert.deepEqual(Object.fromEntries(scroller), { flex: "1 1 auto", "min-width": "0", "min-height": "0", "overflow-x": "hidden", "overflow-y": "auto", "padding-bottom": "24px", "scrollbar-gutter": "auto" });
 });

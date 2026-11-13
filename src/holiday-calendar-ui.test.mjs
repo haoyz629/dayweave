@@ -14,24 +14,25 @@ const snapshot = structuredClone(getHolidayCalendarSnapshot());
 function harness(next = snapshot) {
   const calls = [];
   const state = { React, useState: React.useState, useRef: React.useRef, useEffect: React.useEffect,
-    useHolidayCalendar: () => next, holidayYearMessage, missingHolidayYears,
+    useHolidayCalendar: () => next, getHolidayCalendarSnapshot: () => next, holidayYearMessage, missingHolidayYears,
     requestHolidayUpdate: async (...args) => calls.push(args) };
   const context = vm.createContext(state);
   vm.runInContext(ts.transpileModule(definitions, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText, context);
   return { context, calls };
 }
 
-test("actual holiday settings show coverage and offline/privacy boundaries without a task-save button", () => {
+test("holiday details retain scheduling rules without implementation copy", () => {
   const { context } = harness();
   const html = renderToStaticMarkup(React.createElement(context.HolidayCalendarSettings));
   assert.match(html, /已覆盖 2026 年/);
   assert.match(html, /尚未成功检查/);
   assert.match(html, /检查节假日更新/);
   assert.match(html, /离线使用/);
-  assert.match(html, /不上传任务/);
-  assert.match(html, /NateScarlet\/holiday-cn/);
-  assert.match(html, /jsDelivr/);
-  assert.match(html, /第三方整理数据/);
+  assert.match(html, /缺失年份按每周设置安排，不推测调休/);
+  assert.match(html, /法定工作日重复事项待对应年份补齐后恢复推演/);
+  assert.match(html, /以国务院公告为准/);
+  assert.match(html, /更新不影响已有任务和执行记录/);
+  assert.doesNotMatch(html, /jsDelivr|NateScarlet|至少 24 小时|个人设置/);
   assert.doesNotMatch(html, /type="submit"|自动重排/);
 });
 
@@ -60,4 +61,27 @@ test("application hooks refresh projections without clearing plan previews or mo
   assert.match(effect, /listRecurringOccurrences\(date\)/);
   assert.doesNotMatch(effect, /setPlanPreview|setMessage|updatePlanBlockTime|confirmRuleBasedPlan|includePlanTask/);
   assert.doesNotMatch(app, /节气仍可显示|OFFICIAL_HOLIDAY_COVERAGE/);
+});
+
+test("manual holiday results use the transient channel and report the latest failure", async () => {
+  const component = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "HolidayCalendarSettings");
+  const check = component.body.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "check");
+  for (const error of [null, "节假日更新未完成：测试超时"]) {
+    const results = [], inline = [];
+    const state = {
+      savingRef: { current: false }, snapshot: { checking: false, lastError: null },
+      setManualBusy(value) { state.busy = value; }, setMessage(value) { inline.push(value); },
+      async requestHolidayUpdate(years, force) { assert.equal(years.length, 0); assert.equal(force, true); },
+      getHolidayCalendarSnapshot: () => ({ lastError: error }), onResult: (...args) => results.push(args)
+    };
+    vm.runInNewContext(ts.transpileModule(check.getText(source), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, state);
+    await state.check();
+    assert.deepEqual(results, [[error || "检查完成，已有任务和执行记录不受节假日更新影响。", Boolean(error)]]);
+    assert.deepEqual(inline, [""]);
+    assert.equal(state.busy, false);
+    assert.equal(state.savingRef.current, false);
+  }
+  const failed = harness({ ...snapshot, lastError: "测试超时" });
+  const html = renderToStaticMarkup(React.createElement(failed.context.HolidayCalendarSettings, { compact: true, onResult() {} }));
+  assert.doesNotMatch(html, /测试超时|role="status"/);
 });

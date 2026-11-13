@@ -123,8 +123,8 @@ test("keyboard resizing, bounds and reset retain the existing saved-width contra
   assert.equal(state.setConstrainedLedgerWidth(-100), 320);
   assert.equal(state.setConstrainedLedgerWidth(2000), 706);
   state.resetLedgerWidth();
-  assert.equal(state.ledgerListWidth, 340);
-  assert.deepEqual(calls.at(-1), ["ui.task_ledger_list_width", "340"]);
+  assert.equal(state.ledgerListWidth, 400);
+  assert.deepEqual(calls.at(-1), ["ui.task_ledger_list_width", "400"]);
 });
 
 
@@ -152,7 +152,8 @@ test("CSS and runtime agree on minimum sizes and the container stacking threshol
   const { state } = harness();
   assert.equal(state.TASK_LEDGER_LIST_MIN_WIDTH, 320);
   assert.equal(state.TASK_LEDGER_HANDLE_WIDTH, 14);
-  assert.equal(state.TASK_LEDGER_LIST_DEFAULT_WIDTH, 340);
+  assert.equal(state.TASK_LEDGER_LIST_DEFAULT_WIDTH, 400);
+  assert.equal(declarations(".task-ledger")["--task-list-width"], "400px");
   const rules = [];
   css.walkRules(rule => {
     if (rule.selector === ".task-ledger" || rule.selector === ".task-ledger:has(.ordinary-task-detail)") rule.walkDecls("grid-template-columns", d => rules.push(d.value));

@@ -1,11 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { HolidayCalendarSnapshot } from "./official-holiday-calendar";
 
 const desktopRuntimeMessage = "请在今序桌面应用中打开；网页预览无法使用保存在这台电脑上的数据。";
-
-export function setAppLogoMode(mode: "light" | "dark") {
-  return invokeDesktop<void>("set_app_logo_mode", { mode });
-}
 
 export function setAppWindowTitle(title: string) {
   document.title = title;
@@ -16,6 +13,14 @@ export function setAppWindowTitle(title: string) {
 function invokeDesktop<T>(command: string, args?: Record<string, unknown>) {
   if (!("__TAURI_INTERNALS__" in window)) return Promise.reject(desktopRuntimeMessage);
   return invoke<T>(command, args);
+}
+
+export type ReminderTarget = { date: string; blockId: string; taskId: string };
+export type ReminderAction = { target: ReminderTarget; action: "open" | "completed" };
+
+export function onReminderActivated(handler: (event: ReminderAction) => void): Promise<() => void> {
+  if (!("__TAURI_INTERNALS__" in window)) return Promise.resolve(() => {});
+  return listen<ReminderAction>("reminder-activated", (event) => handler(event.payload));
 }
 
 export type TaskStatus = "open" | "scheduled" | "done" | "deleted";
@@ -585,10 +590,6 @@ export function getAutostartEnabled() {
 
 export function setAutostartEnabled(enabled: boolean) {
   return invokeDesktop<boolean>("set_autostart_enabled", { enabled });
-}
-
-export function setGlobalShortcut(shortcut: string) {
-  return invokeDesktop<string>("set_global_shortcut", { shortcut });
 }
 
 export function sendTestNotification() {

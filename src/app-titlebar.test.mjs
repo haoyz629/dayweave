@@ -32,7 +32,7 @@ function mount({ desktop = true, fail = null, delayedListener = false } = {}) {
     if (id === "./logo") return { ProductBrand: () => null };
     throw new Error(id);
   }});
-  const tree = exports.AppTitlebar({ viewSlotRef() {}, weekLabel: "2026 第44周", onError: error => errors.push(error) });
+  const tree = exports.AppTitlebar({ viewSlotRef() {}, weekLabel: "2026 第44周", onError: error => errors.push(error), onOpenSettings: () => calls.push("settings") });
   const cleanups = effects.map(run => run());
   const nodes = [];
   function visit(node) { if (!node?.props) return; nodes.push(node); const children = node.props.children; (Array.isArray(children) ? children : [children]).forEach(visit); }
@@ -49,6 +49,20 @@ test("window buttons call native close request, never destroy, and refresh maxim
   assert.equal(h.stopped(), 1);
   assert.deepEqual(h.errors, []);
   assert.doesNotMatch(source, /\.destroy\(/);
+});
+
+test("settings gear precedes the divider outside native window controls", () => {
+  const h = mount();
+  h.button("设置").props.onClick();
+  assert.deepEqual(h.calls, ["settings"]);
+  assert.equal(h.button("设置").props["aria-haspopup"], "dialog");
+  const actions = h.tree.props.children.find(node => node.props?.className === "app-titlebar-actions");
+  const [settings, divider, controls] = actions.props.children;
+  assert.equal(settings, h.button("设置"));
+  assert.equal(divider.props.className, "app-window-divider");
+  assert.equal(controls.props.className, "app-window-controls");
+  assert.deepEqual(Array.from(controls.props.children, node => node.props["aria-label"]), ["最小化", "最大化", "关闭窗口"]);
+  h.cleanup();
 });
 
 test("only primary-button blank chrome drags or double-click maximizes", async () => {

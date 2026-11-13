@@ -1,0 +1,99 @@
+/* Attachment-led preferences: scoped to the modal, not the underlying workspace. */
+.settings-dialog { box-sizing: border-box; width: 660px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 48px); margin: auto; padding: 0; overflow: hidden; border: 1px solid var(--color-edge); border-radius: 16px; color: var(--color-ink); background: var(--color-panel); box-shadow: 0 16px 48px rgb(20 38 61 / 16%); font: 400 14px/1.5 var(--jx-font-sans); }
+.settings-dialog[open] { display: flex; flex-direction: column; }
+.settings-dialog::backdrop { background: rgb(20 30 46 / 32%); }
+.settings-dialog *, .settings-dialog *::before, .settings-dialog *::after { box-sizing: border-box; }
+.settings-dialog button, .settings-dialog input { font: inherit; letter-spacing: 0; }
+.settings-dialog button { cursor: pointer; transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease, box-shadow 120ms ease, filter 120ms ease; }
+.settings-dialog button:disabled, .settings-dialog input:disabled { cursor: not-allowed; opacity: .45; }
+.settings-dialog :is(button,input,.settings-dialog-content):focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.settings-dialog button:active:not(:disabled) { filter: brightness(.92); box-shadow: inset 0 1px 3px rgb(23 43 77 / 16%); }
+.settings-dialog ::selection { color: var(--color-selected-ink); background: var(--color-selected-bg); }
+.settings-dialog input { caret-color: var(--color-primary); }
+.settings-dialog-header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 48px; padding: 8px 24px; border-bottom: 1px solid rgb(23 43 77 / 8%); flex: none; }
+.settings-dialog-header h1 { margin: 0; color: var(--color-ink); font: 600 16px/24px var(--jx-font-sans); letter-spacing: 0; }
+.settings-dialog .settings-text-button { width: auto; min-height: 32px; padding: 4px 8px; border: 1px solid var(--color-edge); border-radius: 8px; color: var(--color-muted); background: var(--color-panel); box-shadow: none; font-weight: 400; white-space: nowrap; }
+.settings-dialog .settings-text-button:hover:not(:disabled) { color: var(--color-selected-ink); background: var(--color-group); }
+.settings-dialog-header > .settings-text-button { justify-self: start; margin-left: -8px; font-size: 13px; }
+.settings-dialog .settings-close-button { display: grid; place-items: center; justify-self: end; width: 32px; height: 32px; margin-right: -8px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--color-muted); }
+.settings-dialog .settings-close-button:hover:not(:disabled) { background: var(--color-group); color: var(--color-ink); }
+.settings-dialog-form { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: hidden; }
+.settings-dialog-content { flex: 1 1 auto; min-width: 0; min-height: 0; padding: 24px 28px 20px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--color-edge) transparent; }
+.settings-dialog-content:focus-visible { outline-offset: -3px; }
+.settings-dialog-fields { display: block; min-width: 0; margin: 0; padding: 0; border: 0; }
+.settings-dialog-section + .settings-dialog-section { margin-top: 24px; padding-top: 24px; border-top: 1px solid rgb(23 43 77 / 8%); }
+.settings-dialog-section h2 { margin: 0 0 12px; padding-bottom: 4px; border-bottom: 1px solid var(--color-edge); color: var(--color-muted); font: 500 13px/20px var(--jx-font-sans); letter-spacing: 0; }
+.settings-dialog-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 64px; margin: 0; padding: 12px 0; }
+.settings-dialog-section .settings-dialog-row + .settings-dialog-row { border-top: 1px solid rgb(23 43 77 / 7%); }
+.settings-field-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.settings-field-copy strong { color: var(--color-ink); font-size: 14px; font-weight: 500; }
+.settings-field-copy small { color: var(--color-muted); font-size: 12px; line-height: 18px; }
+.settings-weekday-buttons { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); width: 260px; gap: 4px; flex: none; }
+.settings-weekday-buttons button { display: grid; place-items: center; height: 32px; min-width: 0; padding: 0; border: 1px solid var(--color-edge); border-radius: 8px; color: var(--color-muted); background: var(--color-panel); }
+.settings-weekday-buttons button:hover:not(:disabled) { border-color: var(--color-primary); background: var(--color-group); }
+.settings-weekday-buttons button[aria-pressed="true"] { border-color: var(--color-primary); color: var(--color-selected-ink); background: var(--color-blue-bg); }
+.settings-weekday-buttons button[aria-pressed="true"]:hover:not(:disabled) { background: var(--color-selected-bg); }
+.settings-makeup-row { cursor: pointer; }
+.settings-checkbox-option { display: inline-flex; flex: none; align-items: center; gap: 8px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--color-edge); border-radius: 8px; color: var(--color-muted); background: var(--color-panel); transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease; }
+.settings-dialog .settings-makeup-checkbox { width: 18px; height: 18px; margin: 0; accent-color: var(--color-primary); cursor: inherit; flex: none; }
+.settings-checkbox-option:has(:checked) { border-color: var(--color-primary); color: var(--color-selected-ink); background: var(--color-selected-bg); }
+.settings-makeup-row:hover .settings-checkbox-option:not(:has(:disabled)) { border-color: var(--color-primary); }
+.settings-makeup-row:active .settings-checkbox-option:not(:has(:disabled)) { filter: brightness(.96); }
+.settings-makeup-row:has(:disabled) { cursor: not-allowed; }
+.settings-checkbox-option:has(:disabled) > span { opacity: .45; }
+.settings-time-inputs { width: 260px; max-width: 100%; flex: none; }
+.settings-time-inputs .time-range-rail { margin: 0; padding: 0; }
+.settings-reminder-inputs { display: flex; align-items: center; justify-content: flex-end; width: 260px; max-width: 100%; gap: 8px; flex: none; }
+.settings-minutes-input { display: flex; align-items: center; width: 124px; height: 40px; padding: 0 12px 0 0; gap: 4px; border: 1px solid var(--color-edge); border-radius: 8px; background: var(--color-panel); font-size: 12px; color: var(--color-muted); }
+.settings-minutes-input:hover:not(:has(:disabled)), .settings-minutes-input:focus-within { border-color: var(--color-primary); }
+.settings-minutes-input:focus-within { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.settings-dialog .settings-minutes-input input { flex: 1; width: 64px; min-width: 0; height: 100%; padding: 0 4px 0 12px; border: 0; border-radius: inherit; color: var(--color-ink); background: transparent; text-align: center; font-size: 14px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.settings-dialog .settings-minutes-input input:focus-visible { outline: none; }
+.settings-minutes-input input::-webkit-inner-spin-button { opacity: 1; cursor: pointer; }
+.settings-minutes-input:has(input:invalid) { border-color: var(--color-red-ink); }
+.settings-dialog .settings-test-button { min-height: 40px; padding: 8px 12px; border: 1px solid var(--color-edge); border-radius: 8px; background: var(--color-panel); color: var(--color-ink); font-size: 13px; white-space: nowrap; }
+.settings-dialog .settings-test-button:hover:not(:disabled) { border-color: var(--color-primary); background: var(--color-group); }
+html:root .settings-dialog .switch-control { display: block; flex: none; width: 40px; height: 24px; padding: 3px; border: 1px solid var(--color-muted); border-radius: 12px; background: var(--color-muted); }
+.settings-dialog .switch-control > span { position: static; display: block; width: 16px; height: 16px; border-radius: 50%; background: white; box-shadow: 0 1px 3px rgb(23 43 77 / 24%); transform: translateX(0); transition: transform 180ms cubic-bezier(.22,1,.36,1); }
+html:root .settings-dialog .switch-control.enabled { border-color: var(--color-primary); background: var(--color-primary); }
+.settings-dialog .switch-control.enabled > span { transform: translateX(16px); }
+html:root .settings-dialog .switch-control:hover:not(:disabled) { box-shadow: 0 0 0 3px var(--color-group); }
+html:root .settings-dialog .switch-control.enabled:hover:not(:disabled) { border-color: var(--color-primary-hover); background: var(--color-primary-hover); }
+html:root:not([data-mode="dark"]) .settings-dialog .holiday-calendar-settings.is-compact { margin: 0; padding: 0; border: 0; font-size: 12px; }
+.settings-holiday-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.settings-dialog .settings-holiday-actions button { width: auto; height: auto; min-height: 32px; padding: 4px 8px; border: 0; border-radius: 8px; color: var(--color-selected-ink); background: transparent; font-size: 13px; font-weight: 400; white-space: nowrap; }
+.settings-dialog .settings-holiday-actions button:hover:not(:disabled) { background: var(--color-group); }
+.settings-holiday-details { margin: 4px 0 12px; padding: 12px 16px; border-radius: 8px; background: var(--color-group); color: var(--color-muted); }
+.settings-holiday-details ul { display: grid; gap: 4px; margin: 8px 0; padding-left: 18px; }
+.settings-holiday-details small { display: block; line-height: 1.6; }
+.settings-dialog .holiday-calendar-settings small { font-size: 12px; }
+.settings-load-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-block: 12px; color: var(--color-red-ink); }
+.settings-load-error button { padding: 4px 12px; border: 1px solid var(--color-edge); border-radius: 8px; color: var(--color-ink); background: var(--color-panel); }
+.settings-load-error button:hover:not(:disabled) { border-color: var(--color-primary); background: var(--color-group); }
+.settings-dialog-footer { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px 16px; padding: 12px 28px; border-top: 1px solid rgb(23 43 77 / 8%); flex: none; background: var(--color-panel); }
+.settings-save-status { flex: 1 1 240px; min-width: 0; color: var(--color-muted); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+.settings-save-status:empty { display: none; }
+.settings-dialog-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.settings-dialog-actions > button { min-height: 32px; padding: 4px 12px; border: 1px solid var(--color-edge); border-radius: 8px; color: var(--color-ink); background: var(--color-panel); font-size: 13px; font-weight: 400; white-space: nowrap; }
+.settings-dialog-actions > button:hover:not(:disabled) { border-color: var(--color-primary); background: var(--color-group); }
+.settings-dialog-actions > .settings-apply-close { color: white; border-color: var(--color-primary); background: var(--color-primary); }
+.settings-dialog-actions > .settings-apply-close:hover:not(:disabled) { background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
+.settings-discard-backdrop { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; padding: 24px; background: rgb(20 30 46 / 24%); }
+.settings-discard-backdrop .feedback-confirm { max-width: 100%; }
+.settings-dialog .settings-feedback-viewport { position: absolute; top: 60px; right: 16px; bottom: auto; left: 16px; flex-direction: column; align-items: center; max-width: none; max-height: calc(100% - 76px); padding: 0; }
+.settings-dialog .settings-feedback-viewport .feedback-toast { max-width: min(440px, 100%); border: 1px solid var(--toast-edge); border-radius: 12px; box-shadow: 0 4px 20px rgb(23 43 77 / 14%); }
+.settings-dialog .settings-feedback-viewport .feedback-toast-content { font-size: 13px; }
+.settings-dialog .settings-feedback-viewport .feedback-close { top: 6px; }
+@media (max-width: 560px) {
+  .settings-dialog { max-width: calc(100vw - 16px); max-height: calc(100dvh - 24px); }
+  .settings-dialog-header { padding-inline: 20px; }
+  .settings-dialog-content { padding: 16px 20px; }
+  .settings-dialog-row { gap: 12px; flex-wrap: wrap; }
+  .settings-weekday-buttons { grid-template-columns: repeat(7, minmax(28px, 1fr)); width: 100%; }
+  .settings-time-inputs, .settings-reminder-inputs { margin-left: auto; }
+  .settings-dialog-footer { padding: 12px 20px; }
+  .settings-save-status { flex-basis: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-dialog button, .settings-dialog .switch-control > span, .settings-checkbox-option { transition: none; }
+}

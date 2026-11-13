@@ -5,7 +5,8 @@ import { ProductBrand } from "./logo";
 
 type WindowAction = "minimize" | "toggleMaximize" | "close" | "startDragging";
 
-export function AppTitlebar({ viewSlotRef, onError, weekLabel }: {
+export function AppTitlebar({ viewSlotRef, onError, onOpenSettings, weekLabel }: {
+  onOpenSettings: () => void;
   viewSlotRef: (node: HTMLDivElement | null) => void;
   onError: (message: string) => void;
   weekLabel: string;
@@ -45,6 +46,7 @@ export function AppTitlebar({ viewSlotRef, onError, weekLabel }: {
     <ProductBrand weekLabel={weekLabel} />
     <div ref={viewSlotRef} className="app-view-slot" />
     <div className="app-titlebar-actions">
+      <button type="button" className="app-settings-button" aria-label="设置" title="设置" aria-haspopup="dialog" onClick={onOpenSettings}><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9.5 3-.6 2.3-2 .9-2.2-.7-2.5 4.3 1.7 1.6v2.3l-1.7 1.6 2.5 4.3 2.2-.7 2 .9.6 2.2h5l.6-2.2 2-.9 2.2.7 2.5-4.3-1.7-1.6v-2.3l1.7-1.6-2.5-4.3-2.2.7-2-.9L14.5 3z" /><circle cx="12" cy="12.5" r="3" /></svg></button>
       <span className="app-window-divider" aria-hidden="true" />
       <div className="app-window-controls" role="group" aria-label="窗口控制">
         <button type="button" aria-label="最小化" title="最小化" onClick={() => void act("minimize")}><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6h10" /></svg></button>

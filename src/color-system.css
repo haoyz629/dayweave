@@ -203,8 +203,6 @@ html:root[data-mode="dark"] {
   --color-cyan-ink: #afe4f5;
   --color-cyan-edge: #69a9bd;
 }
-html:root[data-theme="github"][data-mode="light"] { --color-canvas: #eef2f6; --color-group: #f6f8fa; --color-panel: #ffffff; --color-raised: #ffffff; }
-html:root[data-theme="codex"][data-mode="light"] { --color-canvas: #edf1f5; --color-group: #f5f7fa; --color-panel: #ffffff; --color-raised: #ffffff; }
 
 /* Match the task-page priority treatment; keep ink, solid actions and date selection intact. */
 html:root:not([data-mode="dark"]) {
@@ -384,7 +382,7 @@ html:root .today-page .today-month-sheet .month-grid > button:is(:nth-child(7n+6
 html:root .today-page .today-month-sheet .month-grid > button:is(:nth-child(7n+6), :nth-child(7n)):not(.today) .solar-day-number { color: var(--color-red-ink); font-weight: 700; }
 html:root .today-page .today-month-sheet .month-grid > button.selected,
 html:root .month-grid > button.selected { color: var(--color-selected-ink); background: var(--color-selected-bg); box-shadow: inset 0 0 0 1px var(--color-selected-edge); }
-html:root :is(.settings-layout > nav button.active, .theme-options > button[aria-pressed="true"], .create-type-switch > button[aria-checked="true"], .create-type-switch > button:last-child[aria-checked="true"]) { color: var(--color-selected-ink); border-color: var(--color-selected-edge); background: var(--color-selected-bg); }
+html:root :is(.settings-layout > nav button.active, .create-type-switch > button[aria-checked="true"], .create-type-switch > button:last-child[aria-checked="true"]) { color: var(--color-selected-ink); border-color: var(--color-selected-edge); background: var(--color-selected-bg); }
 html:root .create-type-switch > button[aria-checked="true"] > svg,
 html:root .create-type-switch > button:last-child[aria-checked="true"] > svg { color: var(--color-selected-ink); background: transparent; }
 html:root :is(.primary-action, .selection-create-dialog footer .primary-action, .timeline-floating-panel.task-block-editor > .execution-capture-footer .primary-action) { color: #ffffff; border-color: var(--color-primary); background: var(--color-primary); }
@@ -432,10 +430,6 @@ html:root .timeline-floating-panel.task-block-editor .execution-capture-fields .
 html:root .timeline-floating-panel.task-block-editor .execution-capture-fields textarea { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-panel); }
 html:root .timeline-floating-panel.task-block-editor > .execution-capture-footer { border-color: var(--color-edge); background: var(--color-group); }
 
-html:root .theme-swatch { border-color: var(--color-edge); }
-html:root .theme-swatch.default { background: linear-gradient(90deg, var(--color-canvas) 0 40%, var(--color-panel) 40% 75%, var(--color-primary) 75%); }
-html:root .theme-swatch.github { background: linear-gradient(90deg, #eef2f6 0 40%, #ffffff 40% 75%, var(--color-primary) 75%); }
-html:root .theme-swatch.codex { background: linear-gradient(90deg, #edf1f5 0 40%, #ffffff 40% 75%, var(--color-primary) 75%); }
 html:root[data-mode="dark"] .theme-swatch { background: linear-gradient(90deg, var(--color-canvas) 0 40%, var(--color-panel) 40% 75%, var(--color-primary) 75%); }
 
 /* Form surfaces and controls follow the same hierarchy as the task workspace. */

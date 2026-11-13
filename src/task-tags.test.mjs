@@ -217,6 +217,7 @@ test("compact filter keeps text-only chips and a persistent All surface in one w
   assert.equal(byClass(filter, "task-tag-filter-more")[0].props.tabIndex, -1);
   const css = readFileSync(new URL("./task-tags.css", import.meta.url), "utf8");
   assert.match(css, /\.task-tag-filter-options[^}]*flex-wrap: wrap;[^}]*gap: 6px/);
+  assert.match(css, /\.task-tag-filter:not\(\.is-expanded\) \.task-tag-filter-options[^}]*flex-wrap: nowrap/);
   assert.match(css, /\.task-tag-filter-chip \{[^}]*height: 28px;[^}]*padding: 3px 8px;[^}]*border-radius: 8px/);
   assert.match(css, /\.task-tag-filter-chip\.is-all \{ border-color: #d3ddea; color: #42566e; background: #e7edf5; \}/);
   assert.match(css, /\.task-tag-filter-chip\[aria-pressed="true"\] \{ border-color: var\(--jx-focus\);[^}]*var\(--jx-focus\) 14%, white/);
@@ -225,6 +226,21 @@ test("compact filter keeps text-only chips and a persistent All surface in one w
   assert.match(css, /\.task-tag-filter-chip\.is-clipped[^}]*position: absolute;[^}]*visibility: hidden/);
   assert.equal(nodes(filter.tree, node => node.type === "svg").length, 0);
   assert.doesNotMatch(css, /\.task-tag-filter-chip[^}]*box-shadow/);
+});
+
+test("tag and status overflow controls share fixed geometry and a collapsed right-edge anchor", () => {
+  const css = readFileSync(new URL("./task-tags.css", import.meta.url), "utf8");
+  const shared = css.match(/\.task-tag-filter-more, \.task-status-filter-more \{([^}]+)\}/)?.[1];
+  assert.ok(shared, "both controls use the same sizing rule");
+  for (const property of ["width", "min-width", "max-width"]) assert.ok(shared.includes(`${property}: 72px;`));
+  for (const property of ["height", "min-height", "max-height"]) assert.ok(shared.includes(`${property}: 28px;`));
+  assert.match(shared, /box-sizing: border-box; flex: none/);
+  assert.match(shared, /position: static/);
+  assert.match(shared, /font-variant-numeric: tabular-nums/);
+  assert.match(css, /\.task-tag-filter:not\(\.is-expanded\) \.task-tag-filter-options:has\(> \.task-tag-filter-more:not\(\.is-unused\)\) \{ padding-right: 78px; \}/);
+  assert.match(css, /\.task-tag-filter:not\(\.is-expanded\) \.task-tag-filter-options > \.task-tag-filter-more:not\(\.is-unused\) \{ position: absolute; top: 0; right: 0; \}/);
+  assert.match(css, /\.task-status-filter:not\(\.is-expanded\):has\(> \.task-status-filter-more:not\(\.is-unused\)\) \{ padding-right: 78px; \}/);
+  assert.match(css, /\.task-status-filter:not\(\.is-expanded\) \.task-status-filter-more:not\(\.is-unused\) \{ position: absolute; top: 0; right: 0; \}/);
 });
 
 test("unified filter expands exactly its hidden chips, restores the default range and retains overflow selection", () => {
@@ -655,4 +671,21 @@ test("tag panels stay inside a native modal instead of becoming inert behind it"
   assert.equal(host.calls.portals.at(-1), dialog);
   assert.equal(selector, "dialog");
   assert.equal(byClass(editor, "task-tag-dropdown-panel").length, 1);
+});
+
+test("filter labels show names only and preserve tag selection without writes", () => {
+  const host = createHost();
+  const filter = host.filter({ tags: ["Work", "开发", "零任务"] });
+  const chips = () => byClass(filter, "task-tag-filter-chip");
+  assert.equal(byClass(filter, "task-tag-filter-count").length, 0);
+  assert.deepEqual(chips().map(node => node.props["aria-label"]), ["全部标签", "Work", "开发", "零任务"]);
+  chips()[1].props.onClick();
+  filter.render();
+  assert.deepEqual(filter.changes, ["Work"]);
+  assert.equal(chips()[1].props["aria-pressed"], true);
+  assert.equal(byClass(filter, "task-tag-filter-count").length, 0);
+  assert.deepEqual(host.calls.create, []);
+  const css = readFileSync(new URL("./task-tags.css", import.meta.url), "utf8");
+  assert.doesNotMatch(css, /task-tag-filter-count|\.has-count/);
+  assert.match(css, /\.task-status-filter-chip \.task-status-filter-count \{[^}]*flex: none;[^}]*font-size: 11px;[^}]*tabular-nums/);
 });

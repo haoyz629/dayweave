@@ -6,6 +6,7 @@ import ts from "typescript";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import * as controls from "./time-range-control.ts";
+import postcss from "postcss";
 
 const source = ts.createSourceFile("App.tsx", readFileSync(new URL("./App.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const declaration = name => source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
@@ -90,6 +91,26 @@ test("manual layout CSS stays scoped to date dialogs and light mode", () => {
   }
 });
 
+test("desktop date dialogs spread only right-panel spacing without expanding the narrow layout", () => {
+  const css = postcss.parse(readFileSync(new URL("./styles.css", import.meta.url), "utf8"));
+  const scope = 'html:root:not([data-mode="dark"]) .manual-time-picker ';
+  const expected = new Map([
+    [".schedule-picker-range-panel > header", ["margin-bottom", "24px"]],
+    [".schedule-picker-boundaries.schedule-picker-rows", ["gap", "20px"]],
+    [".schedule-picker-range-panel .time-duration-presets", ["margin-top", "32px"]],
+    [".schedule-occurrence-preview", ["margin-top", "32px"]]
+  ]);
+  const actual = new Map();
+  css.walkAtRules("media", media => {
+    if (media.params !== "(min-width: 761px)") return;
+    media.walkRules(rule => {
+      if (!rule.selector.startsWith(scope)) return;
+      actual.set(rule.selector.slice(scope.length), rule.nodes.map(node => [node.prop, node.value]).flat());
+    });
+  });
+  assert.deepEqual(actual, expected);
+});
+
 test("recurring calendar puts selection feedback before the separated validity shortcuts", () => {
   const calendar = descendants(declaration("RecurringValidityPicker"), node => hasClass(node, "schedule-picker-calendar"))[0];
   const elements = calendar.children.filter(ts.isJsxElement);
@@ -97,6 +118,19 @@ test("recurring calendar puts selection feedback before the separated validity s
   const shortcuts = elements.findIndex(node => hasClass(node, "schedule-validity-presets"));
   assert.equal(shortcuts, feedback + 1);
   assert.ok(feedback >= 0);
+});
+
+test("validity shortcuts fill the divider width with six equal columns and three on narrow windows", () => {
+  const css = postcss.parse(readFileSync(new URL("./styles.css", import.meta.url), "utf8"));
+  const selector = 'html:root:not([data-mode="dark"]) .manual-time-picker .schedule-validity-presets';
+  const columns = [];
+  css.walkRules(selector, rule => {
+    rule.walkDecls("grid-template-columns", decl => columns.push([rule.parent.type === "atrule" ? rule.parent.params : null, decl.value]));
+  });
+  assert.deepEqual(columns, [[null, "repeat(6, minmax(0, 1fr))"], ["(max-width: 899px)", "repeat(3, minmax(0, 1fr))"]]);
+  const local = css.toString().slice(css.toString().indexOf("/* Approved manual date picker:"));
+  assert.match(local, /\.schedule-validity-presets \{[^}]*display: grid;[^}]*gap: 6px;/);
+  assert.match(local, /\.schedule-validity-presets > button \{ min-width: 0; width: 100%; padding: 4px 2px; white-space: nowrap; \}/);
 });
 
 test("date picker spacing is compact and the boundary gap inherits the panel surface", () => {

@@ -173,6 +173,7 @@ FunctionEnd
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
+  DeleteRegKey HKCU "Software\Classes\AppUserModelId\${BUNDLEID}"
   Push $4
   ReadRegStr $4 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${DAYWEAVE_STARTUP_NAME}"
   ${If} $4 == '$\"$INSTDIR\${MAINBINARYNAME}.exe$\" '

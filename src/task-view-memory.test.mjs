@@ -61,7 +61,7 @@ test("missing or invalid memory falls back to the first populated operational li
   }
   const empty = mount(new Map(), { counts: {} });
   empty.run("restore"); await tick();
-  assert.equal(empty.state.view, "open");
+  assert.equal(empty.state.view, "scheduled");
 });
 
 test("loading and explicit navigation keep priority over remembered lists", async () => {

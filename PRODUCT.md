@@ -45,8 +45,8 @@ web
 
 ## Brand Commitments
 
-- 面向用户的正式名称为“今序 · Dayweave”。技术命名使用 Dayweave/dayweave：应用标识为 `com.dayweave.desktop`，数据库为 `dayweave.sqlite3`；升级兼容既有数据和设置，详见 ADR-0006。
-- Windows 安装程序默认复用旧版当前用户安装位置，仅清理指向同一安装的旧名称快捷方式与卸载记录；保留原开机启动状态。
+- 面向用户的正式名称为“今序 · Dayweave”。技术命名使用 Dayweave/dayweave：应用标识为 `com.dayweave.desktop`，数据库为 `dayweave.sqlite3`。
+- 应用当前为初版 Windows 桌面应用，安装与数据均以当前版本为准。
 - 中文界面文案克制、诚实、明确，不把建议表达为事实，不在提交前表达操作成功。
 - 产品承诺：帮用户把今天排得更清楚，但不替用户决定生活。
 - 应用图标源文件位于 `src-tauri/icons/dayweave.svg`。
@@ -58,7 +58,7 @@ web
 - 统一领域语言：`CONTEXT.md`；关键边界：`docs/adr/0004-require-complete-task-time-and-remove-inbox.md`、`docs/adr/0002-separate-tasks-from-daily-execution.md`、`docs/adr/0003-adopt-non-exclusive-daily-timeline.md` 与 `docs/adr/0005-single-day-direct-scheduling.md`。
 - 轻量记录与补录边界：`docs/adr/0007-lightweight-review-and-backfill.md`。
 - 产品定位与用户场景：`dayweave-product-overview.md`。
-- 当前桌面应用、SQLite 迁移、任务状态机与离线确定性测试。
+- 当前桌面应用、任务状态机与离线确定性测试。
 - 没有用户评价、商业数据、公开发布证明或外部集成能力；后续界面不得虚构这些证据。
 
 ## Product Principles

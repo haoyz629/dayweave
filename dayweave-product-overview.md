@@ -19,6 +19,6 @@
 
 侧栏主导航为“今日”和“任务”；标题栏的设置按钮打开偏好设置弹窗，包含工作日、工作时段、节假日数据更新、任务块提醒、开机启动和关闭到托盘。节假日提供内置数据和按年份更新，具体维护规则见[节假日维护说明](docs/holiday-calendar-maintenance.md)。
 
-任务、安排和记录保存在本机 SQLite。应用采用 Tauri、React、TypeScript 和 Rust；具体运行与验证命令见 [README](README.md)。品牌和旧版数据迁移规则见 [ADR-0006](docs/adr/0006-dayweave-brand-and-data-migration.md)。
+任务、安排和记录保存在本机 SQLite。应用采用 Tauri、React、TypeScript 和 Rust；具体运行与验证命令见 [README](README.md)。
 
 仓库保留 AI 及历史记录相关后端能力，但当前界面没有 AI 助手、AI 连接设置或独立的“复盘与记录”入口。历史产品规格中的相关界面和其他规划内容不能视为当前可用功能。

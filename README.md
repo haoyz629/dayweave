@@ -47,7 +47,6 @@
 - 工作时间是安排偏好和视觉参考，不限制在其他时段安排事项。
 - 当前不提供账号、同步、外部日历或自动更新；界面也没有 AI 助手、AI 连接设置或独立的「复盘与记录」入口。仓库保留相关历史后端能力。
 - 原有设计中的 API Key 以明文保存在本机 SQLite，请妥善保护数据库文件。
-- 从旧版迁移时请先关闭旧版；已有新数据不会被覆盖，旧数据保留备份但不再双向同步。详见[更名迁移说明](docs/adr/0006-dayweave-brand-and-data-migration.md)。
 
 单日任务时间同步、历史记录保护和撤销的详细规则见 [ADR-0005](docs/adr/0005-single-day-direct-scheduling.md)；轻量记录与历史补录规则见 [ADR-0007](docs/adr/0007-lightweight-review-and-backfill.md)。
 

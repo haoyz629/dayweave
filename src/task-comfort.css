@@ -1,28 +1,28 @@
 /* Approved task-page A: light-only, shared across categories and lifecycle states.
    Keep calendar, navigation, semantic ink and editable control behavior unchanged. */
 html:root:not([data-mode="dark"]) .next-workspace .tasks-workspace {
-  background: #f4f5f7;
-  --color-canvas: #f4f5f7;
-  --color-edge: #dce1e8;
+  color: var(--color-ink);
+  --color-canvas: var(--app-workspace-bg);
+  --color-edge: var(--jx-edge);
 }
 html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger {
-  --task-workspace-bg: #f4f5f7;
-  --task-workspace-divider: #dce1e8;
+  --task-workspace-bg: var(--color-canvas);
+  --task-workspace-divider: var(--color-edge);
 }
 html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list {
-  --task-card-border: #dce1e8;
-  --task-card-hover-border: #bac7db;
-  --task-card-selected-border: #9aafd1;
-  --task-card-bg: #fff;
-  --task-card-hover-bg: #f9fafc;
-  --task-card-selected-bg: #edf2fa;
-  --task-card-title: #253247;
-  --task-card-selected-title: #234c8a;
-  --task-card-note: #58667a;
-  --task-card-muted: #5e6b7d;
-  --task-card-divider: #e8ebf0;
-  --task-card-deadline: #58667a;
-  --task-card-icon: #65758b;
+  --task-card-border: var(--color-edge);
+  --task-card-hover-border: var(--color-selected-edge);
+  --task-card-selected-border: var(--color-selected-edge);
+  --task-card-bg: var(--color-panel);
+  --task-card-hover-bg: var(--color-hover);
+  --task-card-selected-bg: var(--color-selected-bg);
+  --task-card-title: var(--color-ink);
+  --task-card-selected-title: var(--color-selected-ink);
+  --task-card-note: var(--color-muted);
+  --task-card-muted: var(--color-muted);
+  --task-card-divider: var(--color-edge);
+  --task-card-deadline: var(--color-muted);
+  --task-card-icon: var(--color-primary);
 }
 html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list { scrollbar-gutter: auto; }
 /* Keep the draggable hit area on the detail side of the list-edge divider. */
@@ -54,16 +54,16 @@ html:root:not([data-mode="dark"]) .tasks-workspace .task-ledger-list .ledger-row
 
 /* All read-only ordinary, recurring and recycled details share this surface. */
 html:root:not([data-mode="dark"]) .tasks-workspace .task-inspector:has(.ordinary-task-detail) {
-  --task-detail-ink: #29374a;
-  --task-detail-title: #253247;
-  --task-detail-muted: #626f81;
-  --task-detail-label: #626f81;
-  --task-detail-secondary: #58667a;
-  --task-detail-time: #626f81;
-  --task-detail-line: #dce1e8;
-  --task-detail-soft-line: #e8ebf0;
+  --task-detail-ink: var(--color-ink);
+  --task-detail-title: var(--color-ink);
+  --task-detail-muted: var(--color-muted);
+  --task-detail-label: var(--color-muted);
+  --task-detail-secondary: var(--color-muted);
+  --task-detail-time: var(--color-muted);
+  --task-detail-line: var(--color-edge);
+  --task-detail-soft-line: var(--color-edge);
 }
-html:root:not([data-mode="dark"]) .tasks-workspace :is(.task-queue-header, .task-tag-filter) { --jx-edge: #dce1e8; --jx-edge-soft: #dce1e8; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(.task-queue-header, .task-tag-filter) { --jx-edge: var(--color-edge); --jx-edge-soft: var(--color-edge); }
 html:root:not([data-mode="dark"]) .tasks-workspace .task-list-tags > span { font-size: 12px; font-weight: 400; line-height: 18px; }
 html:root:not([data-mode="dark"]) .tasks-workspace .task-capsule-status { font-size: 12px; font-weight: 400; }
 html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail { font-size: 14px; }
@@ -91,24 +91,24 @@ html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail .task-d
 html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail :is(.task-detail-facts dt, .task-detail-unit, .priority-badge, .task-detail-history-count, .task-detail-event-top time) { font-size: 12px; }
 html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail :is(.task-detail-section-heading, .task-detail-history > summary, .task-detail-event-top) { font-size: 14px; font-weight: 500; }
 html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail .task-detail-actions button { font-size: 12px; font-weight: 500; }
-html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail .task-detail-timeline { background: white; }
+html:root:not([data-mode="dark"]) .tasks-workspace .ordinary-task-detail .task-detail-timeline { background: var(--color-panel); }
 html:root:not([data-mode="dark"]) .tasks-workspace .task-page-header .terminal-task-status { font-weight: 500; }
 html:root:not([data-mode="dark"]) .tasks-workspace .task-tag-filter > label { font-size: 12px; }
-html:root:not([data-mode="dark"]) .tasks-workspace :is(button, a, input, select):focus-visible { outline: 2px solid #3168dc; outline-offset: 2px; }
+html:root:not([data-mode="dark"]) .tasks-workspace :is(button, a, input, select):focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 /* The composite search owns its focus ring; do not outline the inner input again. */
 html:root:not([data-mode="dark"]) .tasks-workspace .task-queue-search > input[type="search"]:focus-visible { outline: none; }
-html:root:not([data-mode="dark"]) .tasks-workspace .task-queue-search > svg { color: #91a2bb; }
-html:root:not([data-mode="dark"]) .tasks-workspace .task-queue-search > input[type="search"]::placeholder { color: #8a99ad; font-weight: 400; opacity: 1; }
+html:root:not([data-mode="dark"]) .tasks-workspace .task-queue-search > svg { color: var(--color-muted); }
+html:root:not([data-mode="dark"]) .tasks-workspace .task-queue-search > input[type="search"]::placeholder { color: var(--color-muted); font-weight: 400; opacity: 1; }
 
 /* Creation, saved drafts and both editors: same quiet type, no input clamping. */
 html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-compact-body :is(.task-title-input, .recurring-title-field .recurring-modal-input) {
-  color: #253247;
+  color: var(--color-ink);
   font-size: 15px;
   font-weight: 500;
   letter-spacing: 0;
 }
 html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-editor-form, #recurring-editor-form) .task-notes-inputs :is(input, textarea) {
-  color: #29374a;
+  color: var(--color-ink);
   font-size: 14px;
   line-height: 24px;
 }
@@ -179,7 +179,7 @@ html:root:not([data-mode="dark"]) .tasks-workspace :is(#new-task-form, #task-edi
   grid-column: 2;
   align-self: start;
   display: block;
-  color: #58667a;
+  color: var(--color-muted);
   font-size: 14px;
   line-height: 24px;
   font-weight: 400;

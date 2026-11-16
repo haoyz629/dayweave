@@ -28,6 +28,20 @@ test("approved task styles load after the existing palette and never depend on p
   assert.doesNotMatch(css, /preview-a|preview-readonly|!important|\.next-sidebar|\.day-timeline/);
 });
 
+test("light task surfaces inherit the shared palette without local color overrides", () => {
+  const workspace = declarations(".next-workspace .tasks-workspace");
+  assert.equal(workspace.background, undefined);
+  assert.equal(workspace.color, "var(--color-ink)");
+  assert.equal(workspace["--color-canvas"], "var(--app-workspace-bg)");
+  assert.equal(workspace["--color-edge"], "var(--jx-edge)");
+  const cards = declarations(".tasks-workspace .task-ledger-list");
+  assert.equal(cards["--task-card-bg"], "var(--color-panel)");
+  assert.equal(cards["--task-card-selected-bg"], "var(--color-selected-bg)");
+  assert.equal(cards["--task-card-title"], "var(--color-ink)");
+  assert.equal(cards["--task-card-note"], "var(--color-muted)");
+  assert.doesNotMatch(css, /#(?:f4f5f7|dce1e8|edf2fa|253247|58667a)/i);
+});
+
 test("every list variant keeps one full-width single-line title and separate metadata", () => {
   const title = declarations(".task-capsule-heading > strong");
   assert.equal(title.flex, "1 1 100%");

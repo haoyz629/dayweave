@@ -53,6 +53,10 @@ test("approved palettes retain readable role pairs and independent lake-blue pla
     assert.ok(contrast("#ffffff", colors["--color-primary"]) >= 4.5);
   }
   assert.equal(light["--color-plan-bg"], "#d6f2fa");
+  assert.equal(light["--color-canvas"], "#fffefa", "right workspace stays near-white");
+  assert.equal(light["--color-group"], "#faf9f7", "left sidebar stays warm gray-white");
+  assert.equal(light["--color-panel"], "#ffffff", "raised content stays white");
+  assert.equal(light["--color-edge"], "#e4e0d8", "shared dividers stay faint");
   assert.equal(dark["--color-plan-bg"], "#193e50");
   assert.match(css, /--task-state-scheduled-surface: var\(--color-plan-bg\)/);
   assert.match(css, /--state-plan-surface: var\(--color-plan-bg\)/);

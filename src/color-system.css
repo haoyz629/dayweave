@@ -1,17 +1,17 @@
 /* Approved direction A. Business colors stay stable across pages and appearance themes. */
 html:root {
   color-scheme: light;
-  --color-canvas: #eef2f6;
-  --color-group: #f6f8fb;
+  --color-canvas: #fffefa;
+  --color-group: #faf9f7;
   --color-panel: #ffffff;
   --color-raised: #ffffff;
-  --color-ink: #172b4d;
-  --color-muted: #4a5c75;
-  --color-edge: #bdc9d8;
-  --color-hover: #e3ebf5;
-  --color-selected-bg: #dce9ff;
-  --color-selected-ink: #1544a5;
-  --color-selected-edge: #6c92da;
+  --color-ink: #26364a;
+  --color-muted: #596579;
+  --color-edge: #e4e0d8;
+  --color-hover: #efede7;
+  --color-selected-bg: #e7effb;
+  --color-selected-ink: #1f4f91;
+  --color-selected-edge: #8eadd8;
   --color-primary: #3168dc;
   --color-primary-hover: #285bc4;
   --color-mask: rgb(20 38 61 / 60%);
@@ -243,6 +243,7 @@ html:root ::selection { color: var(--color-selected-ink); background: var(--colo
 html:root ::-webkit-scrollbar-thumb { background: var(--color-gray-edge); border-color: var(--color-canvas); }
 html:root :is(.next-shell, .next-workspace, .tasks-workspace, .today-workspace, .today-schedule-pane, .today-page, .timeline-page-shell, .next-workspace > .review-page, .next-workspace > .settings-page) { background: var(--color-canvas); }
 html:root .next-sidebar { color: var(--color-ink); border-color: var(--color-edge); background: var(--color-group); }
+html:root:not([data-mode="dark"]) .shell-divider { background: #eeece8; }
 html:root .next-sidebar nav button { color: var(--color-muted); }
 html:root .next-sidebar nav button:hover { color: var(--color-ink); background: var(--color-hover); }
 html:root .next-sidebar nav button.active { color: var(--color-selected-ink); background: var(--color-selected-bg); }

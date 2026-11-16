@@ -279,8 +279,8 @@ test("unified filter expands exactly its hidden chips, restores the default rang
 
 test("task search weakens only its light-mode placeholder and icon", () => {
   const css = readFileSync(new URL("./task-comfort.css", import.meta.url), "utf8");
-  assert.match(css, /:not\(\[data-mode="dark"\]\) .tasks-workspace .task-queue-search > svg \{ color: #91a2bb; \}/);
-  assert.match(css, /input\[type="search"\]::placeholder \{ color: #8a99ad; font-weight: 400; opacity: 1; \}/);
+  assert.match(css, /:not\(\[data-mode="dark"\]\) .tasks-workspace .task-queue-search > svg \{ color: var\(--color-muted\); \}/);
+  assert.match(css, /input\[type="search"\]::placeholder \{ color: var\(--color-muted\); font-weight: 400; opacity: 1; \}/);
 });
 
 test("picker footer retains counts and limit messages without the save hint", async () => {

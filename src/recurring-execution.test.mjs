@@ -455,12 +455,15 @@ test("recurring cancellation history names the original result, including cancel
     cancelled_outcome, notes: index === 1 ? "保留的备注" : null, occurred_at: "2026-10-29T10:00:00+08:00"
   }));
   events.push({ ...events[0], id: "note", cancelled_outcome: null, notes: "仅随手记" });
+  events.push({ ...events[0], id: "note-clear", cancelled_outcome: null, note_cleared: true });
   const h = mount("RecurringExecutionHistory", { itemId: "series-1", createdAt: "2026-10-01" }, { async listRecurringExecutionHistory() { return events; } });
   h.render(); await tick();
   const rows = byClass(h.render(), "task-detail-event");
-  assert.deepEqual(rows.slice(0, 5).map(row => elements(row, node => node.type === "strong")[0].props.children),
-    ["已取消本次完成", "已取消本次未完成", "已取消本次部分完成", "已取消本次结果", "随手记"]);
-  assert.ok(rows.slice(0, 5).every(row => row.props["data-status"] === "cleared"));
+  assert.deepEqual(rows.slice(0, 6).map(row => elements(row, node => node.type === "strong")[0].props.children),
+    ["已取消本次完成", "已取消本次未完成", "已取消本次部分完成", "已取消本次结果", "随手记", "随手记"]);
+  assert.ok(rows.slice(0, 4).every(row => row.props["data-status"] === "cleared"));
+  assert.ok(rows.slice(4, 6).every(row => row.props["data-status"] === "open"));
+  assert.match(renderToStaticMarkup(rows[5]), /已清空随手记/);
   assert.match(renderToStaticMarkup(h.render()), /保留的备注/);
 });
 

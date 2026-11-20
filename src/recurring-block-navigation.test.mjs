@@ -30,7 +30,7 @@ function collect(node) {
 }
 collect(source);
 const fieldsSource = ts.createSourceFile("task-time-range-fields.tsx", readFileSync(new URL("./task-time-range-fields.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-functions.set("TaskTimeRangeFields", fieldsSource.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "TaskTimeRangeFields").getText(fieldsSource).replace("export ", ""));
+functions.set("timeRangeFields", fieldsSource.statements.filter(node => !ts.isImportDeclaration(node)).map(node => node.getText(fieldsSource).replace(/^export /, "")).join("\n"));
 const compile = code => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
 function load(names, state) {
   vm.createContext(state);
@@ -108,17 +108,21 @@ test("return location uses a soft halo rather than a dark outline and retains ke
 });
 
 test("recurring edit header returns to timeline while ordinary edit still returns to details", () => {
-  const state = load(["TaskPageHeader"], { React, Icon: () => null, recurringItemStatusLabel: () => "进行中", taskListStatus: task => task.status, statusCopy: { scheduled: "已安排" } });
+  const state = load(["TaskContextReturnButton", "TaskPageHeader"], { React, Icon: () => null, recurringItemStatusLabel: () => "进行中", taskListStatus: task => task.status, statusCopy: { scheduled: "已安排" } });
   for (const [props, expected] of [
     [{ task: { frequency: "daily", status: "active" }, editing: true, backLabel: "返回今日计划中的任务块" }, "返回今日计划中的任务块"],
     [{ task: { status: "scheduled" }, editing: true }, "返回任务详情"]
   ]) {
     let called = false;
     const tree = state.TaskPageHeader({ ...props, busy: true, onBack() { called = true; } });
-    const button = tree.props.children[0].props.children[0];
+    const control = tree.props.children[0].props.children[0];
+    assert.equal(control.type, state.TaskContextReturnButton);
+    const button = control.type(control.props);
     assert.equal(button.props["aria-label"], expected);
+    assert.equal(button.props.title, expected);
     assert.equal(button.props.disabled, true);
-    button.props.onClick();
+    assert.equal(button.props.children.props.size, 17);
+    state.TaskContextReturnButton({ ...control.props, disabled: false }).props.onClick();
     assert.equal(called, true);
   }
 });
@@ -143,11 +147,11 @@ test("recurring result and time pages share the ordinary shells but never show t
   for (const editable of [true, false]) for (const editingTime of editable ? [true, false] : [false]) {
     const context = { React, useState: React.useState, useEffect: React.useEffect, selectedRecurringOccurrence: { ...item, title: "重复任务", outcome: "completed", review_notes: "本次备注" }, recurringTimeEdit: editingTime ? { date: "2026-11-03", time: "09:00", duration: 120, error: "" } : null, today: "2026-11-03", savingRecurringChange: false, pendingRecurringChange: null, Icon: () => null, CopySeparator: () => null, closeTimelinePanel() {}, returnToRecurringOccurrenceDetails() {}, adjustRecurringOccurrenceTime() {}, openTimelineRecurringItem() {}, saveRecurringTimeEdit() {}, saveRecurringResult() {}, canEditRecurringOccurrence: () => editable, canRecordRecurringOccurrence: () => editable, recurringTimeRange: () => "09:00–11:00", RecurringBlockTimeEditor: () => null, setRecurringTimeEdit() {}, quickCompletingBlockId: null, busy: false, loading: false, savingExecution: false, preview: null };
     context.normalizeClockInput = normalizeClockInput;
-    load(["CompletedBlockRecord", "RecurringOccurrenceResult", "recurringTimeEditChanged"], context);
+    load(["TaskContextReturnButton", "CompletedBlockRecord", "RecurringOccurrenceResult", "recurringTimeEditChanged"], context);
     const html = renderToStaticMarkup(vm.runInContext(compile(`(${recurringPanel});`), context));
     assert.doesNotMatch(html, /execution-remove-today/);
     if (editingTime) {
-      assert.match(html, /返回任务块详情/);
+      assert.match(html, /class="task-context-return-icon" aria-label="返回任务块详情" title="返回任务块详情"/);
       assert.match(html, /<form id="recurring-block-time-form"/);
       assert.match(html, /<\/form><footer class="execution-capture-footer">/);
       assert.match(html, /type="submit" form="recurring-block-time-form" class="primary-action"/);
@@ -235,8 +239,8 @@ test("recurring block editor reuses an overlay calendar and compact midnight-awa
   assert.equal(value.time, "23:59"); assert.equal(value.duration, 1); assert.equal(value.date, "2026-11-05");
 });
 
-test("inputs-only range keeps presets but omits the rail and edge labels while defaults stay intact", () => {
-  const state = load(["TaskTimeRangeFields", "BlockEditorTimeRangeRail"], {
+test("inputs-only range keeps presets and inline labels without the rail, while defaults stay intact", () => {
+  const state = load(["timeRangeFields", "BlockEditorTimeRangeRail"], {
     React, compactBlockDuration, Fragment: React.Fragment, Icon: () => null, useRef: React.useRef, useState: React.useState, useEffect: React.useEffect,
     MIN_TASK_BLOCK_MINUTES: 15,
     clockMinutes: value => { const [h, m] = value.split(":").map(Number); return h * 60 + m; },
@@ -248,12 +252,14 @@ test("inputs-only range keeps presets but omits the rail and edge labels while d
   for (const inputsOnly of [false, true]) {
     const html = renderToStaticMarkup(React.createElement(state.BlockEditorTimeRangeRail, { start: "09:00", end: "11:00", onChange() {}, inputsOnly }));
     assert.equal((html.match(/type="text"/g) ?? []).length, 2);
+    assert.equal((html.match(/class="selection-preset-btn"/g) ?? []).length, 6);
+    assert.match(html, /aria-label="快捷时长"/);
     if (inputsOnly) {
-      assert.doesNotMatch(html, /time-rail-surface|time-duration-presets|time-range-marker|>开始<|>结束</);
-      assert.match(html, /task-time-range-presets/); assert.match(html, /推荐时长/);
+      assert.doesNotMatch(html, /time-rail-surface|time-range-marker/);
+      assert.equal((html.match(/class="task-time-range-box"/g) ?? []).length, 2);
       assert.match(html, /aria-label="输入开始时间"/); assert.match(html, /aria-label="输入结束时间"/);
     } else {
-      assert.match(html, /time-rail-surface/); assert.match(html, /time-duration-presets/); assert.match(html, /time-range-marker/);
+      assert.match(html, /time-rail-surface/); assert.match(html, /time-range-marker/);
     }
   }
 });

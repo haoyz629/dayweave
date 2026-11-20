@@ -13,6 +13,7 @@ function Invoke-DayweaveNpm {
     $command = ($tokens | ForEach-Object { '"' + $_ + '"' }) -join ' '
     # Wait only for npm's command process, not PowerShell's job/process-tree wait.
     $startInfo = New-Object Diagnostics.ProcessStartInfo
+    $startInfo.WorkingDirectory = (Get-Location).Path
     $startInfo.FileName = $env:ComSpec
     $startInfo.Arguments = '/d /s /c "' + $command + '"'
     $startInfo.UseShellExecute = $false

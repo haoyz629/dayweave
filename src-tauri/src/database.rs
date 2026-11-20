@@ -1711,6 +1711,8 @@ impl Database {
                     // Archive only after the fingerprint check, before undo overwrites the result.
                     database_history::preserve_current(&transaction, &target_id)?;
                 }
+                let audit_cursor = database_history::audit_cursor(&transaction, &target_id)?;
+                let before_capture = payload.block.as_ref().map(|block| database_history::capture_snapshot(&transaction, &block.id)).transpose()?;
                 if let Some(task) = payload.task {
                     let current = load_task_dto_in_transaction(&transaction, &task.id)?;
                     transaction.execute("UPDATE tasks SET status = ?2, remaining_workload_minutes = ?3, updated_at = ?4 WHERE id = ?1",
@@ -1723,19 +1725,19 @@ impl Database {
                     record_task_change(&transaction, &task.id, "undo_task_completed", Some(&current.status), Some(&task.status), "undo", Some(undo_id))?;
                 }
                 if let Some(block) = payload.block {
-                    let cancelled_completion = execution_snapshot(&transaction, &block.id)?.execution_status == "completed";
                     transaction.execute("UPDATE plan_blocks SET execution_status = ?2, actual_minutes = ?3, review_required = ?4,
                         execution_note = ?5, execution_captured_at = ?6, updated_at = ?7 WHERE id = ?1",
                         params![block.id, block.execution_status, block.actual_minutes, block.review_required,
                             block.execution_note, block.execution_captured_at, now()])?;
-                    if target_type == "execution_capture" {
-                        let (_, date, _) = database_results::block_context(&transaction, &block.id)?;
-                        database_history::record_cleared(&transaction, &target_id, &date, cancelled_completion)?;
-                    }
                 }
                 if let Some(review) = payload.review {
                     transaction.execute("UPDATE review_entries SET outcome = ?2, notes = ?3 WHERE id = ?1",
                         params![review.id, review.outcome, review.notes])?;
+                }
+                if let Some(before) = &before_capture {
+                    if target_type == "execution_capture" { database_execution::sync_block_result(&transaction, &before.id)?; }
+                    let (_, date, _) = database_results::block_context(&transaction, &before.id)?;
+                    database_history::record_capture_change(&transaction, &target_id, &date, before, audit_cursor, &now())?;
                 }
                 if let Some(occurrence) = payload.occurrence {
                     if occurrence.occurrence_date != shanghai_today() {
@@ -1746,12 +1748,6 @@ impl Database {
                         params![occurrence.id, occurrence.outcome, occurrence.review_notes, occurrence.reviewed_at, now()])?;
                     database_recurring_execution::record(&transaction, &occurrence.id, &now())?;
                     clear_review_draft(&transaction, &occurrence.occurrence_date, "recurring", &occurrence.id)?;
-                }
-                if target_type == "execution_capture" {
-                    let payload: FactUndo = serde_json::from_str(&before_json)?;
-                    if let Some(block) = payload.block {
-                        database_execution::sync_block_result(&transaction, &block.id)?;
-                    }
                 }
             }
             "task" => {
@@ -3653,8 +3649,13 @@ impl Database {
             transaction.commit()?;
             return Ok(());
         }
-        database_history::preserve_current(&transaction, &task_id)?;
         let before = execution_snapshot(&transaction, &input.plan_block_id)?;
+        let before_capture = database_history::capture_snapshot(&transaction, &input.plan_block_id)?;
+        if database_history::capture_unchanged(&before_capture, &outcome_str, input.note.as_deref()) {
+            return Ok(());
+        }
+        let audit_cursor = database_history::audit_cursor(&transaction, &task_id)?;
+        database_history::preserve_current(&transaction, &task_id)?;
         database_results::freeze_block(&transaction, &input.plan_block_id)?;
         if has_review {
             transaction.execute("UPDATE review_entries SET outcome = ?2, notes = ?3 WHERE plan_block_id = ?1",
@@ -3674,6 +3675,7 @@ impl Database {
             clear_review_draft(&transaction, capture_date, "task", &input.plan_block_id)?;
         }
         database_execution::sync_block_result(&transaction, &input.plan_block_id)?;
+        database_history::record_capture_change(&transaction, &task_id, capture_date, &before_capture, audit_cursor, &timestamp)?;
         if in_window && !has_review && !note_only && task_status != "done" {
             let payload = FactUndo { task: None, block: Some(before), occurrence: None, review: None,
                 after_facts: fact_fingerprint(&transaction, "execution_capture", &task_id)? };
@@ -3716,6 +3718,8 @@ impl Database {
         if !matches!(execution_status.as_str(), "completed" | "not_started" | "partial" | "cancelled" | "blocked") {
             return Err(AppError::Domain("该执行块没有可取消的任务结果".into()));
         }
+        let before = database_history::capture_snapshot(&transaction, plan_block_id)?;
+        let audit_cursor = database_history::audit_cursor(&transaction, &task_id)?;
         let timestamp = now();
         database_execution::clear_block_capture(&transaction, &task_id, capture_date, plan_block_id, has_review)?;
         if let Some(note) = note {
@@ -3723,12 +3727,12 @@ impl Database {
                 params![plan_block_id, note, timestamp])?;
         }
         if in_window { transaction.execute("UPDATE tasks SET updated_at = ?2 WHERE id = ?1", params![task_id, timestamp])?; }
-        database_history::record_cleared(&transaction, &task_id, capture_date, execution_status == "completed")?;
         if execution_status == "completed" {
             database_execution::sync_cleared_completion(&transaction, plan_block_id)?;
         } else {
             database_execution::sync_block_result(&transaction, plan_block_id)?;
         }
+        database_history::record_capture_change(&transaction, &task_id, capture_date, &before, audit_cursor, &timestamp)?;
         transaction.commit()?;
         Ok(())
     }
@@ -7459,7 +7463,7 @@ mod tests {
         let task_id = &result.affected_task_ids[0];
         assert_eq!(database.task_status(task_id).unwrap(), "done");
         assert_eq!(database.get_task(task_id).unwrap().source_type, "ai_assistant");
-        assert_eq!(database.count("task_changes").unwrap(), 2);
+        assert_eq!(database.get_task_metadata(task_id).unwrap().history.len(), 2, "creation and completion are two visible records");
         assert_eq!(database.get_day_schedule("2026-08-28").unwrap().task_blocks[0].execution_note.as_deref(), Some("创建历史任务自动完成"));
         let audit_status: String = database.connection.query_row("SELECT validation_status FROM ai_runs WHERE id = ?1", [&preview.ai_run_id], |row| row.get(0)).unwrap();
         assert_eq!(audit_status, "committed");
@@ -7604,7 +7608,8 @@ mod tests {
         assert_eq!(committed.status, "open");
         assert_eq!(database.task_status(&task_id).unwrap(), "open");
         assert_eq!(database.count("plan_blocks").unwrap(), 0);
-         assert_eq!(database.count("task_changes").unwrap(), 4);
+        let history = database.get_task_metadata(&task_id).unwrap().history;
+        assert_eq!(history.iter().map(|event| event.kind.as_str()).collect::<Vec<_>>(), ["created", "status", "reopened"]);
     }
 
     #[test]

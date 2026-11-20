@@ -83,6 +83,56 @@ export function solarTermProgressLabel(date: string) {
   return elapsedDays === 0 ? SOLAR_TERMS_2026[termDate] : `${SOLAR_TERMS_2026[termDate]}第${elapsedDays + 1}天`;
 }
 
+const HEAVENLY_STEMS = ["甲", "乙", "丙", "丁", "戊", "己", "庚", "辛", "壬", "癸"] as const;
+const EARTHLY_BRANCHES = ["子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"] as const;
+const ZODIAC_ANIMALS: Record<string, string> = {
+  子: "鼠", 丑: "牛", 寅: "虎", 卯: "兔", 辰: "龙", 巳: "蛇",
+  午: "马", 未: "羊", 申: "猴", 酉: "鸡", 戌: "狗", 亥: "猪"
+};
+const CANONICAL_MONTH_SOLAR_TERMS = [
+  ["小寒", "大寒"], ["立春", "雨水"], ["惊蛰", "春分"], ["清明", "谷雨"],
+  ["立夏", "小满"], ["芒种", "夏至"], ["小暑", "大暑"], ["立秋", "处暑"],
+  ["白露", "秋分"], ["寒露", "霜降"], ["立冬", "小雪"], ["大雪", "冬至"]
+] as const;
+
+const chineseYearFormatter = new Intl.DateTimeFormat("zh-CN-u-ca-chinese", {
+  timeZone: "Asia/Shanghai",
+  year: "numeric"
+});
+
+export function weekPeriodLabel(date: string) {
+  const month = Number(date.slice(5, 7));
+  const day = Number(date.slice(8, 10));
+  if (!Number.isInteger(month) || !Number.isInteger(day)) return "";
+  return `${month}月${day <= 10 ? "上旬" : day <= 20 ? "中旬" : "下旬"}`;
+}
+
+export function monthOverviewMeta(monthKey: string) {
+  const year = Number(monthKey.slice(0, 4));
+  const month = Number(monthKey.slice(5, 7));
+  const daysInMonth = Number.isInteger(year) && Number.isInteger(month)
+    ? new Date(Date.UTC(year, month, 0)).getUTCDate()
+    : 30;
+  const midMonth = new Date(`${monthKey}-15T00:00:00+08:00`);
+  const parts = Number.isNaN(midMonth.getTime()) ? [] : chineseYearFormatter.formatToParts(midMonth);
+  const rawStemBranch = parts.find((part) => (part.type as string) === "yearName")?.value;
+  const fallbackOffset = (((year - 4) % 60) + 60) % 60;
+  const stemBranch = rawStemBranch && rawStemBranch.length === 2
+    ? rawStemBranch
+    : `${HEAVENLY_STEMS[fallbackOffset % 10]}${EARTHLY_BRANCHES[fallbackOffset % 12]}`;
+  const zodiac = ZODIAC_ANIMALS[stemBranch[1]] ?? "";
+  const exactTerms = Object.entries(SOLAR_TERMS_2026)
+    .filter(([key]) => key.startsWith(`${monthKey}-`))
+    .map(([, label]) => label);
+  const canonicalPair = CANONICAL_MONTH_SOLAR_TERMS[month - 1];
+  const solarTerms = (exactTerms.length ? exactTerms : canonicalPair ?? []).join(" / ");
+  return {
+    lunarYear: `${stemBranch}${zodiac}年`,
+    solarTerms,
+    daysLabel: `全月 ${daysInMonth} 天`
+  };
+}
+
 function nextDate(date: string) {
   const value = new Date(`${date}T00:00:00+08:00`);
   value.setUTCDate(value.getUTCDate() + 1);

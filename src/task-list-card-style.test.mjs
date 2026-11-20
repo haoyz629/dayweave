@@ -26,17 +26,18 @@ function approvedDeclarations(ending) {
 }
 
 test("compact cards use list-scoped spacing, rounded borders and distinct selection", () => {
-  const row = declarations(`${list} .ledger-row.task-capsule-row`);
-  assert.equal(row.width, "calc(100% - 24px)");
-  assert.equal(row.margin, "6px 12px 0");
-  assert.equal(row.border, "1px solid var(--task-card-border)");
-  assert.equal(row["border-radius"], "14px");
-  assert.equal(row.background, "var(--task-card-bg)");
-  assert.equal(approvedDeclarations(".task-capsule-content").padding, "12px");
-  const selected = declarations(`${list} .ledger-row.task-capsule-row.selected`);
-  assert.equal(selected["border-color"], "var(--task-card-selected-border)");
-  assert.equal(selected.background, "var(--task-card-selected-bg)");
-  assert.equal(approvedDeclarations(".ledger-row.task-capsule-row:is(.selected, :hover)")["box-shadow"], "none");
+  const row = approvedDeclarations(".ledger-row.task-capsule-row");
+  assert.equal(row.width, "100%");
+  assert.equal(row.margin, "0");
+  assert.equal(row.border, "1px solid #e2e8f0");
+  assert.equal(row["border-radius"], "10px");
+  assert.equal(row.background, "#ffffff");
+  assert.equal(approvedDeclarations(".ledger-row-select.task-capsule-select").padding, "10px 12px");
+  assert.equal(approvedDeclarations(".task-capsule-content").padding, "0");
+  const selected = approvedDeclarations(".ledger-row.task-capsule-row.selected");
+  assert.equal(selected["border-color"], "#3168dc");
+  assert.equal(selected.background, "#eff5ff");
+  assert.equal(row["box-shadow"], "none");
 });
 
 test("every card palette token is local to the list and has a dark value", () => {
@@ -55,15 +56,18 @@ test("every card palette token is local to the list and has a dark value", () =>
   });
 });
 
-test("single-line titles get a full row and metadata stays below, not beside quick actions", () => {
+test("single-line titles share row with status slot and metadata stays in the bottom footer", () => {
   const heading = approvedDeclarations(".task-capsule-heading");
-  assert.equal(heading["flex-wrap"], "wrap");
-  assert.equal(heading["padding-right"], undefined);
-  const title = declarations(".task-capsule-heading > strong");
+  assert.equal(heading.display, "grid");
+  assert.equal(heading["grid-template-columns"], "minmax(0, 1fr) auto");
+  const title = approvedDeclarations(".task-capsule-heading > strong");
   assert.equal(title["text-overflow"], "ellipsis");
   assert.equal(title["white-space"], "nowrap");
-  assert.equal(approvedDeclarations(".task-capsule-heading-meta")["max-width"], "100%");
-  assert.equal(declarations(`${list} .task-capsule-heading > strong`)["font-size"], "15px");
+  assert.equal(title["font-size"], "13.5px");
+  const headingMeta = approvedDeclarations(".task-capsule-heading-meta");
+  assert.equal(headingMeta["max-width"], "none");
+  assert.equal(headingMeta.overflow, "hidden");
+  assert.equal(approvedDeclarations(".task-capsule-content .task-capsule-facts").flex, "0 0 auto");
   assert.match(app, /sourceType === "ai_assistant" && <span/);
   assert.doesNotMatch(app, /aria-label=\{sourceType === "ai_assistant" \? "AI 创建" : "手动创建"/);
 });
@@ -100,9 +104,9 @@ test("compact quick actions overlay the upper right without reserving a bottom r
   assert.equal((app.match(/<div className="ledger-row-actions"/g) || []).length, 4);
 });
 
-test("deadline icon, flat filters and persisted list width keep their behavior", () => {
+test("deadline icon, dropdown filters and persisted list width keep their behavior", () => {
   assert.match(app, /<Icon name=\{deadline \? "clock" : icon\} size=\{13\}/);
-  assert.match(app, /id="task-status-filter"[^>]*task-tag-filter-options[^>]*statusFilterExpanded/);
+  assert.match(app, /<TaskStatusDropdown id="task-status-filter"/);
   assert.match(app, /const TASK_LEDGER_LIST_DEFAULT_WIDTH = 400;/);
   assert.match(app, /const TASK_LEDGER_WIDTH_SETTING = "ui.task_ledger_list_width";/);
   for (const tone of ["open", "scheduled", "not_completed"]) {
@@ -111,11 +115,11 @@ test("deadline icon, flat filters and persisted list width keep their behavior",
 });
 
 test("priority border colors are at least as specific as the compact badge border", () => {
-  for (const priority of ["low", "medium", "high"]) {
-    const badge = declarations(`${list} .task-capsule-footer .priority-${priority}`);
-    assert.equal(badge["border-color"], `var(--priority-${priority}-border)`);
-    assert.equal(declarations(`${list} .task-capsule-footer .priority-badge`).border, "1px solid");
-    assert.equal(approvedDeclarations(".task-capsule-footer .priority-badge").height, "24px");
+  assert.equal(approvedDeclarations(".task-ledger-list .priority-badge").height, "18px");
+  assert.equal(approvedDeclarations(".task-ledger-list .priority-badge").border, "1px solid");
+  for (const priority of ["urgent", "low", "medium", "high"]) {
+    const badge = approvedDeclarations(`.task-capsule-footer .priority-${priority}`);
+    assert.ok(badge["border-color"], priority);
   }
 });
 

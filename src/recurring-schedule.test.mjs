@@ -85,17 +85,34 @@ test("history and invalid target dates are rejected before any write", () => {
 });
 
 test("incomplete recurring creation preserves draft and never calls confirmation", async () => {
-  const state = { busy: false, draftSaving: false, createItemType: "recurring", recurringForm: { ...input, display_time: "" }, currentCreationInput: () => ({ ...input }), newTaskEditRevision: { current: 0 }, recurringTimeBlockIssue };
+  const state = { busy: false, draftSaving: false, createItemType: "recurring", recurringForm: { ...input, display_time: "" }, currentCreationInput: () => ({ ...input }), newTaskEditRevision: { current: 0 }, recurringTimeBlockIssue, recurringItemPreviewDates: () => ["2026-10-05"] };
   setters(state, ["newTaskError"]);
   run(["commitNewTask"], state);
   assert.equal(await state.commitNewTask(), false);
   assert.match(state.newTaskError, /开始时间.*草稿/);
 });
 
+test("recurring creation and editing reject rules with zero valid occurrence dates", async () => {
+  const noDatesState = { busy: false, draftSaving: false, createItemType: "recurring", recurringForm: { ...input, frequency: "monthly", month_day: 31, starts_on: "2026-11-01", ends_on: "2026-11-30" }, currentCreationInput: () => ({ ...input }), newTaskEditRevision: { current: 0 }, recurringTimeBlockIssue, recurringItemPreviewDates: () => [] };
+  setters(noDatesState, ["newTaskError"]);
+  run(["commitNewTask"], noDatesState);
+  assert.equal(await noDatesState.commitNewTask(), false);
+  assert.match(noDatesState.newTaskError, /暂无匹配发生日，不能保存/);
+
+  let resolved = false;
+  const editNoDatesState = { selectedRecurringItem: { id: "series" }, busy: false, recurringTargetLoading: false, recurringTarget: occurrence, recurringForm: { ...input, frequency: "monthly", month_day: 31, starts_on: "2026-11-01", ends_on: "2026-11-30" }, resolveRecurringEditTarget: async () => { resolved = true; return occurrence; }, recurringItemPreviewDates: () => [] };
+  setters(editNoDatesState, ["busy", "feedback", "recurringScopeError", "pendingItemChange"]);
+  run(["saveRecurringItem"], editNoDatesState);
+  await editNoDatesState.saveRecurringItem();
+  assert.equal(resolved, false);
+  assert.match(editNoDatesState.feedback, /暂无匹配发生日，不能保存/);
+  assert.equal(text.match(/Boolean\(recurringFormSaveIssue\(recurringForm\)\)/g)?.length, 2);
+});
+
 test("task page resolves today/next at save and does not write before confirmation", async () => {
   for (const target of [occurrence, null]) {
     const state = { selectedRecurringItem: { id: "series" }, busy: false, recurringTargetLoading: false, recurringTarget: occurrence, recurringForm: input,
-      resolveRecurringEditTarget: async () => target, recurringItemInputForForm: value => value, recurringChangeIssue, shanghaiDateValue: () => "2026-10-25", uiErrorMessage: String };
+      resolveRecurringEditTarget: async () => target, recurringItemInputForForm: value => value, recurringChangeIssue, recurringItemPreviewDates: () => ["2026-10-05"], shanghaiDateValue: () => "2026-10-25", uiErrorMessage: String };
     setters(state, ["busy", "feedback", "recurringScopeError", "pendingItemChange"]);
     run(["saveRecurringItem"], state);
     await state.saveRecurringItem();

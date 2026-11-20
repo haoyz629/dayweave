@@ -28,45 +28,36 @@ test("approved task styles load after the existing palette and never depend on p
   assert.doesNotMatch(css, /preview-a|preview-readonly|!important|\.next-sidebar|\.day-timeline/);
 });
 
-test("light task surfaces inherit the shared palette without local color overrides", () => {
-  const workspace = declarations(".next-workspace .tasks-workspace");
-  assert.equal(workspace.background, undefined);
-  assert.equal(workspace.color, "var(--color-ink)");
-  assert.equal(workspace["--color-canvas"], "var(--app-workspace-bg)");
-  assert.equal(workspace["--color-edge"], "var(--jx-edge)");
-  const cards = declarations(".tasks-workspace .task-ledger-list");
-  assert.equal(cards["--task-card-bg"], "var(--color-panel)");
-  assert.equal(cards["--task-card-selected-bg"], "var(--color-selected-bg)");
-  assert.equal(cards["--task-card-title"], "var(--color-ink)");
-  assert.equal(cards["--task-card-note"], "var(--color-muted)");
-  assert.doesNotMatch(css, /#(?:f4f5f7|dce1e8|edf2fa|253247|58667a)/i);
-});
 
 test("every list variant keeps one full-width single-line title and separate metadata", () => {
+  const heading = declarations(".task-capsule-heading");
+  assert.equal(heading.display, "grid");
+  assert.equal(heading["grid-template-columns"], "minmax(0, 1fr) auto");
   const title = declarations(".task-capsule-heading > strong");
-  assert.equal(title.flex, "1 1 100%");
   assert.equal(title["white-space"], "nowrap");
   assert.equal(title["text-overflow"], "ellipsis");
-  assert.equal(title["font-weight"], "500");
-  assert.equal(title["font-size"], "15px");
-  assert.equal(declarations(".task-capsule-heading")["flex-wrap"], "wrap");
-  assert.equal(declarations(".task-capsule-heading-meta")["max-width"], "100%");
-  assert.equal(declarations(".task-capsule-content").padding, "12px");
-  assert.equal(declarations(".ledger-row.task-capsule-row:is(.selected, :hover)")["box-shadow"], "none");
+  assert.equal(title["font-weight"], "600");
+  assert.equal(title["font-size"], "13.5px");
+  const headingMeta = declarations(".task-capsule-heading-meta");
+  assert.equal(headingMeta["max-width"], "none");
+  assert.equal(headingMeta.overflow, "hidden");
+  assert.equal(headingMeta["min-width"], "0");
+  assert.equal(declarations(".task-capsule-content .task-capsule-facts").flex, "0 0 auto");
+  assert.equal(declarations(".task-capsule-content").padding, "0");
+  assert.equal(declarations(".ledger-row.task-capsule-row")["box-shadow"], "none");
   assert.match(app, /<strong title=\{title\}>\{title\}<\/strong>/);
   assert.equal((app.match(/<div[^\n]*className=[^\n]*task-capsule-row/g) || []).length, 4);
 });
 
-test("ordinary and all recurring lifecycle details keep full-title hints and per-tag ellipsis", () => {
-  assert.equal((app.match(/<h2 title=\{(?:task|item)\.title\}>\{(?:task|item)\.title\}<\/h2>/g) || []).length, 4);
-  const title = declarations(".ordinary-task-detail > header h2");
-  assert.equal(title["white-space"], "nowrap");
-  assert.equal(title["text-overflow"], "ellipsis");
+test("ordinary and all recurring lifecycle details keep full-title hints and full wrapped headings", () => {
+  assert.equal((app.match(/<TaskDetailHero/g) ?? []).length, 4);
+  const title = declarations(".detail-hero-title-block > h2");
+  assert.equal(title["white-space"], "normal");
+  assert.equal(title["overflow-wrap"], "anywhere");
   assert.equal(title["font-weight"], "500");
-  const tag = declarations(".ordinary-task-detail > header .task-list-tags > span");
-  assert.equal(tag["max-width"], "min(100%, 180px)");
-  assert.equal(tag["white-space"], "nowrap");
-  assert.equal(tag["text-overflow"], "ellipsis");
+  const tag = declarations(".detail-hero-meta .task-list-tags > span");
+  assert.equal(tag["max-width"], "none");
+  assert.equal(tag["white-space"], "normal");
   assert.match(read("./task-tag-editor.tsx"), /data-tag-color=\{colorFor\(definitions, tag\)\} title=\{tag\}>\{tag\}/);
   assert.equal(declarations(".task-completion-backdrop .task-completion-header h2")["text-overflow"], "ellipsis");
   assert.match(app, /id="task-completion-title" title=\{task\.title\}/);
@@ -133,23 +124,25 @@ test("form actions remain readable while title and notes retain the original bor
   assert.match(legacy, /\.task-notes-inputs > :is\(input, textarea\):focus-visible \{\s*outline: none;/);
 });
 
-test("resource details share editor typography and column rhythm, including empty values", () => {
+test("resource details share editor typography and natural height, including empty values", () => {
   const text = declarations(".ordinary-task-detail :is(.task-detail-note, .task-detail-url, .task-detail-empty, .task-detail-resource-label)");
-  assert.equal(text["font-size"], "14px");
-  assert.equal(text["line-height"], "24px");
+  assert.equal(text["font-size"], "13px");
+  assert.equal(text["line-height"], "1.65");
+  const note = declarations(".ordinary-task-detail .task-detail-note");
+  assert.equal(note["max-height"], "none");
+  assert.equal(note["overflow-y"], "visible");
   const row = declarations(".ordinary-task-detail .task-detail-resource-row");
-  assert.equal(row["grid-template-columns"], "60px minmax(0, 1fr) 28px");
-  assert.equal(row.padding, "16px");
-  assert.equal(row.gap, "8px");
+  assert.equal(row["grid-template-columns"], "62px minmax(0, 1fr) 28px");
+  assert.equal(row.padding, "12px 16px");
+  assert.equal(row.gap, "10px");
   assert.equal(declarations(".ordinary-task-detail .task-detail-resource-label")["grid-template-columns"], "16px 36px");
-  assert.equal(declarations(".ordinary-task-detail .task-detail-resource-label > svg")["margin-top"], "5px");
-  assert.equal(declarations(".ordinary-task-detail .task-detail-resource-label")["align-items"], "start");
+  assert.equal(declarations(".ordinary-task-detail .task-detail-resource-label")["align-items"], "center");
   const resources = app.slice(app.indexOf("function TaskDetailResources("), app.indexOf("function TaskPageHeader("));
   assert.match(resources, /<span>链接<\/span>/);
   assert.match(resources, /<span>备注<\/span>/);
 });
 
 test("search input delegates its focus indicator to the composite wrapper", () => {
-  assert.equal(declarations('.task-queue-search > input[type="search"]:focus-visible').outline, "none");
+  assert.equal(declarations(':is(.task-queue-search, .task-filter-popover-search) > input[type="search"]:focus-visible').outline, "none");
   assert.match(read("./styles.css"), /\.task-queue-search:focus-within \{[^}]*border-color: var\(--jx-focus\);[^}]*box-shadow:/);
 });

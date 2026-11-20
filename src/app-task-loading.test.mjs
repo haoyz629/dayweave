@@ -26,6 +26,8 @@ function mount(overrides = {}) {
     useRef: current => ({ current }),
     listTasks: async () => { calls.tasks++; return [{ id: "task" }]; },
     listRecurringItems: async () => { calls.recurring++; return [{ id: "recurring" }]; },
+    listTaskDrafts: async () => [{ id: "draft-one" }, { id: "draft-two" }],
+    setSidebarDraftCount(value) { state.draftCount = value; },
     refreshAvailability() { calls.availability++; },
     refreshSchedule(date) { calls.dates.push(date); },
     setTasks(value) { state.tasks = value; }, setRecurringItems(value) { state.recurring = value; },
@@ -56,6 +58,7 @@ test("mount reads each task collection once; later date changes still refresh wi
   assert.equal(h.calls.availability, 1);
   assert.equal(h.state.tasks[0].id, "task");
   assert.equal(h.state.recurring[0].id, "recurring");
+  assert.equal(h.state.draftCount, 2, "sidebar draft count is loaded before opening tasks");
   for (const date of ["2026-11-13", "2026-11-12"]) {
     h.changeDate(date);
     await tick();

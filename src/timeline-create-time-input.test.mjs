@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 import React from "react";
+import { joinTaskNotes, splitTaskNotes } from "./task-notes.ts";
 import { constrainTimeRange, normalizeClockInput, sanitizeTimeInput } from "./time-range-control.ts";
 
 const source = ts.createSourceFile("timeline-task-create.tsx", readFileSync(new URL("./timeline-task-create.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -19,8 +20,8 @@ function harness(start = "09:00", end = "10:00") {
   const toMinute = value => Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
   const calls = [];
   const state = {
-    React, constrainTimeRange, normalizeClockInput, sanitizeTimeInput,
-    form: { title: "输入验证", priority: "medium", tags: [], start, end }, rangeRef: { current: { start: toMinute(start), end: toMinute(end) } },
+    React, constrainTimeRange, normalizeClockInput, sanitizeTimeInput, joinTaskNotes, splitTaskNotes,
+    form: { title: "输入验证", priority: "medium", tags: [], notes: "", notesExpanded: false, start, end }, rangeRef: { current: { start: toMinute(start), end: toMinute(end) } },
     savingRef: { current: false }, disabled: false, titleRef: { current: { focus() {} } },
     setForm(value) { state.form = value; }, setError(value) { state.error = value; }, onRange(value) { calls.push(value); }
   };
@@ -121,10 +122,47 @@ test("slide creation saves selected tags, and retries update the same draft with
   assert.equal(closed, 1);
 });
 
-test("slide creation keeps tags alongside priority and disables both during saves", () => {
+test("slide creation uses segmented P0-P3 priority, inline tag chips, and structured URL + note inputs matching task creation", () => {
   const text = readFileSync(new URL("./timeline-task-create.tsx", import.meta.url), "utf8");
-  assert.match(text, /className="selection-task-options">\s*<div className="selection-priority-field">[\s\S]*?<TaskTagEditor[^>]*tags=\{form.tags\} disabled=\{saving \|\| disabled\}/);
+  assert.match(text, /<TaskPrioritySelector[\s\S]*?variant="segmented"[\s\S]*?value=\{form\.priority\}[\s\S]*?disabled=\{saving \|\| disabled\}/);
+  assert.match(text, /<TaskTagEditor[\s\S]*?inlineChips[\s\S]*?tags=\{form\.tags\}[\s\S]*?disabled=\{saving \|\| disabled\}/);
   assert.match(text, /onChange=\{\(tags\) => setForm\(\{ \.\.\.form, tags \}\)\}/);
+  assert.match(text, /placeholder="粘贴网址（选填）"/);
+  assert.match(text, /placeholder="添加说明或补充信息（选填）"/);
+  // Shared icon-field styles put inputs in column 2, where this dialog places the labels.
+  assert.match(text, /className="selection-task-notes-inputs"/);
   const css = readFileSync(new URL("./timeline-task-create.css", import.meta.url), "utf8");
-  assert.match(css, /\.selection-task-options \{[^}]*display: flex[^}]*align-items: flex-end/);
+  assert.match(css, /\.selection-create-dialog \{[\s\S]*?width: 404px;/);
+  assert.match(css, /\.priority-segmented-control \{[\s\S]*?grid-template-columns: repeat\(4, minmax\(0, 1fr\)\);/);
+  assert.match(text, /<TaskDurationPresets duration=\{duration\} maxDuration=\{maxDuration\} disabled=\{saving\} onDuration=\{\(minutes\) => updateTimes\("end", clock\(startMinute \+ minutes\)\)\}/);
+  const rangeCss = readFileSync(new URL("./task-time-range-fields.css", import.meta.url), "utf8");
+  assert.match(rangeCss, /\.selection-presets-row \{[\s\S]*?grid-template-columns: repeat\(6, minmax\(0, 1fr\)\);/);
+});
+
+test("slide creation normalizes optional URL and remarks with the shared task-notes format", async () => {
+  const cases = [
+    [{ url: "", body: "" }, null],
+    [{ url: "   ", body: "  \n " }, null],
+    [{ url: " https://dayweave.dev/spec ", body: "" }, "URL: https://dayweave.dev/spec"],
+    [{ url: "", body: " 核对回归样本\n记录耗时 " }, "核对回归样本\n记录耗时"],
+    [{ url: "https://dayweave.dev/spec", body: "核对回归样本" }, "URL: https://dayweave.dev/spec\n\n核对回归样本"],
+  ];
+  for (const [parts, expected] of cases) {
+    const h = harness();
+    let captured = null;
+    Object.assign(h.state, {
+      date: "2026-11-18", draftRef: { current: null }, savedInputRef: { current: "" },
+      setSaving() {}, close() {},
+      async createManualTaskDraft(input) { captured = input; return { id: "draft", version: 1 }; },
+      async saveTaskDraft(id, version, input) { captured = input; return { id, version: version + 1 }; },
+      async confirmCreationDraft() { return { item_type: "task", item: { id: "task" } }; },
+      async onCreated() {},
+    });
+    h.state.form.notes = joinTaskNotes(parts.url, parts.body);
+    await h.state.submit({ preventDefault() {} });
+    assert.equal(captured.notes, expected);
+    if (expected) {
+      assert.deepEqual(splitTaskNotes(captured.notes), { url: parts.url.trim(), body: parts.body.trim() });
+    }
+  }
 });

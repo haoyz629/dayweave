@@ -21,6 +21,7 @@ function mount(name, props) {
   const globals = {
     React, CopySeparator, Fragment: React.Fragment, ...controls, recurringClockRange, recurringRangeInput, recurringTimeBlockIssue,
     MIN_TASK_BLOCK_MINUTES: 15, Icon: () => null, createPortal: node => node,
+    TaskDurationPresets: () => null,
     pickerDateLabel: value => value, formatWorkloadMinutes: value => `${value} 分钟`,
     recurringItemPreviewDates: form => [form.starts_on, ...(form.ends_on ? [form.ends_on] : [])],
     document: { body: { style: { overflow: "" } }, activeElement: { focus() {} } },

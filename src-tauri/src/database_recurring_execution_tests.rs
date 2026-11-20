@@ -71,14 +71,16 @@ fn recurring_execution_save_is_normalized_idempotent_and_clear_recomplete_is_rea
     assert_eq!(save(&mut db, &current.id, "not_completed", None), no_note);
     let events = db.list_recurring_execution_history(&item.id).unwrap();
     assert_eq!(events.iter().map(|e| e.outcome.as_deref()).collect::<Vec<_>>(),
-        vec![Some("completed"), None, Some("completed"), Some("completed"), Some("partial"), Some("not_completed")]);
+        vec![Some("completed"), None, Some("completed"), None, Some("partial"), Some("not_completed")]);
     assert_eq!(events[0].notes.as_deref(), Some("done"));
     assert_eq!(events[1].notes, None);
     assert_eq!(events[5].notes, None);
+    assert_eq!(events[4].notes, None);
+    assert_eq!(events[5].note_cleared, Some(true));
     assert!(events.windows(2).all(|w| w[0].id.parse::<i64>().unwrap() < w[1].id.parse::<i64>().unwrap()));
     assert!(events.iter().all(|e| e.occurrence_id.as_deref() == Some(current.id.as_str()) && e.kind == "execution"));
     let json = serde_json::to_value(&events[1]).unwrap();
-    assert_eq!(json.as_object().unwrap().len(), 11);
+    assert_eq!(json["note_cleared"], true);
     assert_eq!(json["cancelled_outcome"], "completed");
     assert_eq!(json["kind"], "execution");
     assert!(json["id"].is_string());
@@ -89,6 +91,31 @@ fn recurring_execution_save_is_normalized_idempotent_and_clear_recomplete_is_rea
     assert_eq!(json["display_duration_minutes"], 30);
     assert!(json["outcome"].is_null() && json["notes"].is_null());
     assert!(json["occurred_at"].is_string());
+}
+
+#[test]
+fn recurring_note_complete_cancel_are_separate_deltas_for_the_same_occurrence() {
+    let _clock = TestToday::new(TODAY);
+    let mut db = Database::in_memory().unwrap();
+    let item = db.create_recurring_item(rule("Per-save changes")).unwrap();
+    let first = occurrence(&mut db, &item.id, TODAY);
+    let second = occurrence(&mut db, &item.id, "2026-10-17");
+    db.update_recurring_occurrence(&second.id, rule("Second block"), TODAY, "this").unwrap();
+    db.save_recurring_occurrence_review(&first.id, RecurringOccurrenceReviewInput { outcome: None, notes: Some("111222".into()) }).unwrap();
+    save(&mut db, &second.id, "completed", Some("111222"));
+    let completed = save(&mut db, &first.id, "completed", Some("111222"));
+    assert_eq!(save(&mut db, &first.id, "completed", Some(" 111222 ")), completed);
+    let cleared = db.clear_recurring_occurrence_review(&first.id, Some("111222".into())).unwrap();
+    assert_eq!(cleared.review_notes.as_deref(), Some("111222"));
+    db.clear_recurring_occurrence_review(&first.id, None).unwrap();
+    let events = db.list_recurring_execution_history(&item.id).unwrap();
+    let first_events = events.iter().filter(|e| e.occurrence_id.as_deref() == Some(first.id.as_str())).collect::<Vec<_>>();
+    assert_eq!(first_events.iter().map(|e| (e.outcome.as_deref(), e.cancelled_outcome.as_deref(), e.notes.as_deref(), e.note_cleared)).collect::<Vec<_>>(),
+        vec![(None, None, Some("111222"), None), (Some("completed"), None, None, None),
+            (None, Some("completed"), None, None), (None, None, None, Some(true))]);
+    assert_eq!(events.len(), 5);
+    let other = events.iter().find(|e| e.occurrence_id.as_deref() == Some(second.id.as_str())).unwrap();
+    assert_eq!((other.outcome.as_deref(), other.notes.as_deref()), (Some("completed"), Some("111222")));
 }
 
 #[test]

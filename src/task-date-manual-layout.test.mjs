@@ -10,6 +10,8 @@ import postcss from "postcss";
 
 const source = ts.createSourceFile("App.tsx", readFileSync(new URL("./App.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const declaration = name => source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
+const fieldsSource = ts.createSourceFile("task-time-range-fields.tsx", readFileSync(new URL("./task-time-range-fields.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const fields = fieldsSource.statements.filter(node => !ts.isImportDeclaration(node)).map(node => node.getText(fieldsSource).replace(/^export /, "")).join("\n");
 function descendants(node, predicate) {
   const found = [];
   function visit(current) { if (predicate(current)) found.push(current); ts.forEachChild(current, visit); }
@@ -41,11 +43,12 @@ function range(props = {}) {
     useRef: value => ({ current: value }), useState: value => [typeof value === "function" ? value() : value, () => {}], useEffect() {},
     formatWorkloadMinutes: value => `${value} 分钟`
   };
-  const code = ["BlockEditorTimeRangeRail", "clockMinutes", "minutesClock"].map(name => declaration(name).getText(source)).join("\n");
+  const code = [fields, ...["BlockEditorTimeRangeRail", "clockMinutes", "minutesClock"].map(name => declaration(name).getText(source))].join("\n");
   vm.runInNewContext(ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText, globals);
   const tree = globals.BlockEditorTimeRangeRail({ start: "09:30", end: "10:30", onChange: next => changes.push({ ...next }), ...props });
   function buttons(node) {
     if (!React.isValidElement(node)) return [];
+    if (node.type === globals.TaskDurationPresets) return buttons(node.type(node.props));
     return [...(node.type === "button" ? [node] : []), ...React.Children.toArray(node.props.children).flatMap(buttons)];
   }
   return { html: renderToStaticMarkup(tree), buttons: buttons(tree), changes };
@@ -53,18 +56,19 @@ function range(props = {}) {
 
 test("presets-only rendering removes timeline, duplicate inputs and dragging instructions", () => {
   const h = range({ presetsOnly: true, describedBy: "old-rail-help" });
-  assert.equal(h.buttons.length, 4);
+  assert.equal(h.buttons.length, 6);
+  assert.match(h.html, /aria-pressed="true">1h<\/button>/);
   assert.doesNotMatch(h.html, /<input|time-rail-surface|time-range-values|old-rail-help|拖动|方向键/);
-  assert.match(h.html, /快速设置时长/);
-  h.buttons[3].props.onClick();
-  assert.deepEqual(h.changes, [{ start: "09:30", end: "11:30" }]);
+  assert.match(h.html, /快捷时长/);
+  h.buttons[4].props.onClick();
+  assert.deepEqual(h.changes, [{ start: "09:30", end: "11:00" }]);
 });
 
 test("presets preserve ordinary day-end, recurring midnight, disabled and cross-day guards", () => {
   const ordinary = range({ presetsOnly: true, start: "23:30", end: "23:45" });
-  assert.deepEqual(ordinary.buttons.map(button => button.props.disabled), [false, true, true, true]);
+  assert.deepEqual(ordinary.buttons.map(button => button.props.disabled), [false, true, true, true, true, true]);
   const recurring = range({ presetsOnly: true, start: "23:30", end: "23:45", maxMinute: 1440, allowMidnightEnd: true, minimumDuration: 1 });
-  assert.deepEqual(recurring.buttons.map(button => button.props.disabled), [false, false, true, true]);
+  assert.deepEqual(recurring.buttons.map(button => button.props.disabled), [false, false, true, true, true, true]);
   recurring.buttons[1].props.onClick();
   assert.deepEqual(recurring.changes, [{ start: "23:30", end: "24:00" }]);
   assert.ok(range({ presetsOnly: true, disabled: true }).buttons.every(button => button.props.disabled));
@@ -85,7 +89,7 @@ test("manual layout CSS stays scoped to date dialogs and light mode", () => {
   const local = css.slice(css.indexOf("/* Approved manual date picker:"));
   assert.match(local, /\.schedule-picker-range-panel \{ justify-content: center; padding: 24px;/);
   assert.match(local, /gap: 12px; padding: 0;/);
-  assert.match(local, /\.time-duration-presets \{ margin-top: 20px;/);
+  assert.match(local, /\.selection-presets-row \{ margin-top: 20px;/);
   for (const line of local.split("\n").filter(line => line.includes(" { "))) {
     assert.ok(line.trim().startsWith('html:root:not([data-mode="dark"]) .manual-time-picker'), line);
   }
@@ -97,7 +101,7 @@ test("desktop date dialogs spread only right-panel spacing without expanding the
   const expected = new Map([
     [".schedule-picker-range-panel > header", ["margin-bottom", "24px"]],
     [".schedule-picker-boundaries.schedule-picker-rows", ["gap", "20px"]],
-    [".schedule-picker-range-panel .time-duration-presets", ["margin-top", "32px"]],
+    [".schedule-picker-range-panel .selection-presets-row", ["margin-top", "32px"]],
     [".schedule-occurrence-preview", ["margin-top", "32px"]]
   ]);
   const actual = new Map();
@@ -144,7 +148,7 @@ test("date picker spacing is compact and the boundary gap inherits the panel sur
 
 test("light task list removes the idle scrollbar gutter and draws the divider at the list edge", () => {
   const css = readFileSync(new URL("./task-comfort.css", import.meta.url), "utf8");
-  assert.match(css, /html:root:not\(\[data-mode="dark"\]\) \.tasks-workspace \.task-ledger-list \{ scrollbar-gutter: auto; \}/);
+  assert.match(css, /html:root:not\(\[data-mode="dark"\]\) \.tasks-workspace \.task-ledger-list \{[^}]*scrollbar-gutter: auto;/);
   assert.match(css, /\.ledger-resize-handle::after \{ left: 0; transform: none; \}/);
-  assert.match(css, /\.ledger-row\.task-capsule-row \{ width: calc\(100% - 20px\); margin-right: 8px; \}/);
+  assert.match(css, /\.ledger-row\.task-capsule-row \{[^}]*width: 100%;/);
 });

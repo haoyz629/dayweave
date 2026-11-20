@@ -6,6 +6,7 @@ import vm from "node:vm";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
+import { CopySeparator } from "./copy-separator.test-helper.mjs";
 
 const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", app, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -65,8 +66,8 @@ assert.ok(loadEffect);
 
 test("settings modal retains core controls without bringing back retired settings", () => {
   const context = vm.createContext({
-    React, useState: React.useState, useEffect: React.useEffect, useRef: React.useRef,
-    Icon: () => null, BlockEditorTimeRangeRail: () => null, HolidayCalendarSettings: () => React.createElement("p", null, "检查节假日更新")
+    React, CopySeparator, useState: React.useState, useEffect: React.useEffect, useRef: React.useRef,
+    Logo: () => null, Icon: () => null, BlockEditorTimeRangeRail: () => null, HolidayCalendarSettings: () => React.createElement("p", null, "检查节假日更新")
   });
   vm.runInContext(compile(text), context);
   const html = renderToStaticMarkup(React.createElement(context.SettingsPage, {
@@ -82,7 +83,7 @@ test("settings modal retains core controls without bringing back retired setting
   assert.match(html, /type="checkbox" aria-label="补班日计入工作日" checked=""/);
   assert.match(html, /inputMode="numeric" autoComplete="off" min="0" max="60" step="1" aria-describedby="settings-reminder-help"/);
   assert.doesNotMatch(html, /节假日涉及的补班日自动识别为工作日|任务开始前发送桌面通知/);
-  assert.doesNotMatch(text, /activeCategory|settingsCategories|previewAppearance/);
+  assert.doesNotMatch(text, /settingsCategories|previewAppearance/);
   assert.doesNotMatch(app, /label: "设置"|active === "设置"|settingsEditorDirty/);
 });
 
@@ -249,4 +250,14 @@ test("settings typography follows the shared UI stack and readable role scale", 
   assert.match(css, /\.settings-field-copy small \{[^}]*font-size: 12px; line-height: 18px/);
   assert.match(css, /\.settings-dialog-actions > button \{[^}]*font-size: 13px/);
   assert.doesNotMatch(css, /font: 700|text-transform: uppercase|letter-spacing: \.12em/);
+});
+
+test("settings top toast uses dedicated smooth entrance without scrollbar flicker or jitter", () => {
+  const dialogCss = readFileSync(new URL("./settings-dialog.css", import.meta.url), "utf8");
+  const colorSystemCss = readFileSync(new URL("./color-system.css", import.meta.url), "utf8");
+  assert.match(dialogCss, /\.settings-dialog \.settings-feedback-viewport \{[^}]*overflow:\s*visible;/);
+  assert.match(dialogCss, /\.settings-dialog \.settings-feedback-viewport \.feedback-toast \{[^}]*animation:\s*settings-toast-enter/);
+  assert.match(dialogCss, /@keyframes settings-toast-enter \{[\s\S]*from \{ opacity: 0; transform: translateY\(-8px\); \}/);
+  assert.match(colorSystemCss, /html:root:not\(\[data-mode="dark"\]\) \.settings-dialog \.settings-feedback-viewport \{[^}]*overflow:\s*visible;/);
+  assert.match(colorSystemCss, /html:root:not\(\[data-mode="dark"\]\) \.settings-dialog \.settings-feedback-viewport \.feedback-toast \{[^}]*animation:\s*settings-toast-enter/);
 });

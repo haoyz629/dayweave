@@ -1,100 +1,102 @@
 ---
-name: Dayweave Paper Ledger
-description: 安静、可信、以物理行政纸面账本为灵感的本地优先桌面工作台
+name: Dayweave Precision Workbench (Direction A)
+description: 冷静、清晰、以本地 SQLite 事务事实为基石的冷蓝灰桌面工作台
 colors:
-  surface: '#fdfdfb'
-  surface-dim: '#dadbd2'
-  surface-bright: '#f9faf1'
+  canvas: '#eef2f6'
+  group: '#f6f8fb'
+  sidebar: '#f8fafc'
+  titlebar: '#fbfcfd'
+  surface: '#ffffff'
+  surface-dim: '#e4e9f0'
+  surface-bright: '#ffffff'
   surface-container-lowest: '#ffffff'
-  surface-container-low: '#f4f4eb'
-  surface-container: '#eeefe6'
-  surface-container-high: '#e8e9e0'
-  surface-container-highest: '#e2e3da'
-  on-surface: '#1a1c17'
-  on-surface-variant: '#444655'
-  inverse-surface: '#2f312b'
-  inverse-on-surface: '#f1f1e8'
-  outline: '#757687'
-  outline-variant: '#c5c5d8'
-  surface-tint: '#304ce0'
-  primary: '#2d4add'
+  surface-container-low: '#f6f8fb'
+  surface-container: '#eef2f6'
+  surface-container-high: '#e4e9f0'
+  surface-container-highest: '#e3ebf5'
+  on-surface: '#172b4d'
+  on-surface-variant: '#4a5c75'
+  inverse-surface: '#0f172a'
+  inverse-on-surface: '#f8fafc'
+  outline: '#4a5c75'
+  outline-variant: '#bdc9d8'
+  surface-tint: '#3168dc'
+  primary: '#3168dc'
+  primary-hover: '#285bc4'
   on-primary: '#ffffff'
-  primary-container: '#4b65f7'
-  on-primary-container: '#fffbff'
-  inverse-primary: '#bbc3ff'
-  secondary: '#5d5f5b'
+  primary-container: '#dceaff'
+  on-primary-container: '#1544a5'
+  inverse-primary: '#9fc2ff'
+  secondary: '#334155'
   on-secondary: '#ffffff'
-  secondary-container: '#e2e3de'
-  on-secondary-container: '#636561'
-  tertiary: '#436349'
+  secondary-container: '#f1f5f9'
+  on-secondary-container: '#334155'
+  tertiary: '#14603d'
   on-tertiary: '#ffffff'
-  tertiary-container: '#5b7c61'
-  on-tertiary-container: '#f6fff3'
-  error: '#ba1a1a'
+  tertiary-container: '#d6f2e3'
+  on-tertiary-container: '#14603d'
+  error: '#9e233c'
   on-error: '#ffffff'
-  error-container: '#ffdad6'
-  on-error-container: '#93000a'
-  primary-fixed: '#dee0ff'
-  primary-fixed-dim: '#bbc3ff'
-  on-primary-fixed: '#000f5c'
-  on-primary-fixed-variant: '#042fc9'
-  secondary-fixed: '#e2e3de'
-  secondary-fixed-dim: '#c6c7c2'
-  on-secondary-fixed: '#1a1c19'
-  on-secondary-fixed-variant: '#454744'
-  tertiary-fixed: '#c7ecca'
-  tertiary-fixed-dim: '#abcfaf'
-  on-tertiary-fixed: '#02210d'
-  on-tertiary-fixed-variant: '#2e4e35'
-  background: '#f9faf1'
-  on-background: '#1a1c17'
-  surface-variant: '#e2e3da'
-  ink: '#20221f'
-  ink-soft: '#555850'
-  muted: '#686a63'
-  paper: '#f8f8f5'
+  error-container: '#ffdde2'
+  on-error-container: '#9e233c'
+  background: '#eef2f6'
+  on-background: '#172b4d'
+  surface-variant: '#e4e9f0'
+  ink: '#172b4d'
+  ink-strong: '#0f172a'
+  ink-soft: '#334155'
+  muted: '#4a5c75'
+  subtle-ink: '#52647a'
+  paper: '#eef2f6'
   surface-raised: '#ffffff'
-  border: '#deded8'
-  primary-soft: '#ebeefc'
-  success: '#6f9174'
-  execution-partial: '#356d78'
-  execution-blocked: '#8a551f'
-  execution-not-started: '#5f625d'
-  cancelled: '#8b4d56'
-  danger: '#884d4d'
-  danger-soft: '#fff7f7'
-  deleted: '#9a6969'
+  border: '#bdc9d8'
+  hairline: '#e2e8f0'
+  primary-soft: '#dce9ff'
+  selected-ink: '#1544a5'
+  selected-edge: '#6c92da'
+  plan-bg: '#d6f2fa'
+  plan-ink: '#07556f'
+  plan-edge: '#8acddd'
+  success: '#14603d'
+  execution-partial: '#09536b'
+  execution-blocked: '#79500a'
+  execution-not-started: '#79500a'
+  cancelled: '#465568'
+  danger: '#9e233c'
+  danger-soft: '#ffdde2'
+  deleted: '#8b2336'
   timeline-now: '#ff3b30'
-  timeline-fixed: '#756b5d'
-  timeline-nonworking: '#f2f2ee'
-  state-recurring: '#c2410c'
-  state-recurring-border: '#fed7aa'
-  state-recurring-surface: '#fff7ed'
+  timeline-now-label: '#3a1612'
+  timeline-fixed: '#465568'
+  timeline-nonworking: '#f0f2f4'
+  state-recurring: '#135e59'
+  state-recurring-border: '#8fcec6'
+  state-recurring-surface: '#d3efec'
 typography:
   display:
-    fontFamily: "'Source Serif 4', Charter, Georgia, 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', SimSun, serif"
-    fontSize: 31px
-    fontWeight: '800'
-    lineHeight: '1.12'
-    letterSpacing: -0.04em
-  display-mobile:
-    fontFamily: "'Source Serif 4', Charter, Georgia, 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', SimSun, serif"
-    fontSize: 24px
-    fontWeight: '800'
-    lineHeight: '1.2'
-    letterSpacing: -0.03em
-  title:
-    fontFamily: "'Source Serif 4', Charter, Georgia, 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', SimSun, serif"
-    fontSize: 20px
-    fontWeight: '800'
-    lineHeight: '1.2'
+    fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif"
+    fontSize: 22px
+    fontWeight: '650'
+    lineHeight: '1.27'
     letterSpacing: -0.025em
-  headline-sm:
-    fontFamily: "'Source Serif 4', Charter, Georgia, 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', SimSun, serif"
-    fontSize: 16px
+  display-mobile:
+    fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif"
+    fontSize: 20px
+    fontWeight: '650'
+    lineHeight: '1.25'
+    letterSpacing: -0.02em
+  title:
+    fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif"
+    fontSize: 18px
     fontWeight: '700'
     lineHeight: '1.3'
     letterSpacing: -0.015em
+  headline-sm:
+    fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif"
+    fontSize: 15px
+    fontWeight: '650'
+    lineHeight: '1.3'
+    letterSpacing: -0.01em
   body-editor:
     fontFamily: "Inter, 'Source Sans 3', 'Segoe UI', -apple-system, 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif"
     fontSize: 14px
@@ -176,77 +178,66 @@ components:
     height: '72px'
 ---
 
-# Design System: 今序 · Dayweave Paper Ledger
+# Design System: 今序 · Dayweave Precision Workbench（方案 A 冷蓝灰工作台）
 
 ## Brand & Style
 
-本设计系统确立了一个安静、可靠、以本地优先为核心的桌面任务工作台，灵感源自物理行政纸面账本（Paper Ledger）与档案登记册。它坚决摒弃短暂的网页视觉流行趋势——如装饰性毛玻璃模糊（backdrop-filter）、多段艳丽渐变以及未经持久化的乐观预测状态（optimistic UI），转而追求结构确定性、使用耐久度与高度自律的版式秩序。用户体验牢牢植根于 SQLite 事务级事实真理：界面上呈现的视觉状态必须真实对应已确认持久化的记录，绝不展示虚假的投机预测。
-
-该美学体系将古典实用账本的沉静触感与现代桌面软件的高精度交互相融合。它基于微妙的浅暖灰色纸面基质、严格的墨水密度层次、发丝般纤细（1px）的结构性规则分割线，以及极为克制、稀有的确认靛蓝（Rare Accent），后者严格限制于当前焦点与选定状态。任务状态与执行流以纯正中文字符和语义基色成对出现，保证极佳的阅读舒适度和无可争议的操作确信度。
+本设计系统确立了一个冷静、清晰、以本地优先为核心的桌面任务工作台（Direction A）。它摒弃装饰性毛玻璃模糊、多段渐变与未经持久化的乐观预测状态（optimistic UI），采用白卡加冷灰蓝底壳与干净的无衬线排版，追求结构确定性、高对比易读性与现代 Windows 桌面软件的利落感。用户体验牢牢植根于 SQLite 事务级事实真理：界面上呈现的视觉状态必须真实对应已确认持久化的记录。
 
 ## Colors
 
-调色板在 **“稀有强调色原则（Rare Accent Rule）”** 与 **“纸面基质原则（Paper Substrate Rule）”** 约束下运行：
-- **确认靛蓝（`#536DFF` / `#2D4ADD`）**：严格充当注意力的指针——指示活动光标焦点、主键确认、选中任务与当前筛选状态。严禁大面积铺底作为容器背景。
-- **淡靛蓝纸面（`#EBEEFC`）**：作为选中行或活动卡片的背景过渡，明确选择边界但不打断文本扫读。
+浅色模式调色板以冷石板灰蓝基底与纯白内容面板构成清晰层次，全部辅助文字均满足 WCAG AA `>= 4.5:1` 对比度：
+- **主强调蓝（`#3168DC`，悬停 `#285BC4`）**：用于顶栏「新建安排」主按钮、确认主键与键盘焦点环。
+- **选中浅蓝（底 `#DCE9FF` / 边 `#6C92DA` / 字 `#1544A5`）**：用于选中日期与激活筛选状态。
 
-### 纸面基质阶层（Surface Roles）
+### 基底与容器色阶（Surface Roles）
 
-- `paper` (`#F8F8F5`)：主工作台基底与应用外壳底色。
-- `surface` (`#FDFDFB`)：中性容器、侧栏背景、账本列表行底色。
-- `surface-raised` (`#FFFFFF`)：可编辑输入区、抬升检查器卡片与交互弹层。
-- `border` (`#DEDED8`)：通用的 1px 发丝边框与列分割线。
-- Material 3 容器阶层（`surface-dim #DADBD2`, `surface-bright #F9FAF1`, `surface-container-low #F4F4EB`, `surface-container #EEEFE6`, `surface-container-high #E8E9E0` 等）提供系统级微色阶支持。
+- `canvas` (`#EEF2F6`)：应用工作台画布底色。
+- `titlebar` (`#FBFCFD`) 与 `sidebar` (`#F8FAFC`)：集成式应用顶栏与左侧导航栏背景。
+- `group` (`#F6F8FB`)：分组浅底与次级条带。
+- `surface` / `surface-raised` (`#FFFFFF`)：主日程画布、白底活动卡片、输入区与交互弹层。
+- `border` (`#BDC9D8`) 与 `hairline` (`#E2E8F0`)：1px 面板边界与侧栏细分隔线。
 
 ### 墨色密度层次（Ink Weights）
 
-- `ink` (`#20221F`)：主墨色，用于核心标题、重要数据记录与最高对比度文字。
-- `ink-soft` (`#555850`)：柔墨色，用于表单标签、操作次级说明与按钮外框。
-- `muted` (`#686A63`)：说明灰，用于时间戳、次级辅助说明与上下文线索。
+- `ink` (`#172B4D`) / `ink-strong` (`#0F172A`)：主文字色，用于核心标题、活动导航与重要数据记录。
+- `ink-soft` (`#334155`)：次级操作文字，用于导航项与分段按钮。
+- `muted` (`#4A5C75`) 与 `subtle-ink` (`#52647A`)：辅助说明、分组标签、任务计数与时间戳（在 `#FFFFFF` 与 `#F8FAFC` 底上对比度均 `> 6:1`）。
 
 ### 生命周期与语义状态（Lifecycle & Execution Markers）
 
-每一个语义状态均严格配合明确、加粗的中文字符展示：
-- `success` (`#6F9174`)：已完成任务、生效中规则（浅色底 `rgba(111, 145, 116, 0.12)`）。
-- `execution-partial` (`#356D78`)：部分完成执行项（浅色底 `rgba(53, 109, 120, 0.12)`）。
-- `execution-blocked` (`#8A551F`)：阻塞或中断事项（浅色底 `rgba(138, 85, 31, 0.12)`）。
-- `execution-not-started` (`#5F625D`)：排队或未开始项。
-- `cancelled` (`#8B4D56`)：放弃本次安排项。
-- `danger` (`#884D4D`) 与 `danger-soft` (`#FFF7F7`)：不可逆的删除操作与回收站提示。
-- `deleted` (`#9A6969`)：回收站历史标记。
-- `timeline-now` (`#FF3B30`)：贯穿 24 小时时间轴的精确实时红线。
-- `timeline-nonworking` (`#F2F2EE`)：非工作时间网格底纹参照。
+- `plan`（底 `#D6F2FA` / 边 `#8ACDDD` / 字 `#07556F`）：已排入时间线的湖蓝计划块。
+- `success`（底 `#D6F2E3` / 边 `#95D5B2` / 字 `#14603D`）：已完成任务块与当日进度绿色指示。
+- `execution-partial`（底 `#D7F1F7` / 边 `#729EAC` / 字 `#09536B`）：部分完成执行项。
+- `execution-blocked` / `execution-not-started`（底 `#FFEDBF` / 边 `#E8C66B` / 字 `#79500A`）：阻塞或未完成事项。
+- `cancelled` / `fixed`（底 `#E4E9F0` / 边 `#BAC5D3` / 字 `#465568`）：已取消安排与固定日程。
+- `danger`（底 `#FFDDE2` / 边 `#EFA2B0` / 字 `#9E233C`）：不可逆删除与紧急（P0）警示。
+- `timeline-now` (`#FF3B30`，文字 `#3A1612`)：贯穿 24 小时时间轴的实时红线与今天红圆点。
+- `timeline-nonworking` (`#F0F2F4`)：非工作时间静默底纹。
 
 ### 任务状态与优先级规则
 
-- **草稿 / 待确认**：琥珀色（`#7A4300` / `#FFE7B8`），内容尚未具备完整起止时间；
-- **待处理**：蓝色（`#0F5F8F` / `#DDF2FF`），任务已成立、等待排入日计划；
-- **已安排**：靛蓝（`#4937B4` / `#E8E4FF`），任务已被日计划安排；
-- **已完成**：绿色（`#2D693A` / `#DDF3E2`），整件任务或今日执行块完成；
-- **回收站**：玫瑰红（`#A52A3D` / `#FFE0E5`），已软删除，保留 30 天；
-- **重复事项**：暖琥珀 / 陶土色（`#C2410C` / `#FFF7ED`），月历徽标、时间线事件、胶囊状态与侧边强调色统一采用该色系；
-- **优先级**：低（绿 `#047857`）、中（琥珀 `#A16207`）、高（红 `#C2410C`），左侧 4px 彩色色条，并始终包含高/中/低优先级中文文本。
+- **草稿**：中性灰（`#3F4752` / `#E5E7EB`），内容尚未具备完整起止时间；
+- **待处理**：蓝色（`#124C8A` / `#CFE5FF`），任务已成立、等待排入日计划；
+- **已安排**：蓝紫（`#523A9C` / `#DCD5FF`），任务已被日计划安排；
+- **未完成**：琥珀（`#754300` / `#FFE0A3`），历史或当日未完成记录；
+- **已完成**：森林绿（`#205C36` / `#C9EBD3`），整件任务完成；
+- **回收站**：玫瑰红（`#8B2336` / `#FFC9D1`），已软删除，保留 30 天；
+- **重复事项标签**：青绿 Teal（`#135E59` / `#D3EFEC`）；
+- **优先级**：统一直接展示 **`P0`（红）、`P1`（橙）、`P2`（琥珀）、`P3`（蓝）** 标签与圆点，不转换为中文“高/中/低优先级”字样。
 
 ---
 
 ## Typography
 
-字体系统采用严谨的三阶字体架构（Three-Tier Typography Architecture），兼顾物理行政账本的庄重质感与现代桌面应用的极限操作清晰度：
+字体系统采用清晰的现代无衬线 + 等宽数字双栈架构：
 
-### 字体栈（Font Stacks）
-
-1. **标题字体（Headings）**：
-   - **首选**：`Source Serif 4`
-   - **回退**：`Charter`, `Georgia`, `'Noto Serif SC'`, `'Source Han Serif SC'`, `'Songti SC'`, `SimSun`, `serif`
-   - **职责与应用**：专用于 Display、Title 与重要模块主标题（如“今日”、“任务队列”、“日计划”、“晚间复盘”）。粗衬线结构配合负字距赋予页面封面级档案权威感与典雅的物理纸张印记。
-2. **正文字体（Body / UI）**：
-   - **首选**：`Inter`
-   - **回退**：`'Source Sans 3'`, `'Segoe UI'`, `-apple-system`, `'PingFang SC'`, `'Microsoft YaHei'`, `sans-serif`
-   - **职责与应用**：专用于日常任务列表、表单输入、字段标签与按钮。保持极高的微字阶（12px~14px）识别度与抗疲劳度。
-3. **代码与时间等宽字体（Code / Monospace）**：
-   - **首选**：`'JetBrains Mono'`
-   - **回退**：`'Maple Mono'`, `'Cascadia Code'`, `Consolas`, `'Courier New'`, `monospace`
-   - **职责与应用**：专用于 24 小时时间刻度、起止时间卡片（如 `09:30 — 11:00`）、双端时间轴时长胶囊与快捷键提示。具备天然的等宽数字（`tabular-nums`）与大 x 轴高度，彻底杜绝时间轴拖动调整时的数字排版抖动。
+1. **标题与界面字体（UI / Headings）**：
+   - **栈**：`Inter`, `-apple-system`, `'Segoe UI Variable Text'`, `'Segoe UI'`, `'PingFang SC'`, `'Microsoft YaHei UI'`, `'Microsoft YaHei'`, `sans-serif`
+   - **职责**：全界面统一采用无衬线体；日程主标题使用 `22px`（`650` 字重），模块与弹窗标题 `15px–18px`（`650–700` 字重），日常列表与操作按钮 `12.5px–14px`。
+2. **时间与计数等宽字体（Monospace）**：
+   - **栈**：`'JetBrains Mono'`, `'Cascadia Code'`, `Consolas`, `monospace`
+   - **职责**：用于 24 小时时间刻度、起止时段、侧栏计数器与时长读数，启用 `tabular-nums` 防止数字跳动。
 
 ### 核心排版原则
 
@@ -423,7 +414,7 @@ components:
 
 面向用户的品牌名称统一为“今序 · Dayweave”，中文操作提示可简称“今序”。英文标语为“Bring order to your day.”，中文标语为“让今天，井然有序。”；启动页、产品介绍及侧栏品牌区展示双语标语。图标源文件为 `src-tauri/icons/dayweave.svg`；应用标识、专属存储键、数据库（`dayweave.sqlite3`）与开机启动注册值统一使用 Dayweave/dayweave。
 
-侧栏创建按钮高 44px、圆角 12px，文字独立居中，左侧 20px 清单加号图标保留蓝色，间距 9px。按钮使用橙色配色：浅色模式为 #C2410C 底、#9A3412 边框、#FFFFFF 字，深色模式为 #EA580C 底、#F97316 高光边框、#1E201C 字及 rgba(234,88,12,0.36) 光晕；悬浮底色分别为 #9A3412 与 #F97316。展开与收起保持相同规则。一级导航只显示今日、任务、设置；今日无数字或复盘红点，设置为滑杆。进入记录视图时仍选中今日，再点击一级今日返回日程。选中框在页签间平滑移动 240ms，页面实际切换后淡入并轻移 4px（200ms），未保存拦截保留；减少动态效果时直接切换，收起后仅保留单层选中框。正常状态隐藏本地数据提示，加载和错误保留。底部使用一张“当日进度”卡片：突出合计完成数，使用单一总进度，保留普通安排与重复事项分类明细，安排时长合计两类事项已指定的时长。
+集成顶栏采用 `42px` 原生 Windows 11 规格（底色 `#FBFCFD`、底边 `1px solid #E2E8F0`）：左侧紧凑单行展示 `24px` 浅色 Logo 与「今序 · Dayweave」（省略顶栏周数胶囊与双语副标语），右侧常驻 `28px` 高蓝色「新建安排」主按钮与贴边全高 `46×42px` 窗口控制按钮（关闭悬停 `#E81123`）；窄窗口（`<=860px`）在顶栏左侧显示「菜单」按钮并支持抽屉内关闭按钮及 Esc 收起，不额外追加全局视图或创建快捷键。左侧导航栏宽 `236px`（收起态 `52px`），常驻展示「日程视图（今日安排）」与「任务管理（全部任务及 7 个状态子项：待安排、进行中、草稿箱、重复规则、未完成、已完成、回收站）」，底部放置「当日进度」看板，并在底栏同排并置「偏好设置」与侧边栏收起按钮（收起态时于 `52px` 窄轨底部垂直叠放 `40px` 宽「偏好设置」与展开按钮，绝不遮挡「今日安排」或任何导航项）；二级图标组在收起态下顶部与底部的水平分割线保持相同的 `1px solid #E2E8F0` 宽度与间距。日程顶栏统一采用单行基线对齐标题与副信息（日视图展示星期、农历与节气进度；周视图展示周次、上中下旬与「本周」高亮；月视图展示干支生肖年、当月节气与全月天数），不追加冗余点击/双击说明文案。所有视图的「今日」日期统一使用醒目红（`--today-red: #FF3B30`）圆点标识，日期选中态使用蓝色强调。周视图采用 `56px` 时间轴 + 工作日 `1fr` / 周末 `0.9fr` 网格、「时间」角标、今日红底圆标列头、上标题下时间的 `5px` 圆角语义左描边卡片及底部实时汇总图例栏（仅展示已安排、已完成、未完成计数与全周汇总，不含历史遗留的固定日程项）；点击列头摘要或卡片打开周详情抽屉，仅点击列头「看当日」或抽屉内「进入当日时间线 / 定位到当日时间线」进入日视图。月视图采用 `#EEF2F6` 清爽底台、高对比白底「周一 ~ 周日」表头胶囊与 `6px` 间距的 `6×7` 独立圆角白卡矩阵（非本月日期采用清晰可读的 `#F4F6F9` 底与 `#475569` 高对比字色），顶行水平展示公历数字（今日套红底圆标）、节气绿签/节日/农历（今日标「今日·初X」）与「休 / 班」角标，右下角保留普通任务与重复事项计数胶囊；单击日期卡选中当天并同步侧栏进度，双击日期卡（或按 Enter）进入该日日视图。时间线右侧框选区仅保留简洁加号，不附加“拖选创建”文字胶囊；日视图任务块的标签、任务类型与 `P0–P3` 优先级徽标保持统一紧凑语义边框样式。
 
 月历上月/下月箭头紧邻年月标题左右两侧，回到今天置于头部右侧，月份下居中显示所选日期、星期、农历与节气；左右对称占位保持标题稳定居中。切换回选中日期所属月份时恢复日期文案。日期格悬浮或聚焦提示“双击日期查看当天日程”，Esc 可关闭。日程显示完整年月日（20px 衬线加粗），下方紧凑显示星期、农历与节气小标签，历史只读提示保留。
 

@@ -80,6 +80,49 @@ mod windows {
         Ok(())
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ToastActivation {
+        OpenApp,
+        OpenReminder,
+        Snooze,
+        Complete,
+        Dismiss,
+    }
+
+    fn toast_buttons(reminder: Option<&TaskBlockNotificationDto>, is_snoozed: bool) -> Vec<(&'static str, &'static str)> {
+        let Some(item) = reminder else {
+            return vec![("打开今序", "open")];
+        };
+        let mut buttons = vec![("打开今序", "open")];
+        if item.is_end {
+            buttons.push(("快捷完成", "complete"));
+            if !is_snoozed {
+                buttons.push(("稍后提醒", "snooze"));
+            }
+        } else {
+            if !is_snoozed {
+                buttons.push(("稍后提醒", "snooze"));
+            }
+            buttons.push(("我知道了", "dismiss"));
+        }
+        buttons
+    }
+
+    fn classify_activation(has_reminder: bool, action: Option<&str>) -> ToastActivation {
+        let action = action.filter(|value| !value.is_empty()).unwrap_or("open");
+        if action == "dismiss" {
+            return ToastActivation::Dismiss;
+        }
+        if !has_reminder {
+            return ToastActivation::OpenApp;
+        }
+        match action {
+            "snooze" => ToastActivation::Snooze,
+            "complete" => ToastActivation::Complete,
+            _ => ToastActivation::OpenReminder,
+        }
+    }
+
     pub fn show(app: &AppHandle, title: &str, body: &str, reminder: Option<TaskBlockNotificationDto>, is_snoozed: bool) -> Result<(), String> {
         let _identity = app.try_state::<NotificationIdentity>()
             .ok_or_else(|| "今序的 Windows 通知尚未就绪，请重新启动应用后重试".to_string())?;
@@ -87,37 +130,54 @@ mod windows {
         let mut toast = Toast::new(&app.config().identifier)
             .title(title)
             .text1(body);
-        if reminder.is_some() {
-            toast = toast.add_button("打开今序", "open");
-            if reminder.as_ref().is_some_and(|item| item.is_end) {
-                toast = toast.add_button("快捷完成", "complete");
-            }
-            if !is_snoozed { toast = toast.add_button("稍后提醒", "snooze"); }
-        } else { toast = toast.add_button("打开今序", "open"); }
+        for (label, action) in toast_buttons(reminder.as_ref(), is_snoozed) {
+            toast = toast.add_button(label, action);
+        }
         toast.on_activated(move |action| {
             let app = activated_app.clone();
             let reminder = reminder.clone();
-            let action = action.unwrap_or_else(|| "open".into());
             let _ = activated_app.run_on_main_thread(move || {
-                if let Some(reminder) = reminder {
-                    if action == "snooze" {
-                        if let Err(error) = crate::snooze_task_block_reminder(&app, reminder) { eprintln!("任务提醒延后失败：{error}"); }
-                    } else if action == "complete" {
+                let activation = classify_activation(reminder.is_some(), action.as_deref());
+                match (activation, reminder) {
+                    (ToastActivation::Snooze, Some(reminder)) => {
+                        if let Err(error) = crate::snooze_task_block_reminder(&app, reminder) {
+                            eprintln!("任务提醒延后失败：{error}");
+                        }
+                    }
+                    (ToastActivation::Complete, Some(reminder)) => {
                         match crate::complete_task_block_reminder(&app, &reminder) {
                             Ok(true) => {
-                                let target = ReminderAction { target: ReminderTarget { date: reminder.starts_at[..10].to_string(), block_id: reminder.block_id, task_id: reminder.task_id }, action: "completed".into() };
+                                let target = ReminderAction {
+                                    target: ReminderTarget {
+                                        date: reminder.starts_at[..10].to_string(),
+                                        block_id: reminder.block_id,
+                                        task_id: reminder.task_id,
+                                    },
+                                    action: "completed".into(),
+                                };
                                 let _ = app.emit("reminder-activated", target);
                             }
                             Ok(false) => eprintln!("任务块已变化，提醒未执行完成操作"),
                             Err(error) => eprintln!("任务块完成失败：{error}"),
                         }
-                    } else {
+                    }
+                    (ToastActivation::OpenReminder, Some(reminder)) => {
                         crate::show_main_window(&app);
-                        let target = ReminderAction { target: ReminderTarget { date: reminder.starts_at[..10].to_string(), block_id: reminder.block_id, task_id: reminder.task_id }, action };
+                        let action = action.filter(|value| !value.is_empty()).unwrap_or_else(|| "open".into());
+                        let target = ReminderAction {
+                            target: ReminderTarget {
+                                date: reminder.starts_at[..10].to_string(),
+                                block_id: reminder.block_id,
+                                task_id: reminder.task_id,
+                            },
+                            action,
+                        };
                         let _ = app.emit("reminder-activated", target);
                     }
-                } else {
-                    crate::show_main_window(&app);
+                    (ToastActivation::OpenApp, None) => {
+                        crate::show_main_window(&app);
+                    }
+                    (ToastActivation::Dismiss, _) | (_, None) | (ToastActivation::OpenApp, Some(_)) => {}
                 }
             });
             Ok(())
@@ -132,6 +192,62 @@ mod windows {
     mod tests {
         use std::path::PathBuf;
         use super::*;
+
+        fn sample_reminder(is_end: bool) -> TaskBlockNotificationDto {
+            TaskBlockNotificationDto {
+                block_id: "block-1".into(),
+                task_id: "task-1".into(),
+                task_title: "测试任务".into(),
+                task_notes: None,
+                task_priority: None,
+                task_tags: Vec::new(),
+                starts_at: "2026-11-11T14:30:00+08:00".into(),
+                ends_at: "2026-11-11T15:00:00+08:00".into(),
+                event_at: if is_end { "2026-11-11T15:00:00+08:00" } else { "2026-11-11T14:30:00+08:00" }.into(),
+                is_end,
+                schedule_revision: None,
+            }
+        }
+
+        #[test]
+        fn start_reminder_buttons_include_open_snooze_and_acknowledge() {
+            let start = sample_reminder(false);
+            assert_eq!(
+                toast_buttons(Some(&start), false),
+                vec![("打开今序", "open"), ("稍后提醒", "snooze"), ("我知道了", "dismiss")]
+            );
+            assert_eq!(
+                toast_buttons(Some(&start), true),
+                vec![("打开今序", "open"), ("我知道了", "dismiss")]
+            );
+        }
+
+        #[test]
+        fn end_and_test_notification_buttons_keep_expected_actions() {
+            let end = sample_reminder(true);
+            assert_eq!(
+                toast_buttons(Some(&end), false),
+                vec![("打开今序", "open"), ("快捷完成", "complete"), ("稍后提醒", "snooze")]
+            );
+            assert_eq!(
+                toast_buttons(Some(&end), true),
+                vec![("打开今序", "open"), ("快捷完成", "complete")]
+            );
+            assert_eq!(toast_buttons(None, false), vec![("打开今序", "open")]);
+        }
+
+        #[test]
+        fn dismiss_activation_does_not_open_or_modify_reminder() {
+            assert_eq!(classify_activation(true, Some("dismiss")), ToastActivation::Dismiss);
+            assert_eq!(classify_activation(false, Some("dismiss")), ToastActivation::Dismiss);
+            assert_eq!(classify_activation(true, Some("snooze")), ToastActivation::Snooze);
+            assert_eq!(classify_activation(true, Some("complete")), ToastActivation::Complete);
+            assert_eq!(classify_activation(true, Some("open")), ToastActivation::OpenReminder);
+            assert_eq!(classify_activation(true, None), ToastActivation::OpenReminder);
+            assert_eq!(classify_activation(true, Some("")), ToastActivation::OpenReminder);
+            assert_eq!(classify_activation(false, Some("open")), ToastActivation::OpenApp);
+            assert_eq!(classify_activation(false, None), ToastActivation::OpenApp);
+        }
 
         #[test]
         fn notification_identity_registers_brand_and_icon_for_uninstalled_executables() {

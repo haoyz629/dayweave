@@ -144,10 +144,10 @@ test("disabled state hides an already open menu and resets it without changes", 
 test("task editors and slide creation use the same selector without normalizing persisted nulls", () => {
   assert.match(text, /<TaskPrioritySelector id=\{priorityId\} value=\{form.priority\} disabled=\{disabled\}/);
   const timeline = readFileSync(new URL("./timeline-task-create.tsx", import.meta.url), "utf8");
-  assert.match(timeline, /setForm\(\{ title: "", start: clock\(range.start\), end: clock\(range.end\), priority: "high", tags: \[\] \}\)/);
-  assert.match(timeline, /<TaskPrioritySelector[^>]*value=\{form.priority\} disabled=\{saving \|\| disabled\}/);
+  assert.match(timeline, /setForm\(\{ title: "", start: clock\(range\.start\), end: clock\(range\.end\), priority: "high", tags: \[\], notes: "", notesExpanded: false \}\)/);
+  assert.match(timeline, /<TaskPrioritySelector[\s\S]*?variant="segmented"[\s\S]*?value=\{form\.priority\}[\s\S]*?disabled=\{saving \|\| disabled\}/);
   assert.doesNotMatch(timeline, /<select name="priority"/);
-  assert.match(timeline, /title: form.title.trim\(\), notes: null, priority: form.priority/);
+  assert.match(timeline, /title: form\.title\.trim\(\), notes: normalizedNotes, priority: form\.priority/);
   // The timeline's Escape shortcut detects explicit dialog roles before native cancel runs.
   assert.match(timeline, /<dialog ref=\{dialogRef\} role="dialog"/);
 });

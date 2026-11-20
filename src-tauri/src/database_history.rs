@@ -9,6 +9,10 @@ pub struct TaskHistoryEventDto {
     pub status: Option<String>,
     pub note: Option<String>,
     pub review_note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note_cleared: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_status: Option<String>,
 }
 
 // Keep execution and review notes separate. Planned-only reservations are not execution facts.
@@ -33,7 +37,7 @@ pub(super) fn current_events(connection: &Connection, task_id: &str) -> AppResul
             id: format!("block:{}", row.get::<_, String>(0)?), occurred_at,
             plan_date: row.get(1)?, kind: if outcome == "planned" { "note" } else { "execution" }.into(),
             status: if outcome == "planned" { None } else { Some(if outcome == "completed" { "done" } else { "not_completed" }.into()) },
-            note: row.get(5)?, review_note: row.get(6)?,
+            note: row.get(5)?, review_note: row.get(6)?, note_cleared: None, task_status: None,
         })
     })?.collect::<Result<Vec<_>, _>>()?;
     let mut statement = connection.prepare("SELECT review.id, review.review_date, review.updated_at,
@@ -46,7 +50,7 @@ pub(super) fn current_events(connection: &Connection, task_id: &str) -> AppResul
             id: format!("review:{}", row.get::<_, String>(0)?), occurred_at: row.get(2)?,
             plan_date: row.get(1)?, kind: "execution".into(),
             status: Some(if outcome == "completed" { "done" } else { "not_completed" }.into()),
-            note: None, review_note: row.get(4)?,
+            note: None, review_note: row.get(4)?, note_cleared: None, task_status: None,
         })
     })?.collect::<Result<Vec<_>, _>>()?);
     Ok(events)
@@ -62,7 +66,7 @@ pub(super) fn preserve_events(transaction: &Transaction<'_>, task_id: &str, even
     for event in events {
         let json = serde_json::to_string(event)?;
         let exists: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM task_changes
-            WHERE task_id = ?1 AND change_kind = 'history_snapshot' AND new_value = ?2)",
+            WHERE task_id = ?1 AND change_kind = 'history_snapshot' AND (new_value = ?2 OR old_value = ?2))",
             params![task_id, json], |row| row.get(0))?;
         if !exists {
             record_task_change(transaction, task_id, "history_snapshot", None, Some(&json), "system", None)?;
@@ -75,12 +79,46 @@ pub(super) fn preserve_current(transaction: &Transaction<'_>, task_id: &str) -> 
     preserve_events(transaction, task_id, &current_events(transaction, task_id)?)
 }
 
-pub(super) fn record_cleared(transaction: &Transaction<'_>, task_id: &str, plan_date: &str, completed: bool) -> AppResult<()> {
-    let status: String = transaction.query_row("SELECT status FROM tasks WHERE id = ?1", [task_id], |row| row.get(0))?;
-    let event = TaskHistoryEventDto { id: format!("cleared:{}", Uuid::new_v4()), occurred_at: Some(now()),
-        plan_date: Some(plan_date.into()), kind: if completed { "cleared" } else { "cleared_incomplete" }.into(), status: Some(status), note: None, review_note: None };
-    preserve_events(transaction, task_id, &[event])
+// Link audit rows by insertion ID, not by timestamp: separate saves can share a clock tick.
+pub(super) fn audit_cursor(transaction: &Transaction<'_>, task_id: &str) -> AppResult<i64> {
+    Ok(transaction.query_row("SELECT COALESCE(MAX(rowid), 0) FROM task_changes WHERE task_id = ?1",
+        [task_id], |row| row.get(0))?)
 }
+
+pub(super) fn record_capture_change(transaction: &Transaction<'_>, task_id: &str, plan_date: &str,
+    before: &ExecutionSnapshot, audit_cursor: i64, timestamp: &str) -> AppResult<()> {
+    let after = capture_snapshot(transaction, &before.id)?;
+    let outcome_changed = before.execution_status != after.execution_status;
+    let note_changed = before.execution_note.as_deref().unwrap_or_default().trim()
+        != after.execution_note.as_deref().unwrap_or_default().trim();
+    let (task_status, audit_ids, reopened): (Option<String>, Option<String>, bool) = transaction.query_row(
+        "SELECT CASE WHEN COUNT(*) > 0 THEN (SELECT status FROM tasks WHERE id = ?1) END, GROUP_CONCAT(id),
+            COALESCE(MAX(change_kind = 'status_changed' AND old_value = 'done' AND new_value IN ('open', 'scheduled') AND reason IS NULL), 0)
+         FROM task_changes WHERE task_id = ?1 AND rowid > ?2
+         AND change_kind IN ('status_changed', 'soft_deleted', 'execution_resolved', 'undo_task_completed')",
+        params![task_id, audit_cursor], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+    if !outcome_changed && !note_changed && task_status.is_none() { return Ok(()); }
+
+    let block_key = format!("block:{}", before.id);
+    // A later independent review can still replace this exact live snapshot.
+    let snapshot = current_events(transaction, task_id)?.into_iter().find(|event| event.id == block_key)
+        .map(|event| serde_json::to_string(&event)).transpose()?;
+    let (kind, status) = if reopened { ("reopened", task_status.clone()) }
+    else if !outcome_changed {
+        if let Some(status) = &task_status { ("status", Some(status.clone())) } else { ("note", None) }
+    } else if after.execution_status == "planned" {
+        (if before.execution_status == "completed" { "cleared" } else { "cleared_incomplete" }, task_status.clone())
+    } else {
+        ("execution", Some(if after.execution_status == "completed" { "done" } else { "not_completed" }.into()))
+    };
+    let event = TaskHistoryEventDto { id: format!("capture:{}", Uuid::new_v4()), occurred_at: Some(timestamp.into()),
+        plan_date: Some(plan_date.into()), kind: kind.into(), status, review_note: None, task_status,
+        note_cleared: (note_changed && after.execution_note.as_deref().unwrap_or_default().trim().is_empty()).then_some(true),
+        note: if note_changed { after.execution_note } else { None } };
+    record_task_change(transaction, task_id, "history_snapshot", snapshot.as_deref(),
+        Some(&serde_json::to_string(&event)?), "system", audit_ids.as_deref())
+}
+
 
 pub(super) fn load(connection: &Connection, task_id: &str) -> AppResult<Vec<TaskHistoryEventDto>> {
     let created_at: String = connection.query_row("SELECT created_at FROM tasks WHERE id = ?1", [task_id], |row| row.get(0))?;
@@ -88,7 +126,7 @@ pub(super) fn load(connection: &Connection, task_id: &str) -> AppResult<Vec<Task
         WHERE task_id = ?1 AND change_kind IN ('created', 'created_from_draft', 'created_from_recurrence')
         ORDER BY rowid LIMIT 1", [task_id], |row| row.get(0)).optional()?.flatten();
     let created = TaskHistoryEventDto { id: format!("created:{task_id}"), occurred_at: Some(created_at),
-        plan_date: None, kind: "created".into(), status: initial_status.and_then(real_status), note: None, review_note: None };
+        plan_date: None, kind: "created".into(), status: initial_status.and_then(real_status), note: None, review_note: None, note_cleared: None, task_status: None };
     let mut events = Vec::new();
     let mut seen = HashSet::new();
     let mut statement = connection.prepare("SELECT rowid, id, change_kind, new_value, reason, created_at, old_value
@@ -96,21 +134,32 @@ pub(super) fn load(connection: &Connection, task_id: &str) -> AppResult<Vec<Task
     let changes = statement.query_map([task_id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?,
         row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, Option<String>>(4)?,
         row.get::<_, String>(5)?, row.get::<_, Option<String>>(6)?)))?.collect::<Result<Vec<_>, _>>()?;
+    let linked_audits: HashSet<String> = changes.iter().filter(|change| change.2 == "history_snapshot")
+        .filter_map(|change| change.4.as_deref()).flat_map(|ids| ids.split(',').map(str::to_owned)).collect();
     for (order, id, kind, new_value, reason, timestamp, old_value) in changes {
         if kind == "history_snapshot" {
+            if let Some(snapshot) = old_value { seen.insert(snapshot); }
             if let Some(event) = new_value.as_deref().and_then(|json| serde_json::from_str::<TaskHistoryEventDto>(json).ok()) {
                 if seen.insert(serde_json::to_string(&event)?) {
                     let mut event = event;
-                    event.id = format!("history:{id}");
-                    let rank = if matches!(event.kind.as_str(), "cleared" | "cleared_incomplete") { 2 } else { 1 };
+                    let delta = event.id.starts_with("capture:");
+                    if !delta { event.id = format!("history:{id}"); }
+                    let rank = if delta || matches!(event.kind.as_str(), "cleared" | "cleared_incomplete") { 2 } else { 1 };
                     events.push((event, rank, order));
                 }
             }
             continue;
         }
-        if !matches!(kind.as_str(), "status_changed" | "soft_deleted" | "restored" | "undo_task_completed" | "undo_plan_status" | "completion_note_changed" | "execution_resolved") { continue; }
-        let status = if kind == "completion_note_changed" { Some("done".into()) }
-            else if kind == "execution_resolved" {
+        if linked_audits.contains(&id) { continue; }
+        if kind == "completion_note_changed" {
+            if new_value.is_some() {
+                events.push((TaskHistoryEventDto { id: format!("change:{id}"), occurred_at: Some(timestamp), plan_date: None,
+                    kind: "note".into(), status: None, note: new_value, review_note: None, note_cleared: None, task_status: None }, 2, order));
+            }
+            continue;
+        }
+        if !matches!(kind.as_str(), "status_changed" | "soft_deleted" | "restored" | "undo_task_completed" | "undo_plan_status" | "execution_resolved") { continue; }
+        let status = if kind == "execution_resolved" {
                 // These persisted actions commit exactly these lifecycle states (not the block outcome).
                 match new_value.as_deref() {
                     Some("schedule") => Some("scheduled".into()), Some("wait") => Some("open".into()),
@@ -123,13 +172,11 @@ pub(super) fn load(connection: &Connection, task_id: &str) -> AppResult<Vec<Task
             && old_value.as_deref() == Some("done") && matches!(status.as_deref(), Some("open" | "scheduled"));
         // System aggregation explains a lifecycle transition, never a user-entered note.
         // Legacy completion and resolution audits can still contain real notes in reason.
-        let note = if automatic { None } else if kind == "completion_note_changed" {
-            new_value
-        } else if kind == "status_changed" && status.as_deref() == Some("done") {
+        let note = if automatic { None } else if kind == "status_changed" && status.as_deref() == Some("done") {
             reason.filter(|note| note != "明确完成整个任务")
         } else if kind == "execution_resolved" { reason } else { None };
         events.push((TaskHistoryEventDto { id: format!("change:{id}"), occurred_at: Some(timestamp), plan_date: None,
-            kind: if automatic { "automatic_status" } else if reopened { "reopened" } else if matches!(kind.as_str(), "soft_deleted" | "restored") { kind.as_str() } else { "status" }.into(), status, note, review_note: None }, 2, order));
+            kind: if automatic { "automatic_status" } else if reopened { "reopened" } else if matches!(kind.as_str(), "soft_deleted" | "restored") { kind.as_str() } else { "status" }.into(), status, note, review_note: None, note_cleared: None, task_status: None }, 2, order));
     }
     for event in current_events(connection, task_id)? {
         if seen.insert(serde_json::to_string(&event)?) { events.push((event, 1, i64::MAX)); }
@@ -149,11 +196,38 @@ fn real_status(value: String) -> Option<String> {
     matches!(value.as_str(), "open" | "scheduled" | "done" | "deleted").then_some(value)
 }
 
+pub(super) fn capture_snapshot(connection: &Connection, id: &str) -> AppResult<ExecutionSnapshot> {
+    let mut snapshot = execution_snapshot(connection, id)?;
+    if let Some((outcome, note)) = connection.query_row("SELECT outcome, notes FROM review_entries WHERE plan_block_id = ?1", [id],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))).optional()? {
+        snapshot.execution_status = outcome;
+        snapshot.execution_note = note.or(snapshot.execution_note);
+    }
+    Ok(snapshot)
+}
+
+pub(super) fn capture_unchanged(before: &ExecutionSnapshot, outcome: &str, note: Option<&str>) -> bool {
+    before.execution_status == outcome && before.execution_note.as_deref().unwrap_or_default().trim() == note.unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const TODAY: &str = "2026-10-16";
+    #[test]
+    fn unplanned_completion_note_revisions_do_not_repeat_the_done_status() {
+        let _clock = TestToday::new(TODAY);
+        let mut db = Database::in_memory().unwrap();
+        let task = db.create_manual_task("Unplanned notes").unwrap();
+        for note in ["111222", " 111222 ", "revised"] {
+            db.complete_task_with_note(&task, None, Some(note.into())).unwrap();
+        }
+        let history = db.get_task_metadata(&task).unwrap().history;
+        assert_eq!(history.iter().skip(1).map(|event| (event.kind.as_str(), event.status.as_deref(), event.note.as_deref())).collect::<Vec<_>>(),
+            [("status", Some("done"), Some("111222")), ("note", None, Some("revised"))]);
+    }
+
 
     fn add_block(db: &Database, task: &str, date: &str) -> String {
         let plan: String = db.connection.query_row("SELECT id FROM daily_plans WHERE plan_date = ?1 AND status = 'confirmed'",
@@ -178,6 +252,47 @@ mod tests {
     fn review(block: &str, note: &str) -> ReviewEntryInput {
         ReviewEntryInput { plan_block_id: block.into(), outcome: ReviewOutcome::Blocked,
             actual_minutes: None, defer_reason: None, notes: Some(note.into()), remaining_workload_minutes: None }
+    }
+
+    #[test]
+    fn capture_saves_record_only_the_fields_changed_at_that_save() {
+        let _clock = TestToday::new(TODAY);
+        for api in ["resolve", "capture", "whole"] {
+            let mut db = Database::in_memory().unwrap();
+            let task = db.create_manual_task(api).unwrap();
+            let block = add_block(&db, &task, TODAY);
+            let input = |outcome, note: &str| ExecutionCaptureInput { plan_block_id: block.clone(), outcome, note: Some(note.into()) };
+            db.save_execution_capture(TODAY, input(None, "111222")).unwrap();
+            let before = fact_fingerprint(&db.connection, "execution_capture", &task).unwrap();
+            db.save_execution_capture(TODAY, input(None, " 111222 ")).unwrap();
+            assert_eq!(fact_fingerprint(&db.connection, "execution_capture", &task).unwrap(), before);
+
+            match api {
+                "resolve" => { db.resolve_task_execution(TODAY, super::super::database_execution::TaskExecutionResolutionInput {
+                    plan_block_id: block.clone(), expected_task_updated_at: db.get_task(&task).unwrap().updated_at,
+                    outcome: ReviewOutcome::Completed, note: Some("111222".into()), next_action: None,
+                    starts_at: None, ends_at: None, remaining_workload_minutes: None,
+                }).unwrap(); }
+                "capture" => db.save_execution_capture(TODAY, input(Some(ReviewOutcome::Completed), "111222")).unwrap(),
+                _ => { db.complete_task_with_note(&task, Some(&block), Some("111222".into())).unwrap(); }
+            }
+            db.clear_execution_capture_with_note(TODAY, &block, Some("111222".into())).unwrap();
+            let events = db.get_task_metadata(&task).unwrap().history;
+            assert_eq!(events.iter().skip(1).map(|e| (e.kind.as_str(), e.note.as_deref(), e.note_cleared)).collect::<Vec<_>>(),
+                vec![("note", Some("111222"), None), ("execution", None, None), ("cleared", None, None)], "{api}");
+            assert_eq!(execution_snapshot(&db.connection, &block).unwrap().execution_note.as_deref(), Some("111222"));
+
+            db.save_execution_capture(TODAY, input(None, " ")).unwrap();
+            db.save_execution_capture(TODAY, input(Some(ReviewOutcome::Partial), "同次保存")).unwrap();
+            db.apply_undo(&db.latest_undo().unwrap().unwrap().id).unwrap();
+            let events = db.get_task_metadata(&task).unwrap().history;
+            assert_eq!(events[4].kind, "note");
+            assert_eq!(events[4].note_cleared, Some(true));
+            assert_eq!((events[5].status.as_deref(), events[5].note.as_deref()), (Some("not_completed"), Some("同次保存")));
+            assert_eq!((events[6].kind.as_str(), events[6].note_cleared), ("cleared_incomplete", Some(true)));
+            assert_eq!(events.len(), 7);
+            assert!(execution_snapshot(&db.connection, &block).unwrap().execution_note.is_none());
+        }
     }
 
     #[test]
@@ -223,23 +338,21 @@ mod tests {
             outcome: Some(ReviewOutcome::Completed), note: Some("用户的完成备注".into()) }).unwrap();
         assert_eq!(db.get_task(&id).unwrap().status, "done");
         let events = db.get_task_metadata(&id).unwrap().history;
-        let automatic = events.iter().find(|event| event.kind == "automatic_status").unwrap();
-        assert_eq!(automatic.status.as_deref(), Some("done"));
-        assert_eq!(automatic.note, None);
-        assert_eq!(automatic.review_note, None);
-        assert!(events.iter().any(|event| event.kind == "execution" && event.note.as_deref() == Some("用户的完成备注")));
+        assert_eq!(events.len(), 2);
+        let event = &events[1];
+        assert_eq!((event.kind.as_str(), event.task_status.as_deref(), event.note.as_deref()),
+            ("execution", Some("done"), Some("用户的完成备注")));
+        assert_eq!(event.review_note, None);
 
         // Identical user wording must remain a note on the execution fact, not be filtered globally.
         capture(&mut db, &block, TODAY, "汇总全部执行块结果");
         assert_eq!(db.get_task(&id).unwrap().status, "scheduled");
         let before = fact_fingerprint(&db.connection, "task_completion", &id).unwrap();
         let events = db.get_task_metadata(&id).unwrap().history;
-        let automatic = events.iter().filter(|event| event.kind == "automatic_status").collect::<Vec<_>>();
-        assert_eq!(automatic.len(), 2);
-        assert_eq!(automatic.last().unwrap().status.as_deref(), Some("scheduled"));
-        assert!(automatic.iter().all(|event| event.note.is_none() && event.review_note.is_none()));
-        assert!(events.iter().any(|event| event.kind == "execution" && event.note.as_deref() == Some("汇总全部执行块结果")));
-        assert!(events.iter().any(|event| event.kind == "execution" && event.note.as_deref() == Some("用户的完成备注")));
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[2].task_status.as_deref(), Some("scheduled"));
+        assert_eq!(events[2].note.as_deref(), Some("汇总全部执行块结果"));
+        assert_eq!(events[1].note.as_deref(), Some("用户的完成备注"));
         assert_eq!(events, db.get_task_metadata(&id).unwrap().history);
         assert_eq!(before, fact_fingerprint(&db.connection, "task_completion", &id).unwrap());
         let audits: i64 = db.connection.query_row("SELECT COUNT(*) FROM task_changes
@@ -311,9 +424,8 @@ mod tests {
         drop(db);
         let db = Database::open(path).unwrap();
         let events = db.get_task_metadata(&id).unwrap().history;
-        for note in ["first completion", "corrected completion"] {
-            assert!(events.iter().any(|e| e.kind == "execution" && e.note.as_deref() == Some(note)), "{note}");
-        }
+        assert_eq!(events.iter().find(|e| e.note.as_deref() == Some("first completion")).unwrap().kind, "execution");
+        assert_eq!(events.iter().find(|e| e.note.as_deref() == Some("corrected completion")).unwrap().kind, "note");
         assert_eq!(events.last().unwrap().status.as_deref(), Some("scheduled"));
     }
 
@@ -352,8 +464,8 @@ mod tests {
             outcome: Some(ReviewOutcome::Completed), note: None }).unwrap();
         db.clear_execution_capture(TODAY, &block).unwrap();
         let history = db.get_task_metadata(&id).unwrap().history;
-        assert!(history.iter().any(|event| event.kind == "cleared" && event.plan_date.as_deref() == Some(TODAY)));
-        assert!(history.iter().any(|event| event.kind == "automatic_status" && event.status.as_deref() == Some("scheduled")));
+        assert!(history.iter().any(|event| event.kind == "cleared" && event.plan_date.as_deref() == Some(TODAY)
+            && event.task_status.as_deref() == Some("scheduled")));
     }
 
     #[test]

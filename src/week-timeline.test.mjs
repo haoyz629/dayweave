@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import ts from 'typescript';
 import { weekDatesFor, weekHeading, shiftWeekDate, weekEntries, weekGroups, weekInitialMinute, weekClock, weekDetailRange } from './week-timeline-model.ts';
 import { readFileSync } from 'node:fs';
 
@@ -105,34 +107,34 @@ test('random dense/chain layouts retain every task with no temporal lane collisi
   }
 });
 
-test('day and week share date content while all views use one header', () => {
+test('week uses prototype 7-day columns, 时间 corner label and explicit 看当日 button', () => {
   const read = file => readFileSync(new URL(file, import.meta.url), 'utf8');
   const app = read('./App.tsx'), week = read('./week-timeline.tsx'), css = read('./week-timeline.css');
   assert.equal(app.match(/<header className="timeline-design-topbar">/g)?.length, 1);
   assert.doesNotMatch(app, /className="month-controls"/);
-  assert.doesNotMatch(week, /week-timeline-toolbar/);
-  for (const source of [app, week]) assert.match(source, /<TimelineWeekDateContent /);
-  assert.match(css, /--week-columns: 64px repeat\(5, minmax\(0, 1fr\)\) repeat\(2, minmax\(0, \.5fr\)\)/);
+  assert.doesNotMatch(week, /week-timeline-toolbar|onDoubleClick|时间 \/ 星期/);
+  assert.match(app, /<TimelineWeekDateContent /);
+  assert.match(week, /className="week-timeline-corner" aria-hidden="true">时间<\/div>/);
+  assert.match(week, /className="week-open-day-btn"[^>]*onClick=\{\(\) => onOpenDay\(day\.date\)\}>看当日<\/button>/);
+  assert.match(css, /--week-columns: 56px repeat\(5, minmax\(0, 1fr\)\) repeat\(2, minmax\(0, \.9fr\)\)/);
   assert.match(css, /\.week-timeline-dates, \.week-timeline-body \{[^}]*grid-template-columns: var\(--week-columns\)/);
   assert.match(week, /measure\.widths\[index\]/, 'task text wrapping uses each actual day width');
 });
 
-test('week removes redundant read-only copy and includes the incomplete semantic legend', () => {
+test('week removes redundant copy and legacy fixed-event legend item while keeping live counts and summary', () => {
   const read = file => readFileSync(new URL(file, import.meta.url), 'utf8');
   const app = read('./App.tsx'), week = read('./week-timeline.tsx'), css = read('./week-timeline.css');
   assert.doesNotMatch(app, /只读周日程/);
-  assert.match(app, /todayView !== "week" && <div className="timeline-date-meta timeline-day-subline">/);
-  assert.doesNotMatch(week, /只读 · 点击任务或日期查看完整安排/);
-  assert.match(week, /aria-label="任务状态图例"><span className="tone-plan">已安排<\/span><span className="tone-completed">已完成<\/span><span className="tone-not-started">未完成<\/span>/);
+  assert.doesNotMatch(week, /只读 · 点击任务或日期查看完整安排|固定日程 \(\{/);
+  assert.match(week, /aria-label="任务状态图例"><span className="tone-plan">已安排 \(\{planCount\}\)<\/span><span className="tone-completed">已完成 \(\{completedCount\}\)<\/span><span className="tone-not-started">未完成 \(\{incompleteCount\}\)<\/span><div className="week-legend-summary">/);
   assert.match(css, /\.tone-not-started[^{}]*\{ --week-tone: var\(--state-not-started\); --week-bg: var\(--state-not-started-surface\); --week-edge: var\(--state-not-started-border\);/);
 });
 
-test('week dates inherit day card styling while column separators stay independent', () => {
+test('week column headers mark today with vivid red circle and separate drawer trigger from sibling 看当日 action', () => {
   const css = readFileSync(new URL('./week-timeline.css', import.meta.url), 'utf8');
-  const button = css.match(/\.today-page \.week-timeline \.week-timeline-dates > button \{([^}]+)\}/)[1];
-  assert.match(button, /height: calc\(100% - 12px\); margin: 6px 4px/);
-  assert.doesNotMatch(button, /border|border-radius|padding|background/);
-  assert.match(css, /\.week-timeline-dates > button::after \{[^}]*right: -5px; width: 1px;[^}]*pointer-events: none/);
+  assert.match(css, /\.week-day-col-head \{[^}]*border-right: 1px solid #e2e8f0/);
+  assert.match(css, /\.week-day-col-head\.today \.week-col-num \{ color: var\(--today-red-label\); background: var\(--today-red\)/);
+  assert.match(css, /\.week-open-day-btn \{[^}]*height: 20px/);
 });
 
 test('week task blocks use narrower horizontal gutters and clearer vertical gaps', () => {
@@ -144,7 +146,7 @@ test('week task blocks use narrower horizontal gutters and clearer vertical gaps
   assert.match(css, /\.week-timeline-more \{[^}]*left: calc\(66.666667% \+ 2px\); right: 2px/);
 });
 
-test('week blocks reserve tag space while hover keeps every tag', () => {
+test('week blocks place title above time, reserve tag space and keep every tag on hover', () => {
   const source = readFileSync(new URL('./week-timeline.tsx', import.meta.url), 'utf8');
   const sizing = ['showTime', 'showTags', 'lines'].map(name => source.match(new RegExp(`const ${name} = ([^;]+);`))?.[0]).join('\n');
   const size = new Function('height', 'timeRows', 'entry', `${sizing}\nreturn { showTags, lines };`);
@@ -152,10 +154,11 @@ test('week blocks reserve tag space while hover keeps every tag', () => {
   assert.equal(size(30, 1, { tags: ['工作'] }).showTags, false);
   assert.equal(size(66, 1, { tags: [] }).showTags, false);
   assert.deepEqual(size(102, 2, { tags: ['工作', '设计'] }), { showTags: true, lines: 2 });
+  assert.ok(source.indexOf('className="week-timeline-task-title"') < source.indexOf('className="week-timeline-time"'));
   assert.match(source, /<TaskTagList tags=\{entry.tags\}/);
   assert.match(source, /<TaskTagList tags=\{hover.entry.tags\} expanded/);
   const css = readFileSync(new URL('./week-timeline.css', import.meta.url), 'utf8');
-  assert.match(css, /\.week-timeline-event \{[^}]*gap: 3px;[^}]*padding: 3px 4px;/);
+  assert.match(css, /\.week-timeline-event \{[^}]*gap: 2px;[^}]*padding: 3px 5px;/);
 });
 
 test('drawer range includes every timed member and ignores untimed/empty entries', () => {
@@ -179,16 +182,19 @@ test('task and more entrances open complete groups while date entrances retain e
   assert.match(source, /dateTime=\{details.date\}/);
   assert.match(source, /detailRange && <p className="detail-range">/);
   assert.match(source, /const short = tiny && height >= 28/);
+  assert.match(source, /进入当日时间线/);
+  assert.match(source, /定位到当日时间线/);
+  assert.match(source, /查看任务/);
+  assert.match(source, /查看重复规则/);
 });
 
-test('approved light week is compact and drawer date/count are centered with a separate range', () => {
+test('approved light week uses prototype header and drawer date/count are centered with a separate range', () => {
   const css = readFileSync(new URL('./week-timeline.css', import.meta.url), 'utf8');
-  assert.match(css, /html:root:not\(\[data-mode="dark"\]\) \.today-page \.week-timeline \.week-timeline-dates \{ height: 88px/);
-  assert.match(css, /html:root:not\(\[data-mode="dark"\]\) \.week-timeline-grid \{ min-width: 960px/);
+  assert.match(css, /\.week-timeline-grid \{ --week-columns: 56px repeat\(5, minmax\(0, 1fr\)\) repeat\(2, minmax\(0, \.9fr\)\); min-width: 820px/);
   assert.match(css, /\.week-timeline-details \.detail-title \{[^}]*align-items: center/);
   assert.match(css, /\.week-timeline-details \.detail-heading-copy \{[^}]*flex-direction: column; gap: 4px/);
   assert.match(css, /\.detail-surface \{[^}]*width: min\(480px, 100vw\)/);
-  assert.match(css, /\.week-timeline-event.is-tiny.is-short \{ padding: 4px/);
+  assert.match(css, /\.week-timeline-event\.is-tiny\.is-short \{ padding: 3px 5px/);
 });
 
 test('week resources split saved URLs before merging ordinary execution notes', () => {
@@ -258,11 +264,99 @@ test('recurring icons and identity labels are independent of week execution tone
   assert.doesNotMatch(app, /tone: "recurring"/);
 });
 
-test('light week only marks today with a red circle and removes incoming day selection styling', () => {
+test('light week highlights today with vivid red circle and keeps incoming day selection neutral', () => {
   const css = readFileSync(new URL('./color-system.css', import.meta.url), 'utf8');
-  const prefix = 'html:root:not([data-mode="dark"]) .next-workspace .today-page .week-timeline .week-timeline-dates > button';
-  assert.ok(css.includes(`${prefix} .timeline-week-date { color: inherit; background: transparent; box-shadow: none; }`));
-  assert.ok(css.includes(`${prefix}.today .timeline-week-date { color: var(--today-red-label); background: var(--today-red); }`));
-  assert.ok(css.includes(`${prefix}.selected { color: var(--color-ink); border-color: transparent; background: transparent; box-shadow: none; }`));
-  assert.ok(css.includes(`${prefix}.weekend.selected { background: color-mix(in srgb, var(--color-orange-bg) 60%, var(--color-panel)); }`));
+  const prefix = 'html:root:not([data-mode="dark"]) .next-workspace .today-page .week-timeline .week-day-col-head';
+  assert.ok(css.includes(`${prefix}.selected:not(.today) { background: transparent; }`));
+  assert.ok(css.includes(`${prefix}.weekend.selected:not(.today) { background: #faf8f7; }`));
+  assert.ok(css.includes(`${prefix}.today .week-col-name { color: var(--color-red-ink); }`));
+  assert.ok(css.includes(`${prefix}.today .week-col-num { color: var(--today-red-label); background: var(--today-red); }`));
+});
+
+test('mounted WeekTimeline opens drawer on header/card click and only jumps to Day view via 看当日 or drawer button', async () => {
+  const source = readFileSync(new URL('./week-timeline.tsx', import.meta.url), 'utf8');
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 }
+  }).outputText;
+  let stateValues = [], effects = [];
+  const openDayCalls = [];
+  const exports = {};
+  const model = { WEEK_HOUR_HEIGHT: 72, weekClock, weekDatesFor, weekDetailRange, weekEntries, weekGroups, weekInitialMinute };
+  const schedules = Object.fromEntries(weekDatesFor('2026-11-18').map(date => [date, date === '2026-11-18'
+    ? { ...empty(), task_blocks: [block('done-1', { starts_at: '2026-11-18T09:30:00+08:00', ends_at: '2026-11-18T10:30:00+08:00', execution_status: 'completed', task_title: '核心架构评审' }), block('plan-1', { starts_at: '2026-11-18T14:00:00+08:00', ends_at: '2026-11-18T15:30:00+08:00', task_title: '周月视图对齐' })] }
+    : empty()]));
+  let cursor = 0;
+  const render = () => {
+    cursor = 0;
+    effects = [];
+    return exports.WeekTimeline({
+      selectedDate: '2026-11-18',
+      today: '2026-11-18',
+      tasks: [{ id: 'done-1', tags: [], notes: null }, { id: 'plan-1', tags: ['UI'], notes: null }],
+      recurringItems: [],
+      onOpenDay: (date, ctx) => openDayCalls.push([date, ctx])
+    });
+  };
+  vm.runInNewContext(compiled, {
+    exports,
+    Date,
+    window: { setInterval: () => 1, clearInterval() {}, clearTimeout() {}, setTimeout: () => 1, addEventListener() {}, removeEventListener() {}, requestAnimationFrame() {} },
+    document: { body: {}, addEventListener() {}, removeEventListener() {}, documentElement: { clientWidth: 1280, clientHeight: 800 } },
+    ResizeObserver: class { observe() {} disconnect() {} },
+    require(id) {
+      if (id === 'react') return {
+        useState(initial) {
+          const idx = cursor++;
+          if (!(idx in stateValues)) stateValues[idx] = typeof initial === 'function' ? initial() : initial;
+          return [stateValues[idx], next => { stateValues[idx] = typeof next === 'function' ? next(stateValues[idx]) : next; }];
+        },
+        useMemo: fn => fn(),
+        useRef: initial => ({ current: initial }),
+        useEffect: fn => effects.push(fn),
+        useLayoutEffect: () => {}
+      };
+      if (id === 'react/jsx-runtime') return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }), Fragment: 'Fragment' };
+      if (id === 'react-dom') return { createPortal: node => node };
+      if (id === './tauri') return { getDaySchedule: async date => schedules[date], listRecurringOccurrencesRange: async () => [] };
+      if (id === './timeline-hover-card') return { timelineHoverPosition: () => ({ left: 0, top: 0 }) };
+      if (id === './task-result') return { resultToday: () => '2026-11-18' };
+      if (id === './week-timeline-model') return model;
+      if (id === './task-tag-editor') return { TaskTagList: () => null };
+      if (id === '@tauri-apps/plugin-opener') return { openUrl: async () => {} };
+      if (id === './task-notes') return { taskResourceUrl: () => null };
+      if (id === './assets/recurring.svg') return 'recurring.svg';
+      if (id === './week-timeline.css') return {};
+      throw new Error(id);
+    }
+  });
+  render();
+  for (const run of effects) run();
+  await new Promise(resolve => setImmediate(resolve));
+  const collect = tree => {
+    const out = [];
+    (function walk(node) {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) { node.forEach(walk); return; }
+      out.push(node);
+      if (node.props?.children !== undefined) walk(node.props.children);
+    })(tree);
+    return out;
+  };
+  let nodes = collect(render());
+  assert.equal(nodes.filter(n => typeof n.props?.className === 'string' && n.props.className.startsWith('week-day-col-head')).length, 7);
+  assert.equal(nodes.filter(n => n.props?.className === 'week-open-day-btn').length, 7);
+  const wedHeadMain = nodes.find(n => n.props?.['aria-label']?.startsWith('2026-11-18，星期三'));
+  assert.ok(wedHeadMain);
+  wedHeadMain.props.onClick({ currentTarget: { focus() {} } });
+  assert.deepEqual(openDayCalls, [], 'clicking day column summary opens details drawer without switching views');
+  nodes = collect(render());
+  const dialog = nodes.find(n => n.type === 'dialog' && n.props?.className === 'week-timeline-details');
+  assert.ok(dialog, 'Week details drawer rendered');
+  const wedOpenBtn = nodes.find(n => n.props?.['aria-label'] === '看当日：2026-11-18');
+  wedOpenBtn.props.onClick();
+  assert.deepEqual(openDayCalls, [['2026-11-18', undefined]], 'clicking 看当日 jumps to Day view');
+  const legendSummary = nodes.find(n => n.props?.className === 'week-legend-summary');
+  assert.ok(legendSummary);
+  const textOf = node => Array.isArray(node) ? node.map(textOf).join('') : node && typeof node === 'object' ? textOf(node.props?.children) : String(node ?? '');
+  assert.equal(textOf(legendSummary), '本周共 2 项安排 · 合计约 2.5 小时 · 达成率 50%');
 });

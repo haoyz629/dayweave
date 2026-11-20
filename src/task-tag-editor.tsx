@@ -50,12 +50,13 @@ function colorFor(definitions: TaskTagDefinition[], name: string) {
   return color !== undefined && Number.isInteger(color) && color >= 0 && color < 8 ? color : undefined;
 }
 
-export function TaskTagEditor({ tags, suggestions = [], disabled, id, onChange }: {
+export function TaskTagEditor({ tags, suggestions = [], disabled, id, inlineChips = false, onChange }: {
   tags: string[];
   suggestions?: string[];
   disabled: boolean;
   id: string;
   dropdown?: boolean; // Compatibility only: every editor now uses the same dropdown.
+  inlineChips?: boolean;
   onChange: (tags: string[]) => void;
 }) {
   const { definitions, loaded, loading, error: catalogError } = useTagCatalog();
@@ -102,8 +103,9 @@ export function TaskTagEditor({ tags, suggestions = [], disabled, id, onChange }
       const placeAbove = below < 280 && above > below;
       const maxHeight = Math.max(80, Math.min(500, placeAbove ? above : below));
       const height = Math.min(panelRef.current?.scrollHeight ?? 400, maxHeight);
+      const preferredLeft = inlineChips ? trigger.left : trigger.right - width;
       setPlacement({
-        left: Math.max(12, Math.min(trigger.right - width, window.innerWidth - width - 12)),
+        left: Math.max(12, Math.min(preferredLeft, window.innerWidth - width - 12)),
         top: placeAbove ? Math.max(12, trigger.top - height - 6) : trigger.bottom + 6,
         width, maxHeight
       });
@@ -119,7 +121,7 @@ export function TaskTagEditor({ tags, suggestions = [], disabled, id, onChange }
       window.removeEventListener("scroll", position, true);
       observer.disconnect();
     };
-  }, [open]);
+  }, [open, inlineChips, tags.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -205,16 +207,22 @@ export function TaskTagEditor({ tags, suggestions = [], disabled, id, onChange }
     return Array.from(panelRef.current?.querySelectorAll<HTMLInputElement>('.task-tag-option input:not(:disabled)') ?? []);
   }
 
-  return <div className="task-tag-select-control">
-    <button ref={triggerRef} type="button" className={`task-tag-dropdown-trigger${open ? " is-open" : ""}`} disabled={disabled}
+  return <div className={`task-tag-select-control${inlineChips ? " is-inline-chips" : ""}`}>
+    {inlineChips && selected.map((tag) => <span key={tagKey(tag)} className="task-tag-chip" data-tag-color={colorFor(definitions, tag)} title={tag}>
+      <span>#{tag}</span>
+      <button type="button" disabled={busy} aria-label={`移除标签 ${tag}`} onClick={() => remove(tag)}>×</button>
+    </span>)}
+    <button ref={triggerRef} type="button" className={`task-tag-dropdown-trigger${inlineChips ? " is-add-chip" : ""}${open ? " is-open" : ""}`} disabled={disabled}
       aria-label={`选择标签${tags.length ? `，已选 ${tags.length} 个` : ""}`} title={tags.length ? tags.join("、") : "选择或新建标签"}
       aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? `${id}-panel` : undefined}
       onClick={() => open ? close() : show()} onKeyDown={(event) => {
         if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); show(); }
       }}>
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M3 4h8l10 10-7 7L3 10Z" /><circle cx="7.5" cy="8" r="1" /></svg>
-      <span>标签</span>{tags.length > 0 && <em>{tags.length}</em>}
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d={open ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"} /></svg>
+      {inlineChips ? <span>＋ 标签</span> : <>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M3 4h8l10 10-7 7L3 10Z" /><circle cx="7.5" cy="8" r="1" /></svg>
+        <span>标签</span>{tags.length > 0 && <em>{tags.length}</em>}
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d={open ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"} /></svg>
+      </>}
     </button>
     {open && createPortal(<div ref={panelRef} id={`${id}-panel`} className="task-tag-editor task-tag-dropdown-panel" role="dialog" aria-label="选择任务标签" aria-busy={pending || loading} style={placement}
       onKeyDown={(event) => {
@@ -273,67 +281,133 @@ export function TaskTagEditor({ tags, suggestions = [], disabled, id, onChange }
   </div>;
 }
 
-export function TaskTagList({ tags, expanded = false }: { tags: string[]; expanded?: boolean }) {
+export function TaskTagList({ tags, expanded = false, limit = 3 }: { tags: string[]; expanded?: boolean; limit?: number }) {
   const { definitions } = useTagCatalog();
   if (!tags.length) return null;
-  return <span className="task-list-tags" aria-label="标签">{(expanded ? tags : tags.slice(0, 3)).map((tag) => <span key={tag} data-tag-color={colorFor(definitions, tag)} title={tag}>{tag}</span>)}{!expanded && tags.length > 3 && <span className="task-tag-overflow" aria-label={`还有 ${tags.length - 3} 个标签`} title={tags.slice(3).join("、")}>+{tags.length - 3}</span>}</span>;
+  const visible = expanded ? tags : tags.slice(0, limit);
+  const overflow = expanded ? 0 : Math.max(0, tags.length - limit);
+  return <span className="task-list-tags" aria-label="标签">{visible.map((tag) => <span key={tag} data-tag-color={colorFor(definitions, tag)} title={tag}>{tag}</span>)}{overflow > 0 && <span className="task-tag-overflow" aria-label={`还有 ${overflow} 个标签`} title={tags.slice(limit).join("、")}>+{overflow}</span>}</span>;
 }
 
-export function TaskTagFilter({ id, tags, value, onChange }: { id: string; tags: string[]; value: string; onChange: (tag: string) => void }) {
+export function TaskTagFilter({ id, tags, counts, value, onChange }: {
+  id: string;
+  tags: string[];
+  counts?: Record<string, number>;
+  value: string;
+  onChange: (tag: string) => void;
+}) {
   const { definitions } = useTagCatalog();
-  const [expanded, setExpanded] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(Infinity);
-  const [promotedTag, setPromotedTag] = useState("");
-  const listRef = useRef<HTMLDivElement>(null);
-  const toggleRef = useRef<HTMLButtonElement>(null);
-  const options = uniqueTags([...(matchesTag(tags, promotedTag) ? [promotedTag] : []), ...tags, value]);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const options = uniqueTags([...tags, ...(value ? [value] : [])]);
+  const selectedTag = value ? (options.find((tag) => matchesTag([tag], value)) ?? value) : "";
+  const active = Boolean(selectedTag);
+  const activeTagColor = active ? colorFor(definitions, selectedTag) : undefined;
+  const trimmedQuery = query.trim().toLowerCase();
+  const filteredOptions = trimmedQuery ? options.filter((tag) => tag.toLowerCase().includes(trimmedQuery)) : options;
 
-  useLayoutEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-    function measure() {
-      const buttons = Array.from(list!.querySelectorAll<HTMLButtonElement>(".task-tag-filter-chip"));
-      const first = buttons[0];
-      if (!first) return;
-      const gap = Number.parseFloat(getComputedStyle(list!).columnGap);
-      const widths = buttons.map((button) => button.offsetWidth);
-      const width = list!.clientWidth;
-      const total = widths.reduce((sum, size) => sum + size, 0) + gap * (buttons.length - 1);
-      const available = total <= width ? width : width - toggleRef.current!.offsetWidth - gap;
-      let used = 0;
-      let count = 0;
-      for (const size of widths) {
-        if (count && used + gap + size > available + .5) break;
-        used += (count ? gap : 0) + size;
-        count++;
-      }
-      count = Math.max(Math.min(2, buttons.length), count);
-      setVisibleCount(count);
-      if (!expanded && buttons.slice(count).includes(document.activeElement as HTMLButtonElement)) first.focus();
+  useEffect(() => {
+    if (!open) {
+      setQuery("");
+      return;
     }
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(list);
-    return () => observer.disconnect();
-  }, [tags, value, promotedTag, expanded]);
+    searchRef.current?.focus();
+    function outside(event: PointerEvent | FocusEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape" || event.isComposing || event.keyCode === 229) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("focusin", outside);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("focusin", outside);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [open]);
 
   if (!options.length) return null;
-  const hasOverflow = visibleCount < options.length + 1;
-  function chip(tag: string, clipped = false, promote = false) {
-    const selected = tag ? Boolean(value) && matchesTag([tag], value) : !value;
-    return <button key={tagKey(tag)} type="button" className={`task-tag-filter-chip${!tag ? " is-all" : ""}${clipped ? " is-clipped" : ""}`} data-tag-color={colorFor(definitions, tag)} aria-label={tag || "全部标签"} aria-pressed={selected} aria-hidden={clipped || undefined} tabIndex={clipped ? -1 : 0} title={tag || "全部标签"} onClick={() => {
-      if (promote) setPromotedTag(tag);
-      onChange(tag);
-    }}>
-      <span>{tag || "全部"}</span>
-    </button>;
-  }
-  return <div className={`task-tag-filter${expanded && hasOverflow ? " is-expanded" : ""}`} role="group" aria-label="标签筛选">
-    <div ref={listRef} id={id} className="task-tag-filter-options">
-      {["", ...options].map((tag, index) => chip(tag, !expanded && index >= visibleCount, expanded && Boolean(tag) && index >= visibleCount))}
-      <button ref={toggleRef} type="button" className={`task-tag-filter-more${!hasOverflow ? " is-unused" : ""}`} aria-hidden={!hasOverflow || undefined} tabIndex={hasOverflow ? 0 : -1} aria-expanded={expanded && hasOverflow} aria-controls={id} onClick={() => setExpanded((current) => !current)}>
-        {expanded ? "收起" : `+${Math.max(0, options.length + 1 - visibleCount)} 展开`}
+
+  return <div ref={rootRef} className={`task-tag-filter task-filter-dropdown${open ? " is-open" : ""}`}>
+    <div className={`task-filter-trigger-group${active ? " is-active" : ""}`} data-tag-color={activeTagColor}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`task-filter-trigger${active ? " is-active" : ""}${open ? " is-open" : ""}`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? `${id}-popover` : undefined}
+        aria-label={active ? `标签筛选：${selectedTag}` : "标签筛选"}
+        title={active ? `标签：${selectedTag}` : "按标签筛选"}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <svg className="task-filter-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 4h8l10 10-7 7L3 10Z" /><circle cx="7.5" cy="8" r="1" /></svg>
+        <span className="task-filter-trigger-label">{active ? `#${selectedTag}` : "全部标签"}</span>
+        {!active && <svg className="task-filter-chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d={open ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"} /></svg>}
       </button>
+      {active && <button
+        type="button"
+        className="task-filter-clear"
+        aria-label="清除标签筛选"
+        title="清除标签筛选"
+        onClick={() => { onChange(""); setOpen(false); }}
+      >×</button>}
     </div>
+    {open && <div id={`${id}-popover`} className="task-filter-popover task-tag-filter-popover" role="dialog" aria-label="按标签筛选">
+      <div className="task-filter-popover-search">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6" /><path d="m15.2 15.2 4.8 4.8" /></svg>
+        <input
+          ref={searchRef}
+          id={`${id}-search`}
+          type="search"
+          value={query}
+          placeholder="搜索标签…"
+          aria-label="搜索标签"
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </div>
+      <div id={id} className="task-filter-popover-list" role="listbox" aria-label="标签选项">
+        {(!trimmedQuery || "全部标签".includes(trimmedQuery)) && <button
+          type="button"
+          role="option"
+          aria-selected={!active}
+          className={`task-filter-option${!active ? " is-selected" : ""}`}
+          onClick={() => { onChange(""); setOpen(false); }}
+        >
+          <span className="task-filter-option-name">全部标签</span>
+          <span className="task-filter-option-meta">{!active && <span className="task-filter-check" aria-hidden="true">✓</span>}</span>
+        </button>}
+        {filteredOptions.length ? filteredOptions.map((tag) => {
+          const selected = Boolean(active && matchesTag([tag], selectedTag));
+          const count = counts?.[tagKey(tag)];
+          return <button
+            key={tagKey(tag)}
+            type="button"
+            role="option"
+            aria-selected={selected}
+            className={`task-filter-option${selected ? " is-selected" : ""}`}
+            data-tag-color={colorFor(definitions, tag)}
+            title={tag}
+            onClick={() => { onChange(tag); setOpen(false); }}
+          >
+            <span className="task-filter-swatch" aria-hidden="true" />
+            <span className="task-filter-option-name">#{tag}</span>
+            <span className="task-filter-option-meta">
+              {count !== undefined && <span className="task-filter-option-count">{count}</span>}
+              {selected && <span className="task-filter-check" aria-hidden="true">✓</span>}
+            </span>
+          </button>;
+        }) : <p className="task-filter-popover-empty">未找到匹配标签</p>}
+      </div>
+    </div>}
   </div>;
 }

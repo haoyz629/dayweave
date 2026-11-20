@@ -60,6 +60,8 @@ pub struct RecurringExecutionEventDto {
     pub outcome: Option<String>,
     pub cancelled_outcome: Option<String>,
     pub notes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note_cleared: Option<bool>,
     pub occurred_at: String,
 }
 
@@ -92,19 +94,25 @@ impl Database {
         // Active baselines and repeated active requests are not resumptions. The
         // immediately preceding series state must be paused, including legacy rows.
         let mut statement = self.connection.prepare(
-            "SELECT CAST(event.id AS TEXT), 'execution', event.occurrence_id, event.occurrence_date, event.title,
-                    event.display_time, event.display_duration_minutes, event.outcome, event.notes, event.occurred_at, event.id, 0,
-                    CASE WHEN event.outcome IS NULL THEN (
-                        SELECT previous.outcome FROM recurring_execution_events previous
-                        WHERE previous.occurrence_id = event.occurrence_id AND previous.id < event.id
-                        ORDER BY previous.id DESC LIMIT 1
-                    ) END
-             FROM recurring_execution_events event WHERE event.recurring_item_id = ?1
+            "WITH execution AS (
+                SELECT *,
+                    LAG(outcome) OVER occurrence AS previous_outcome,
+                    LAG(notes) OVER occurrence AS previous_notes
+                FROM recurring_execution_events WHERE recurring_item_id = ?1
+                WINDOW occurrence AS (PARTITION BY occurrence_id ORDER BY id)
+             )
+             SELECT CAST(id AS TEXT), 'execution', occurrence_id, occurrence_date, title,
+                    display_time, display_duration_minutes,
+                    CASE WHEN outcome IS NOT previous_outcome THEN outcome END,
+                    CASE WHEN notes IS NOT previous_notes THEN notes END, occurred_at, id, 0,
+                    CASE WHEN outcome IS NULL THEN previous_outcome END,
+                    notes IS NULL AND previous_notes IS NOT NULL
+             FROM execution WHERE outcome IS NOT previous_outcome OR notes IS NOT previous_notes
              UNION ALL
              SELECT 'status:' || s.id,
                     CASE s.status WHEN 'active' THEN 'resumed' ELSE s.status END,
                     NULL, date(s.effective_from, '-1 day'), i.title, NULL, NULL, NULL, NULL,
-                    COALESCE(s.occurred_at, date(s.effective_from, '-1 day')), s.id, 1, NULL
+                    COALESCE(s.occurred_at, date(s.effective_from, '-1 day')), s.id, 1, NULL, 0
              FROM recurring_status_versions s JOIN recurring_items i ON i.id = s.recurring_item_id
              WHERE s.recurring_item_id = ?1 AND (
                  s.status IN ('paused', 'ended') OR (s.status = 'active' AND (
@@ -114,7 +122,7 @@ impl Database {
                  ) = 'paused'))
              UNION ALL
              SELECT 'lifecycle:' || id, kind, NULL, action_date, title, NULL, NULL, NULL, NULL,
-                    occurred_at, id, 2, NULL
+                    occurred_at, id, 2, NULL, 0
              FROM recurring_lifecycle_events WHERE recurring_item_id = ?1",
         )?;
         let rows = statement.query_map([item_id], |row| Ok((RecurringExecutionEventDto {
@@ -122,6 +130,7 @@ impl Database {
             occurrence_date: row.get(3)?, title: row.get(4)?, display_time: row.get(5)?,
             display_duration_minutes: row.get(6)?, outcome: row.get(7)?, notes: row.get(8)?,
             occurred_at: row.get(9)?, cancelled_outcome: row.get(12)?,
+            note_cleared: row.get::<_, bool>(13)?.then_some(true),
         }, row.get::<_, i64>(10)?, row.get::<_, i64>(11)?)))?;
         let mut events = rows.collect::<Result<Vec<_>, _>>()?;
         // Keep schedule days grouped, then compare actual instants (including nanoseconds

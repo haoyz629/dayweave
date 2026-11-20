@@ -53,15 +53,11 @@ test("approved palettes retain readable role pairs and independent lake-blue pla
     assert.ok(contrast("#ffffff", colors["--color-primary"]) >= 4.5);
   }
   assert.equal(light["--color-plan-bg"], "#d6f2fa");
-  assert.equal(light["--color-canvas"], "#fffefa", "right workspace stays near-white");
-  assert.equal(light["--color-group"], "#faf9f7", "left sidebar stays warm gray-white");
-  assert.equal(light["--color-panel"], "#ffffff", "raised content stays white");
-  assert.equal(light["--color-edge"], "#e4e0d8", "shared dividers stay faint");
   assert.equal(dark["--color-plan-bg"], "#193e50");
-  assert.match(css, /--task-state-scheduled-surface: var\(--color-plan-bg\)/);
+  assert.match(css, /--task-state-scheduled: #523A9C/);
   assert.match(css, /--state-plan-surface: var\(--color-plan-bg\)/);
   assert.match(css, /--priority-low-surface: var\(--color-blue-bg\)/);
-  assert.match(css, /--task-state-draft-surface: var\(--color-gray-bg\)/);
+  assert.match(css, /--task-state-draft-surface: #E5E7EB/);
   assert.match(css, /\.feedback-confirm\.caution[^}]+--confirm-surface: var\(--color-amber-bg\)/);
   assert.doesNotMatch(css, /!important/);
   assert.ok(readFileSync(new URL("./main.tsx", import.meta.url), "utf8").indexOf('./color-system.css') > readFileSync(new URL("./main.tsx", import.meta.url), "utf8").indexOf('./styles.css'));
@@ -255,7 +251,7 @@ test("active recurring controls and overflow tags cannot bypass the shared light
   });
 });
 
-test("day and week blocks restore original light surfaces without reverting shared badges", () => {
+test("day and week blocks retain original light status surfaces and edges", () => {
   const rules = [];
   postcss.parse(css).walkRules(rule => rules.push(rule));
   function originalPair(selector, surface, edge, role) {
@@ -266,7 +262,7 @@ test("day and week blocks restore original light surfaces without reverting shar
   }
   originalPair('.today-page .timeline-event:is(.plan-draft-block, .execution-block)', '--state-plan-surface', '--state-plan-border', 'plan');
   const recurring = rules.find(rule => rule.selector === 'html:root:not([data-mode="dark"]) .today-page .timeline-event.recurring-event');
-  assert.deepEqual(Object.fromEntries(recurring.nodes.map(node => [node.prop, node.value])), { '--state-recurring': 'var(--state-plan)', '--state-recurring-surface': light['--color-plan-bg'], '--state-recurring-border': light['--color-plan-edge'] });
+  assert.deepEqual(Object.fromEntries(recurring.nodes.map(node => [node.prop, node.value])), { '--state-recurring': 'var(--color-plan-ink)', '--state-recurring-surface': light['--color-plan-bg'], '--state-recurring-border': light['--color-plan-edge'] });
   for (const suffix of ['', ':hover']) {
     const result = rules.find(rule => rule.selector === `html:root:not([data-mode="dark"]) .today-page .timeline-event.recurring-event:not(.execution-planned)${suffix}`);
     const values = Object.fromEntries(result.nodes.map(node => [node.prop, node.value]));
@@ -284,6 +280,22 @@ test("day and week blocks restore original light surfaces without reverting shar
   }
   assert.doesNotMatch(css, /--timeline-block-tone|14%, white|38%, white/);
   assert.doesNotMatch(css, /week-timeline[^{}]*\.tone-recurring/);
+});
+
+test("selected day blocks use a strong primary left edge while Toast stays compact and flexible", () => {
+  const rules = [];
+  postcss.parse(css).walkRules(rule => rules.push(rule));
+  const selected = rules.find(rule => rule.selector === 'html:root:not([data-mode="dark"]) .today-page .timeline-event:is(.execution-block, .recurring-event).selected');
+  assert.ok(selected);
+  assert.equal(selected.nodes.find(node => node.prop === 'border-left-color')?.value, 'var(--color-primary)');
+  assert.equal(selected.nodes.find(node => node.prop === 'border-left-width')?.value, '4px');
+  const content = rules.find(rule => rule.selector === 'html:root:not([data-mode="dark"]) .feedback-toast-content');
+  assert.equal(content.nodes.find(node => node.prop === 'display')?.value, 'flex');
+  assert.equal(content.nodes.find(node => node.prop === 'flex-wrap')?.value, 'wrap');
+  const toast = rules.find(rule => rule.selector.includes('.feedback-toast.has-actions'));
+  assert.ok(toast);
+  assert.equal(toast.nodes.find(node => node.prop === 'padding')?.value, '8px 48px 8px 14px');
+  assert.match(readFileSync(new URL('./feedback.tsx', import.meta.url), 'utf8'), /onMouseEnter=\{pause\}[\s\S]*onMouseLeave=\{resume\}/);
 });
 
 test("toasts restore original light fills and edges without changing their ink or behavior", () => {
@@ -313,6 +325,37 @@ test("light nonworking time is a quiet fill without stripes or boundary borders"
   assert.match(legacy, /\.timeline-nonworking:focus-visible \{[^}]*outline: 2px solid/);
 });
 
+test("light day timeline uses a white canvas and borderless nonworking bands and now label", () => {
+  const scope = 'html:root:not([data-mode="dark"]) .today-page .is-timeline-view';
+  const dayRules = new Map();
+  postcss.parse(css).walkRules(rule => {
+    if (rule.selector.startsWith(`${scope} `)) dayRules.set(rule.selector.slice(scope.length + 1), Object.fromEntries(rule.nodes.map(node => [node.prop, node.value])));
+  });
+  assert.equal(dayRules.get('.hourly-timeline')['background-color'], '#fff');
+  assert.equal(dayRules.get('.timeline-hour span')['border-top-color'], '#c5cdd7');
+  assert.equal(dayRules.get('.timeline-hour span::after')['border-top'], '1px dashed #d1d8e0');
+  assert.deepEqual(dayRules.get('.timeline-nonworking'), { border: '0', 'border-radius': '0', background: '#f0f2f4' });
+  assert.equal(dayRules.get('.current-time-line')['border-top'], '2px solid var(--today-red)');
+  const label = dayRules.get('.current-time-line > span');
+  assert.equal(label.background, 'var(--today-red)');
+  assert.ok(!Object.keys(label).some(property => property === 'border' || property.startsWith('border-')));
+});
+
+test("light day grid stays above the create rail and below solid task blocks", () => {
+  const rules = new Map();
+  postcss.parse(css).walkRules(rule => rules.set(rule.selector, Object.fromEntries(rule.nodes.filter(node => node.type === 'decl').map(node => [node.prop, node.value]))));
+  const scope = 'html:root:not([data-mode="dark"]) .today-page .is-timeline-view';
+  assert.equal(rules.get(`${scope} .timeline-events`)['z-index'], 'auto');
+  assert.equal(rules.get(`${scope} .timeline-event:not(.is-dragging)`)['z-index'], '3');
+  assert.equal(rules.get(`${scope} .timeline-event:not(.is-dragging)`)['border-style'], 'solid');
+  assert.equal(rules.get('html:root:not([data-mode="dark"]) .selection-create-track')['z-index'], '1');
+  const legacy = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+  assert.match(legacy, /\.timeline-hours \{[^}]*z-index: 2;/);
+  assert.match(legacy, /\.timeline-nonworking \{[^}]*z-index: 0;/);
+  assert.equal(rules.get('html:root:not([data-mode="dark"]) .selection-create-track').background, 'color-mix(in srgb, var(--color-selected-bg) 45%, white)');
+  assert.equal(rules.get('html:root:not([data-mode="dark"]) .selection-create-track:is(:hover, :focus-visible)').background, 'var(--color-selected-bg)');
+});
+
 test("P0 reuses urgent red across badges, dropdowns and waiting-pool dots", () => {
   for (const [suffix, role] of [["", "ink"], ["-accent", "solid"], ["-border", "edge"], ["-surface", "bg"]]) {
     assert.ok(css.includes(`--priority-urgent${suffix}: var(--color-red-${role});`));
@@ -320,4 +363,36 @@ test("P0 reuses urgent red across badges, dropdowns and waiting-pool dots", () =
   assert.ok(css.includes(':is(.priority-badge, .timeline-fact-priority).priority-urgent { color: var(--priority-urgent); border-color: var(--priority-urgent-border); background: var(--priority-urgent-surface); }'));
   assert.ok(css.includes('.waiting-pool-dot.priority-urgent { background: var(--priority-urgent-accent); }'));
   assert.ok(css.includes('.priority-select-control.priority-tone-urgent { --priority-tone: var(--priority-urgent); --priority-border: var(--priority-urgent-border); --priority-surface: var(--priority-urgent-surface); }'));
+});
+test("draft cards say draft and task status badges use explicit semantic fills", () => {
+  const draftCards = app.slice(app.indexOf("view === \"draft\" && visibleTaskDrafts.map"), app.indexOf("!loading && visibleTasks.map"));
+  assert.match(draftCards, /status="草稿"/);
+  assert.doesNotMatch(draftCards, /status="待确认"/);
+  const rules = [];
+  postcss.parse(css).walkRules(rule => rules.push(rule));
+  const expected = [
+    ["status-draft", "#3F4752", "#B8BEC7", "#E5E7EB"],
+    ["status-open", "#124C8A", "#8FBCE8", "#CFE5FF"],
+    ["status-scheduled", "#523A9C", "#B5A7E7", "#DCD5FF"],
+    ["status-not_completed", "#754300", "#E1B35E", "#FFE0A3"],
+    ["status-done", "#205C36", "#8BC69B", "#C9EBD3"],
+    ["status-deleted", "#8B2336", "#E18D9A", "#FFC9D1"]
+  ];
+  for (const [status, ink, edge, background] of expected) {
+    const token = status === "status-not_completed" ? "incomplete" : status.replace("status-", "");
+    const rule = rules.find(candidate => candidate.selector.includes(`.${status}`)
+      && candidate.selector.includes(".task-capsule-status")
+      && candidate.nodes.some(node => node.type === "decl" && node.prop === "background" && node.value === `var(--task-state-${token}-surface)`));
+    assert.ok(rule, `missing explicit rule for ${status}`);
+    const declarations = Object.fromEntries(rule.nodes.filter(node => node.type === "decl").map(node => [node.prop, node.value]));
+    assert.equal(declarations.color, `var(--task-state-${token})`);
+    assert.equal(declarations["border-color"], `var(--task-state-${token}-border)`);
+    assert.equal(declarations.background, `var(--task-state-${token}-surface)`);
+    assert.match(css, new RegExp(`--task-state-${token}: ${ink}`));
+    assert.match(css, new RegExp(`--task-state-${token}-border: ${edge}`));
+    assert.match(css, new RegExp(`--task-state-${token}-surface: ${background}`));
+  }
+  for (const rule of rules.filter(candidate => candidate.selector.includes(".task-capsule-status"))) {
+    assert.doesNotMatch(rule.nodes.filter(node => node.type === "decl").map(node => node.toString()).join(";"), /color-mix\(in srgb, currentColor 12%/);
+  }
 });

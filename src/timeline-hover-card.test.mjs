@@ -422,7 +422,7 @@ test("recurring save stages scope confirmation without success toast and retains
       selectedRecurringItem: { id: "recurring" }, busy: false, recurringTargetLoading: false, recurringTarget: target, recurringForm: { title: "事项", display_time: "09:00", display_duration_minutes: 30 },
       setBusy(value) { state.busy = value; }, setFeedback: value => feedback.push(value),
       resolveRecurringEditTarget: async () => { if (fail) throw new Error("读取失败"); return target; },
-      recurringChangeIssue: () => null, shanghaiDateValue: () => "2026-10-25",
+      recurringChangeIssue: () => null, recurringItemPreviewDates: () => ["2026-10-26"], shanghaiDateValue: () => "2026-10-25",
       setRecurringScopeError() {}, setPendingItemChange(value) { state.pending = value; },
       recurringItemInputForForm: value => value, uiErrorMessage: error => error.message
     };
@@ -442,4 +442,60 @@ test("task hover cards receive every tag without truncating the source data", ()
   const tagList = nodes(tree, node => node.props.tags === tags)[0];
   assert.equal(tagList.props.expanded, true);
   assert.match(renderToStaticMarkup(tree), /工作、设计、本周、第四个标签/);
+});
+
+test("Scheme A partitioned hover card renders single-row status header, priority/type/tag attributes, resource well and footer", () => {
+  const full = cardHarness({
+    ...content,
+    kind: "多日任务",
+    tone: "execution",
+    statusLabel: "已安排",
+    priority: "urgent",
+    timeRange: "10:30–12:00",
+    duration: "1h30m",
+    tags: ["核心引擎", "本周重点"],
+    footerKind: "hint",
+    footerText: "上下拖动调整时间 · 点击精确编辑"
+  });
+  const html = renderToStaticMarkup(full.render());
+  assert.match(html, /class="timeline-hover-meta timeline-hover-header"/);
+  assert.match(html, /class="timeline-hover-status">已安排<\/span>/);
+  assert.match(html, /<span>10:30–12:00<\/span><span class="timeline-hover-duration">1h30m<\/span>/);
+  assert.match(html, /class="timeline-hover-priority priority-urgent"><i aria-hidden="true"><\/i>P0<\/span>/);
+  assert.match(html, /class="timeline-hover-kind">多日任务<\/span>/);
+  assert.match(html, /class="timeline-hover-attr-sep"/);
+  assert.match(html, /class="timeline-hover-res-icon"/);
+  assert.match(html, /class="timeline-hover-footer"/);
+
+  const recurring = cardHarness({
+    ...content,
+    kind: "重复事项",
+    tone: "execution",
+    priority: "high",
+    url: "",
+    note: "检查本地快照",
+    tags: ["例行运维"]
+  });
+  const recurringHtml = renderToStaticMarkup(recurring.render());
+  assert.match(recurringHtml, /is-recurring-kind/);
+  assert.match(recurringHtml, /class="timeline-hover-kind is-recurring"/);
+  assert.doesNotMatch(recurringHtml, /timeline-hover-priority/);
+
+  const staticCard = cardModule.TimelineStaticHoverCard({
+    content: {
+      kind: "固定日程",
+      title: "产品周会",
+      time: "16:00 - 16:45 (45m)",
+      detail: "固定日程；同一时段仍可安排其他事项",
+      tone: "fixed",
+      left: 120,
+      top: 180,
+      placement: "below"
+    }
+  });
+  const staticHtml = renderToStaticMarkup(staticCard);
+  assert.match(staticHtml, /role="tooltip"/);
+  assert.match(staticHtml, /class="timeline-hover-status">固定日程<\/span>/);
+  assert.match(staticHtml, /<span>16:00–16:45<\/span><span class="timeline-hover-duration">45m<\/span>/);
+  assert.doesNotMatch(staticHtml, /timeline-hover-kind/);
 });

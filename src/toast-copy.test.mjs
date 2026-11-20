@@ -168,11 +168,10 @@ function executeHandler(file, name, state) {
   return state;
 }
 
-test("manual draft save and discard emit one toast and clear duplicate page feedback", async () => {
+test("draft creation removes redundant manual save button, places discard on the left, and keeps discard toast", async () => {
   const state = {
     busy: false, draftSaving: false, persistedNewTaskDraft: null, taskDrafts: [{ id: "draft" }],
-    savedWithFeedback: null, feedback: "旧提示", toasts: [],
-    async persistCurrentTaskDraft(showFeedback) { state.savedWithFeedback = showFeedback; state.feedback = null; return { id: "draft" }; },
+    feedback: "旧提示", toasts: [],
     async discardTaskDraft() {},
     setBusy(value) { state.busy = value; },
     setTaskDrafts(update) { state.taskDrafts = update(state.taskDrafts); },
@@ -181,19 +180,14 @@ test("manual draft save and discard emit one toast and clear duplicate page feed
     setSuccessToast(value) { state.toasts.push(value); },
     uiErrorMessage: String
   };
-  executeHandler("./App.tsx", "handleManualSaveDraft", state);
   executeHandler("./App.tsx", "discardTaskDraftFromList", state);
-  await state.handleManualSaveDraft();
-  assert.equal(state.toasts.length, 1);
-  assert.equal(state.toasts[0].message, "草稿已保存");
-  assert.equal(state.feedback, null);
-  assert.match(text, /if \(showFeedback\) setFeedback\(null\)/);
-  state.feedback = "旧提示";
   await state.discardTaskDraftFromList({ id: "draft" });
-  assert.equal(state.toasts.length, 2);
-  assert.equal(state.toasts[1].message, "草稿已放弃");
+  assert.equal(state.toasts.length, 1);
+  assert.equal(state.toasts[0].message, "草稿已放弃");
   assert.equal(state.feedback, null);
   assert.deepEqual(state.taskDrafts, []);
+  assert.doesNotMatch(text, /task-action-save-draft|handleManualSaveDraft/);
+  assert.match(text, /className="task-compact-lifecycle">[\s\S]*task-action-discard[\s\S]*放弃草稿[\s\S]*task-draft-save-state/);
 });
 
 test("recurring review uses either an undo toast or inline success, never both", async () => {

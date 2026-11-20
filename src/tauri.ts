@@ -89,6 +89,7 @@ export type RecurringExecutionEvent = {
   outcome: RecurringOccurrenceOutcome | null;
   cancelled_outcome?: RecurringOccurrenceOutcome | null;
   notes: string | null;
+  note_cleared?: boolean;
   occurred_at: string;
 };
 
@@ -164,6 +165,8 @@ export type TaskHistoryEvent = {
   status: TaskStatus | "not_completed" | null;
   note: string | null;
   review_note: string | null;
+  note_cleared?: boolean;
+  task_status?: TaskStatus;
 };
 
 export type TaskMetadata = {

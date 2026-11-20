@@ -11,15 +11,14 @@ export function Logo(_props: { mode?: "light" | "dark" } = {}) {
 }
 
 export function ProductBrand({ weekLabel }: { weekLabel?: string } = {}) {
-  return <section className="product-brand" aria-label="今序 · dayweave 品牌介绍">
+  return <section className="product-brand" aria-label="今序 · Dayweave 品牌标识">
     <div className="product-brand-heading">
       <div className="product-brand-logo"><Logo /></div>
       <div className="product-brand-text">
         <div className="product-brand-name-row">
-          <h1 className="product-brand-name">今序<CopySeparator />dayweave</h1>
+          <h1 className="product-brand-name">今序<CopySeparator /><span lang="en">Dayweave</span></h1>
           {weekLabel && <span className="product-brand-week">{weekLabel}</span>}
         </div>
-        <p className="product-brand-copy"><span className="product-brand-chinese">让今天，井然有序</span><CopySeparator /><span className="product-brand-english" lang="en">Bring order to your day.</span></p>
       </div>
     </div>
   </section>;

@@ -191,6 +191,8 @@ pub(super) fn save_recycled_completion(transaction: &Transaction<'_>, task: &Tas
     }
     if before.execution_status == "completed" && before.execution_captured_at.is_some()
         && normalized_note.as_deref() == before.execution_note.as_deref() && same_review { return Ok(true); }
+    let audit_cursor = database_history::audit_cursor(transaction, &task.id)?;
+    let before_capture = database_history::capture_snapshot(transaction, block_id)?;
     database_history::preserve_current(transaction, &task.id)?;
     freeze_block(transaction, block_id)?;
     let timestamp = now();
@@ -200,7 +202,7 @@ pub(super) fn save_recycled_completion(transaction: &Transaction<'_>, task: &Tas
     transaction.execute("UPDATE review_entries SET outcome = 'completed', notes = ?2 WHERE plan_block_id = ?1",
         params![block_id, normalized_note])?;
     clear_review_draft(transaction, date, "task", block_id)?;
-    database_history::preserve_current(transaction, &task.id)?;
+    database_history::record_capture_change(transaction, &task.id, date, &before_capture, audit_cursor, &timestamp)?;
     sync_recycled_completion(transaction, &task.id)?;
     Ok(true)
 }

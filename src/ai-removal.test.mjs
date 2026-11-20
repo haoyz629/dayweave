@@ -50,11 +50,11 @@ test("application no longer imports or calls AI APIs or mounts the assistant", (
   assert.doesNotMatch(app, /assistant-orb|assistant-popover|ui\.ai\.current_conversation/);
 });
 
-test("settings renders three non-AI sections in one preferences modal", () => {
+test("settings renders split non-AI sections in one preferences modal", () => {
   const html = renderSettings({ weekdays: [1, 2, 3, 4, 5], workday_start: "09:00", workday_end: "18:00" });
   assert.match(html, /<dialog[^>]*class="settings-dialog"/);
-  assert.doesNotMatch(html, /设置分类/);
-  for (const id of ["settings-work-title", "settings-reminder-title", "settings-system-title"]) {
+  assert.match(html, /aria-label="设置分类"/);
+  for (const id of ["settings-work-title", "settings-reminder-title", "settings-system-title", "settings-about-title"]) {
     assert.ok(html.includes(`id="${id}"`));
   }
   assert.doesNotMatch(html, /AI|访问密钥|API Key|测试连接|保存连接|id="ai"/);

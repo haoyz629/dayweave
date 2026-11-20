@@ -76,14 +76,21 @@ impl Database {
         if final_record && input.next_action.is_some() {
             return Err(AppError::Domain("该执行块已有最终结果，不能重复安排".into()));
         }
+        let before_capture = database_history::capture_snapshot(&transaction, &input.plan_block_id)?;
+        let audit_cursor = database_history::audit_cursor(&transaction, &task_id)?;
+        let timestamp = now();
+        if (!in_window || completed || record_only)
+            && database_history::capture_unchanged(&before_capture, input.outcome.as_str(), input.note.as_deref()) {
+            return Ok(task);
+        }
         if !in_window || completed || record_only {
-            database_history::preserve_current(&transaction, &task_id)?;
             let before = execution_snapshot(&transaction, &input.plan_block_id)?;
+            database_history::preserve_current(&transaction, &task_id)?;
             database_results::freeze_block(&transaction, &input.plan_block_id)?;
             transaction.execute("UPDATE plan_blocks SET execution_status = ?2, execution_note = ?3,
                 execution_captured_at = ?4, review_required = CASE WHEN ?5 THEN review_required WHEN ?6 THEN 1 ELSE 0 END,
                 updated_at = ?4 WHERE id = ?1",
-                params![input.plan_block_id, input.outcome.as_str(), input.note, now(), final_record, !in_window])?;
+                params![input.plan_block_id, input.outcome.as_str(), input.note, timestamp, final_record, !in_window])?;
             transaction.execute("UPDATE review_entries SET outcome = ?2, notes = ?3 WHERE plan_block_id = ?1",
                 params![input.plan_block_id, input.outcome.as_str(), input.note])?;
             if in_window {
@@ -91,6 +98,7 @@ impl Database {
             }
             clear_review_draft(&transaction, capture_date, "task", &input.plan_block_id)?;
             sync_block_result(&transaction, &input.plan_block_id)?;
+            database_history::record_capture_change(&transaction, &task_id, capture_date, &before_capture, audit_cursor, &timestamp)?;
             if in_window && completed && !final_record {
                 let payload = FactUndo { task: None, block: Some(before), occurrence: None, review: None,
                     after_facts: fact_fingerprint(&transaction, "execution_capture", &task_id)? };
@@ -124,7 +132,6 @@ impl Database {
                 }
                 Some(start.date_naive().to_string())
             } else { None };
-            let timestamp = now();
             transaction.execute(
                 "INSERT INTO review_entries (id, review_date, plan_block_id, task_id, outcome, actual_minutes,
                     notes, remaining_workload_minutes, followup_action, created_at, updated_at)
@@ -172,8 +179,9 @@ impl Database {
             record_task_change(&transaction, &task_id, "execution_resolved", Some(input.outcome.as_str()),
                 input.next_action.as_deref(), "manual", input.note.as_deref())?;
             clear_review_draft(&transaction, capture_date, "task", &input.plan_block_id)?;
+            sync_block_result(&transaction, &input.plan_block_id)?;
+            database_history::record_capture_change(&transaction, &task_id, capture_date, &before_capture, audit_cursor, &timestamp)?;
         }
-        sync_block_result(&transaction, &input.plan_block_id)?;
         transaction.commit()?;
         self.get_task(&task_id)
     }
@@ -244,6 +252,8 @@ fn complete_result_in_transaction(transaction: &Transaction<'_>, task_id: &str, 
                  params![task_id, date, end, id])?;
          }
      }
+    let audit_cursor = database_history::audit_cursor(transaction, task_id)?;
+    let timestamp = now();
     database_history::preserve_current(transaction, task_id)?;
     if before_task.status == "done" {
         // Explicit completion promotes an automatic result without replacing its workload snapshot.
@@ -259,25 +269,38 @@ fn complete_result_in_transaction(transaction: &Transaction<'_>, task_id: &str, 
         transaction.execute("UPDATE undo_entries SET status = 'conflicted' WHERE target_type = 'execution_capture'
             AND target_id = ?1 AND status = 'available'", [task_id])?;
         if let Some(id) = block_id {
-            transaction.execute("UPDATE plan_blocks SET execution_status = 'completed', execution_note = CASE WHEN ?4 THEN ?2 ELSE COALESCE(?2, execution_note) END,
-                execution_captured_at = ?3, updated_at = ?3 WHERE id = ?1", params![id, note, now(), replace_note])?;
-            transaction.execute("UPDATE review_entries SET outcome = 'completed', notes = CASE WHEN ?3 THEN ?2 ELSE COALESCE(?2, notes) END WHERE plan_block_id = ?1", params![id, note, replace_note])?;
-            let after = serde_json::to_string(&execution_snapshot(transaction, &id)?)?;
-            transaction.execute("UPDATE task_completion_snapshots SET block_after_json = ?2 WHERE task_id = ?1", params![task_id, after])?;
+            let before = database_history::capture_snapshot(transaction, &id)?;
+            let (_, date, _) = database_results::block_context(transaction, &id)?;
+            let result_note = if replace_note { note } else { note.or(before.execution_note.as_deref()) };
+            if !database_history::capture_unchanged(&before, "completed", result_note) {
+                transaction.execute("UPDATE plan_blocks SET execution_status = 'completed', execution_note = CASE WHEN ?4 THEN ?2 ELSE COALESCE(?2, execution_note) END,
+                    execution_captured_at = ?3, updated_at = ?3 WHERE id = ?1", params![id, note, timestamp, replace_note])?;
+                transaction.execute("UPDATE review_entries SET outcome = 'completed', notes = CASE WHEN ?3 THEN ?2 ELSE COALESCE(?2, notes) END WHERE plan_block_id = ?1", params![id, note, replace_note])?;
+                let after = serde_json::to_string(&execution_snapshot(transaction, &id)?)?;
+                transaction.execute("UPDATE task_completion_snapshots SET block_after_json = ?2 WHERE task_id = ?1", params![task_id, after])?;
+                database_history::record_capture_change(transaction, task_id, &date, &before, audit_cursor, &timestamp)?;
+            }
+        } else if let Some(note) = note {
+            let last_note: Option<String> = transaction.query_row("SELECT CASE WHEN change_kind = 'completion_note_changed' THEN new_value ELSE reason END
+                FROM task_changes WHERE task_id = ?1 AND (change_kind = 'completion_note_changed' OR (change_kind = 'status_changed' AND new_value = 'done'))
+                ORDER BY rowid DESC LIMIT 1", [task_id], |row| row.get(0)).optional()?.flatten();
+            if last_note.as_deref() != Some(note) {
+                record_task_change(transaction, task_id, "completion_note_changed", None, Some(note), "manual", Some(note))?;
+            }
         }
         transaction.execute("UPDATE tasks SET updated_at = ?2 WHERE id = ?1", params![task_id, now()])?;
-        if let Some(note) = note { record_task_change(transaction, task_id, "completion_note_changed", None, Some(note), "manual", Some(note))?; }
         return Ok(());
     }
     let mut before_block = None;
     let mut before_review = None;
+    let before_capture = block_id.as_deref().map(|id| database_history::capture_snapshot(transaction, id)).transpose()?;
     if let Some(id) = &block_id {
         before_block = Some(execution_snapshot(transaction, id)?);
         before_review = transaction.query_row("SELECT id, outcome, notes FROM review_entries WHERE plan_block_id = ?1", [id],
             |row| Ok(ReviewResultSnapshot { id: row.get(0)?, outcome: row.get(1)?, notes: row.get(2)? })).optional()?;
         let result_note = if replace_note { note } else { note.or_else(|| before_review.as_ref().and_then(|review| review.notes.as_deref())) };
         transaction.execute("UPDATE plan_blocks SET execution_status = 'completed', execution_note = CASE WHEN ?4 THEN ?3 ELSE COALESCE(?3, execution_note) END,
-            execution_captured_at = ?2, review_required = 0, updated_at = ?2 WHERE id = ?1", params![id, now(), result_note, replace_note])?;
+            execution_captured_at = ?2, review_required = 0, updated_at = ?2 WHERE id = ?1", params![id, timestamp, result_note, replace_note])?;
         if before_review.is_some() {
             transaction.execute("UPDATE review_entries SET outcome = 'completed', notes = CASE WHEN ?3 THEN ?2 ELSE COALESCE(?2, notes) END WHERE plan_block_id = ?1", params![id, note, replace_note])?;
         }
@@ -291,6 +314,10 @@ fn complete_result_in_transaction(transaction: &Transaction<'_>, task_id: &str, 
     }
     transaction.execute("UPDATE tasks SET status = 'done', remaining_workload_minutes = 0, updated_at = ?2 WHERE id = ?1", params![task_id, now()])?;
     record_task_change(transaction, task_id, "status_changed", Some(&before_task.status), Some("done"), "manual", note.or(Some("明确完成整个任务")))?;
+    if let Some(before) = &before_capture {
+        let (_, date, _) = database_results::block_context(transaction, &before.id)?;
+        database_history::record_capture_change(transaction, task_id, &date, before, audit_cursor, &timestamp)?;
+    }
     let mut before_task = before_task;
     if backfill { before_task.status = "scheduled".into(); }
     let payload = FactUndo { task: Some(before_task), block: before_block, occurrence: None, review: before_review,
@@ -361,8 +388,12 @@ pub(super) fn reopen_in_transaction(transaction: &Transaction<'_>, task_id: &str
             WHERE target_type = 'task_completion' AND target_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 1",
             [task_id], |row| row.get::<_, String>(0)).optional()?.map(|json| (json, None)),
     };
-    // Keep these facts in memory until after the legacy fingerprint comparison below.
+    // Preserve legacy facts only after the fingerprint comparison below.
     let history = database_history::current_events(transaction, task_id)?;
+    let audit_cursor = database_history::audit_cursor(transaction, task_id)?;
+    let source: Option<String> = transaction.query_row("SELECT pb.id FROM tasks JOIN plan_blocks pb ON pb.id = tasks.result_block_id WHERE tasks.id = ?1",
+        [task_id], |row| row.get(0)).optional()?;
+    let before_capture = source.as_deref().map(|id| database_history::capture_snapshot(transaction, id)).transpose()?;
     let mut remaining = current.remaining_workload_minutes.filter(|minutes| *minutes > 0)
         .or(current.total_workload_minutes).or(current.estimated_minutes);
     if let Some((json, after_json)) = snapshot {
@@ -417,9 +448,7 @@ pub(super) fn reopen_in_transaction(transaction: &Transaction<'_>, task_id: &str
             clear_block_capture(transaction, task_id, &today, &id, has_review)?;
         }
     }
- database_history::preserve_events(transaction, task_id, &history)?;
- let reopen_date = current.result_date.as_deref().unwrap_or(&today);
- database_history::record_cleared(transaction, task_id, reopen_date, true)?;
+    database_history::preserve_events(transaction, task_id, &history)?;
     if remaining == Some(0) {
         remaining = current.total_workload_minutes.or(current.estimated_minutes).filter(|minutes| *minutes > 0);
     }
@@ -433,6 +462,10 @@ pub(super) fn reopen_in_transaction(transaction: &Transaction<'_>, task_id: &str
         JOIN daily_plans dp ON dp.id = pb.daily_plan_id WHERE pb.task_id = ?1 AND dp.plan_date = ?2 AND dp.status = 'confirmed')",
         params![task_id, current.result_date.as_deref().unwrap_or(&shanghai_today())], |row| row.get(0))?;
     set_task_status(transaction, task_id, if scheduled { TaskStatus::Scheduled } else { TaskStatus::Open }, "manual")?;
+    if let Some(before) = &before_capture {
+        let date = current.result_date.as_deref().unwrap_or(&today);
+        database_history::record_capture_change(transaction, task_id, date, before, audit_cursor, &now())?;
+    }
     transaction.execute("UPDATE undo_entries SET status = 'conflicted' WHERE target_type = 'task_completion'
         AND target_id = ?1 AND status = 'available'", [task_id])?;
     Ok(())

@@ -61,9 +61,11 @@ function harness(overrides = {}) {
   return { state, calls, scroller, effect, flush() { const ready = [...frames.values()]; frames.clear(); ready.forEach(fn => fn()); } };
 }
 
-test("month double-click and keyboard entry share the current-time positioning handler", () => {
+test("month double-click and keyboard entry share the current-time positioning handler while single-click selects", () => {
+  assert.match(text, /onClick=\{\(\) => selectCalendarDate\(cell\.key, true\)\}/);
   assert.match(text, /onDoubleClick=\{\(\) => openTimelineDate\(cell\.key\)\}/);
   assert.match(text, /event\.key === "Enter"\) \{ event\.preventDefault\(\); openTimelineDate\(cell\.key\)/);
+  assert.doesNotMatch(text, /calendar-date-open-hint|双击日期查看当天日程/);
   for (const date of ["2026-10-20", "2026-10-21", "2026-10-22", "2026-11-01"]) {
     const current = harness();
     current.state.openTimelineDate(date);
@@ -80,7 +82,7 @@ test("month double-click and keyboard entry share the current-time positioning h
 
 test("month date pointer selection preserves focus without scrolling the document", () => {
   assert.match(text, /onPointerDown=\{\(event\) => \{ event\.preventDefault\(\); event\.currentTarget\.focus\(\{ preventScroll: true \}\); \}\}/);
-  assert.match(text, /onClick=\{\(\) => \{ setCalendarDateHint\(null\); selectCalendarDate\(cell\.key, true\); \}\}/);
+  assert.match(text, /onClick=\{\(\) => selectCalendarDate\(cell\.key, true\)\}/);
   assert.match(text, /onDoubleClick=\{\(\) => openTimelineDate\(cell\.key\)\}/);
 });
 

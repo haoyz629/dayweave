@@ -3,10 +3,11 @@ import type { Priority } from "./tauri";
 
 export const priorityCopy = { urgent: "P0", high: "P1", medium: "P2", low: "P3" } as const;
 
-export function TaskPrioritySelector({ id, value, disabled = false, onChange }: {
+export function TaskPrioritySelector({ id, value, disabled = false, variant = "dropdown", onChange }: {
   id: string;
   value: Priority | null;
   disabled?: boolean;
+  variant?: "dropdown" | "segmented";
   onChange: (priority: Priority) => void;
 }) {
   const [priorityOpen, setPriorityOpen] = useState(false);
@@ -68,6 +69,49 @@ export function TaskPrioritySelector({ id, value, disabled = false, onChange }: 
     { value: "medium", label: priorityCopy.medium, tone: "medium" },
     { value: "low", label: priorityCopy.low, tone: "low" },
   ];
+
+  if (variant === "segmented") {
+    return (
+      <div
+        id={id}
+        ref={priorityDropdownRef}
+        className={`priority-segmented-control priority-tone-${priority}`}
+        role="radiogroup"
+        aria-label="选择任务优先级"
+        onKeyDown={(event) => {
+          if (disabled || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          const index = priorityOptions.findIndex((opt) => opt.value === priority);
+          const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? priorityOptions.length - 1
+            : (index + (event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : priorityOptions.length - 1)) % priorityOptions.length;
+          const next = priorityOptions[nextIndex];
+          onChange(next.value);
+          priorityDropdownRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[nextIndex]?.focus();
+        }}
+      >
+        {priorityOptions.map((opt) => {
+          const isSelected = opt.value === priority;
+          return (
+            <button
+              key={opt.tone}
+              type="button"
+              role="radio"
+              aria-checked={isSelected}
+              tabIndex={isSelected ? 0 : -1}
+              disabled={disabled}
+              className={`priority-segment-btn priority-tone-${opt.tone}${isSelected ? " is-selected" : ""}`}
+              onClick={() => {
+                if (!disabled) onChange(opt.value);
+              }}
+            >
+              <i className={`priority-dot priority-dot-${opt.tone}`} aria-hidden="true" />
+              <span>{opt.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
 
   return <div ref={priorityDropdownRef} className={`priority-select-control priority-tone-${priority}`} onKeyDown={handlePriorityKeyDown} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPriorityOpen(false); }}>
     <button id={id} type="button" className={`priority-dropdown-trigger${priorityOpen && !disabled ? " is-open" : ""}`} disabled={disabled} aria-label={`优先级：${priorityCopy[priority]}`} aria-haspopup="listbox" aria-controls={`${id}-menu`} aria-expanded={priorityOpen && !disabled} onMouseDown={(e) => e.stopPropagation()} onClick={() => !disabled && setPriorityOpen(!priorityOpen)}>

@@ -127,13 +127,15 @@ test("keyboard creation does not acquire sliding priority", () => {
   assert.equal(state.pointer.current, null);
 });
 
-test("a real block drag still takes precedence over the slide-to-create preview", () => {
+test("a task block drag keeps the task block in its current lane instead of jumping to the rightmost creation lane", () => {
   const { state, event } = harness();
   state.start(event(660));
+  state.pointer.current.y = 690;
+  state.updateSelection();
   state.timelineDrag = { key: "block:target", start: 660, end: 720 };
   const lanes = state.currentLanes();
-  assert.equal(lanes["create:selection"].column, 0);
-  assert.equal(lanes["block:target"].column, 1);
+  assert.equal(lanes["block:target"].column, 0);
+  assert.equal(lanes["create:selection"].column, 1);
 });
 
 test("sliding back into the anchor snap interval clears the preview and cancels on release", () => {

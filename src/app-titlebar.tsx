@@ -5,11 +5,13 @@ import { ProductBrand } from "./logo";
 
 type WindowAction = "minimize" | "toggleMaximize" | "close" | "startDragging";
 
-export function AppTitlebar({ viewSlotRef, onError, onOpenSettings, weekLabel }: {
-  onOpenSettings: () => void;
+export function AppTitlebar({ viewSlotRef, onError, onCreateTask, mobileNavOpen, onToggleMobileNav }: {
   viewSlotRef: (node: HTMLDivElement | null) => void;
   onError: (message: string) => void;
-  weekLabel: string;
+  weekLabel?: string;
+  onCreateTask?: () => void;
+  mobileNavOpen?: boolean;
+  onToggleMobileNav?: () => void;
 }) {
   const [maximized, setMaximized] = useState(false);
   useEffect(() => {
@@ -43,15 +45,17 @@ export function AppTitlebar({ viewSlotRef, onError, onOpenSettings, weekLabel }:
     event.preventDefault();
     void act(event.detail === 2 ? "toggleMaximize" : "startDragging");
   }}>
-    <ProductBrand weekLabel={weekLabel} />
+    <div className="app-titlebar-lead">
+      {onToggleMobileNav && <button type="button" className="app-mobile-nav-button" aria-controls="main-sidebar" aria-expanded={Boolean(mobileNavOpen)} onClick={onToggleMobileNav}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg><span>菜单</span></button>}
+      <ProductBrand />
+    </div>
     <div ref={viewSlotRef} className="app-view-slot" />
     <div className="app-titlebar-actions">
-      <button type="button" className="app-settings-button" aria-label="设置" title="设置" aria-haspopup="dialog" onClick={onOpenSettings}><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9.5 3-.6 2.3-2 .9-2.2-.7-2.5 4.3 1.7 1.6v2.3l-1.7 1.6 2.5 4.3 2.2-.7 2 .9.6 2.2h5l.6-2.2 2-.9 2.2.7 2.5-4.3-1.7-1.6v-2.3l1.7-1.6-2.5-4.3-2.2.7-2-.9L14.5 3z" /><circle cx="12" cy="12.5" r="3" /></svg></button>
-      <span className="app-window-divider" aria-hidden="true" />
+      {onCreateTask && <button type="button" className="app-create-button" onClick={onCreateTask}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg><span>新建安排</span></button>}
       <div className="app-window-controls" role="group" aria-label="窗口控制">
-        <button type="button" aria-label="最小化" title="最小化" onClick={() => void act("minimize")}><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6h10" /></svg></button>
-        <button type="button" aria-label={maximized ? "还原窗口" : "最大化"} title={maximized ? "还原窗口" : "最大化"} onClick={() => void act("toggleMaximize")}><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">{maximized ? <path d="M4 2h6v6M2 4h6v6H2z" /> : <path d="M2 2h8v8H2z" />}</svg></button>
-        <button type="button" className="app-window-close" aria-label="关闭窗口" title="关闭窗口" onClick={() => void act("close")}><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg></button>
+        <button type="button" aria-label="最小化" title="最小化" onClick={() => void act("minimize")}><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0.5 5h9" /></svg></button>
+        <button type="button" aria-label={maximized ? "还原窗口" : "最大化"} title={maximized ? "还原窗口" : "最大化"} onClick={() => void act("toggleMaximize")}><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">{maximized ? <path d="M2.5 0.5h7v7M0.5 2.5h7v7h-7z" /> : <path d="M0.5 0.5h9v9h-9z" />}</svg></button>
+        <button type="button" className="app-window-close" aria-label="关闭窗口" title="关闭窗口" onClick={() => void act("close")}><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="m1 1 8 8m0-8-8 8" /></svg></button>
       </div>
     </div>
   </header>;

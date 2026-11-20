@@ -137,7 +137,7 @@ test("plan draft time editor stays compact and supports focused manual adjustmen
   assert.match(stylesSource, /\.time-rail-track-wrap\.is-collapsed:is\(\.dragging-start, \.dragging-end\) :is\(\.time-rail-endpoint-cards, \.time-rail-endpoint-card\) \{ cursor: grabbing; \}/);
   assert.doesNotMatch(stylesSource, /--handle-shift/);
   assert.match(stylesSource, /\.time-rail-track-wrap\.active-start \.time-rail-endpoint-card\.start/);
-  assert.match(appSource, /\{ minutes: 120, label: "2 小时" \}/);
+  assert.match(appSource, /<TaskTimeRangeFields[^>]+maxDuration=\{endDomainMax - safeStartMinute\}[^>]+onDuration=\{setDuration\}/);
   assert.match(appSource, /busy \? "正在保存…" : "保存调整"/);
   assert.doesNotMatch(appSource, /plan-draft-time-summary/);
   assert.doesNotMatch(appSource, /输入开始时间会按原时长同步结束时间/);
@@ -200,7 +200,7 @@ test("ordinary tasks use one recycle-bin path instead of a cancellation state", 
   assert.doesNotMatch(appSource, /type TaskView = .*"cancelled"/);
   assert.equal(appSource.includes("不再进行"), false);
   assert.equal(appSource.includes("task-more-actions"), false);
-  assert.match(appSource, /const taskStatusFilterOrder: TaskView\[\] = \["scheduled", "draft", "recurring", "open", "not_completed", "done", "deleted"\]/);
+  assert.match(appSource, /const taskStatusFilterOrder: TaskView\[\] = \["all", "scheduled", "draft", "recurring", "open", "not_completed", "done", "deleted"\]/);
   assert.match(appSource, /className="task-compact-trash" disabled=\{busy\} onClick=\{\(\) => requestTaskChange\(\{ kind: "trash" \}\)\}/);
   assert.equal(stylesSource.includes("status-row-cancelled"), false);
   assert.equal(stylesSource.includes("terminal-task-status.cancelled"), false);
@@ -233,13 +233,14 @@ test("recycle cleanup stays beside permanent deletion and task headings omit eve
   const actions = appSource.slice(appSource.indexOf("function RecycleBinActions("), appSource.indexOf("function TaskDetailResources("));
   assert.match(actions, /onClick=\{onRestore\}[\s\S]*?<div className="task-detail-delete-group">\s*<p[^>]*>[\s\S]*?recycleCleanupMessage\(deletedAt, nowMs\)[\s\S]*?<button[^>]*onClick=\{onPermanentDelete\}/);
   assert.match(stylesSource, /\.task-detail-delete-group \{[^}]*display: flex;[^}]*min-width: 0;[^}]*align-items: center;/);
-  const content = appSource.slice(appSource.indexOf("function TaskDetailContent("), appSource.indexOf("function DeletedTaskDetails("));
-  const heading = content.match(/<section[^>]*ordinary-task-detail[\s\S]*?<header>[\s\S]*?<\/header>/)?.[0];
+  const hero = appSource.slice(appSource.indexOf("function TaskDetailHero("), appSource.indexOf("function TaskDetailContent("));
+  const heading = hero.match(/<header[^>]*detail-hero-title-block[\s\S]*?<\/header>/)?.[0];
   assert.ok(heading);
   assert.match(heading, /<h2 title=\{task.title\}>\{task.title\}<\/h2>/);
   assert.doesNotMatch(heading, /<time\b|task\.(?:completed_at|deleted_at|updated_at)|完成时间|移入时间|事件时间/);
+  assert.match(hero, /priority && <span className=\{`priority-badge priority-\$\{priority\}`\}>\{priorityCopy\[priority\]\}<\/span>/);
+  const content = appSource.slice(appSource.indexOf("function TaskDetailContent("), appSource.indexOf("function DeletedTaskDetails("));
   assert.match(content, /<dt><Icon name="clock" size=\{14\} \/>截止时间/);
-  assert.match(content, /task\.priority && <div><dt><Icon name="deadline" size=\{14\} \/>优先级/);
 
 });
 
@@ -271,13 +272,14 @@ test("confirmed plans expose direct operations without a separate adjustment mod
 
 test("timeline detail flows provide contextual return actions", () => {
   assert.doesNotMatch(appSource, /className="schedule-picker-back"/);
-  assert.match(appSource, /planDraftTimeEdit\.sourceBlockId && <button[^>]*className="timeline-panel-back"[^>]*aria-label="返回任务块详情"/);
+  assert.match(appSource, /planDraftTimeEdit\.sourceBlockId && <TaskContextReturnButton label="返回任务块详情" disabled=\{busy\} onClick=\{returnToSelectedBlockDetails\}/);
+  assert.match(appSource, /<TaskContextReturnButton label="返回任务块详情" disabled=\{savingRecurringChange \|\| Boolean\(quickCompletingBlockId\)\} onClick=\{returnToRecurringOccurrenceDetails\}/);
   assert.match(appSource, /<TaskPageHeader task=\{selectedTask\} editing busy=\{busy\} onBack=\{\(\) => void requestTaskChange\(\{ kind: "detail" \}\)\} \/>/);
-  assert.match(appSource, /className="task-context-return-icon" aria-label=\{backLabel \?\? \(editing \? "返回任务详情"/);
+  assert.match(appSource, /<TaskContextReturnButton label=\{backLabel \?\? \(editing \? "返回任务详情"/);
   assert.match(appSource, /onOpenTasks\(taskId, \{ date: selectedDate, blockId \}\)/);
   assert.match(appSource, /setSelection\(null\);\s*setExecutionDraft\(null\);\s*setExecutionMessage\(""\);\s*const frame/);
   assert.match(appSource, /requestNavigation\(\{ active: "今日", timelineReturnContext: returnContext \}\)/);
-  assert.match(stylesSource, /\.timeline-panel-back:focus-visible/);
+  assert.match(stylesSource, /\.timeline-panel-heading > \.task-context-return-icon \{[^}]+width: 32px; height: 32px;/);
   assert.match(stylesSource, /\.task-context-return-icon:focus-visible/);
 });
 
@@ -317,25 +319,23 @@ test("result notes stay visible and editable without reasons or followup schedul
   assert.match(appSource, /<label className="floating-execution-note"/);
   assert.doesNotMatch(appSource, /draft\.result !== null && <label className="floating-execution-note"/);
   assert.doesNotMatch(appSource, /execution-add-note|incompleteReasonOptions|未完成原因|TaskNextActionFields/);
-  assert.match(appSource, /disabled=\{savingExecution \|\| busy \|\| loading \|\| Boolean\(quickCompletingBlockId\) \|\| !executionDraftChanged\(selectedBlock, executionDraft, selectedTask\) \|\| \(!executionDraft\.outcome && !executionDraft\.note\.trim\(\) && selectedBlockDialog\?\.status !== "completed"\)\}/);
+  assert.match(appSource, /disabled=\{savingExecution \|\| busy \|\| loading \|\| Boolean\(quickCompletingBlockId\) \|\| !executionDraftChanged\(selectedBlock, executionDraft, selectedTask\)\}/);
 });
 
 
 test("calendar, weekly overview and daily plan share the schedule workspace", () => {
   assert.doesNotMatch(appSource, /aria-label="今日页视图"/);
   assert.match(appSource, /className="timeline-view-switch" role="group" aria-label="日程视图"/);
-  assert.match(appSource, /aria-pressed=\{todayView === "timeline"\}[^\n]+onClick=\{\(\) => openTimelineDate\(selectedDate\)\}>日视图<\/button>/);
-  assert.match(appSource, /aria-pressed=\{todayView === "week"\}[^\n]+setTodayView\("week"\)[^\n]+>周视图<\/button>/);
+  assert.match(appSource, /aria-pressed=\{todayView === "timeline"\} aria-label="日视图"[^\n]+onClick=\{\(\) => openTimelineDate\(selectedDate\)\}>日<\/button>/);
+  assert.match(appSource, /aria-pressed=\{todayView === "week"\} aria-label="周视图"[^\n]+setTodayView\("week"\)[^\n]+>周<\/button>/);
   assert.match(appSource, /todayView === "week" \? <WeekTimeline selectedDate=\{selectedDate\}/);
   assert.doesNotMatch(appSource, /周视图暂未开放/);
-  assert.match(appSource, /aria-pressed=\{todayView === "month"\}[^\n]+onClick=\{returnToMonth\}>月视图<\/button>/);
+  assert.match(appSource, /aria-pressed=\{todayView === "month"\} aria-label="月视图"[^\n]+onClick=\{returnToMonth\}>月<\/button>/);
   assert.match(stylesSource, /\.timeline-view-switch button\.is-active/);
+  assert.match(appSource, /onClick=\{\(\) => selectCalendarDate\(cell\.key, true\)\}/);
   assert.match(appSource, /onDoubleClick=\{\(\) => openTimelineDate\(cell\.key\)\}/);
   assert.match(appSource, /function returnToMonth\(\) \{[\s\S]*?setTodayView\("month"\)/);
-  assert.doesNotMatch(appSource, /CalendarOverviewButton|aria-label="返回月历"|calendarSlotRef/);
-  assert.match(appSource, /const returnToMonthOnEscape = \(event: globalThis\.KeyboardEvent\)/);
-  assert.match(appSource, /document\.querySelector\('\[role="dialog"\], \[role="alertdialog"\]'\)/);
-  assert.match(appSource, /const mondayBasedIndex = weekdayIndex < 0 \? 0 : \(weekdayIndex \+ 6\) % 7/);
+  assert.doesNotMatch(appSource, /CalendarOverviewButton|aria-label="返回月历"|calendarSlotRef|returnToMonthOnEscape/);
   const dateContent = readFileSync(new URL("./timeline-week-date-content.tsx", import.meta.url), "utf8");
   assert.match(appSource, /<TimelineWeekDateContent date=\{date\} weekday=\{weekday\} \/>/);
   assert.match(dateContent, /className="timeline-week-calendar-meta"/);
@@ -398,7 +398,7 @@ test("task editor uses shared semantic colors and keeps recycle actions in place
   for (const label of ["P0", "P1", "P2", "P3"]) assert.ok(prioritySource.includes(`"${label}"`));
   assert.doesNotMatch(prioritySource, /紧急|高优先级|中优先级|低优先级/);
   assert.match(appSource, /status=\{statusCopy\[taskListStatus\(task\)\]\} statusTone=\{taskListStatus\(task\)\}/);
-  assert.match(appSource, /status="待确认" statusTone="draft"/);
+  assert.match(appSource, /status="草稿" statusTone="draft"/);
   assert.match(stylesSource, /--task-state-draft:/);
   assert.match(stylesSource, /--task-state-open:/);
   assert.match(stylesSource, /--task-state-scheduled:/);
@@ -437,7 +437,7 @@ test("cross-day daily workload input resets focus styles and recurring items use
   assert.match(appSource, /className="apple-schedule-rows"/);
   assert.match(appSource, /schedule-validity-presets/);
   assert.match(appSource, /schedule-time-control/);
-  assert.match(appSource, /time-duration-presets/);
+  assert.match(appSource, /!inputsOnly && showPresets && <TaskDurationPresets/);
   assert.match(appSource, /starts_on:\s*draftStartsOn,\s*ends_on:\s*draftEndsOn/);
 });
 test("switching between task and recurring tabs preserves inputs without modal prompt", () => {
@@ -483,8 +483,8 @@ test("draft capsule keeps layout stable during autosave and active editing", () 
   // Capsule status badge has fixed min-width and alignment to prevent width-shift jitter
   assert.match(stylesSource, /\.task-capsule-status\s*\{[\s\S]*?min-width:\s*48px;[\s\S]*?justify-content:\s*center;[\s\S]*?box-sizing:\s*border-box;/);
 
-  // Both unpersisted and persisted draft capsules use stable "待确认" status
-  assert.match(appSource, /status="待确认"\s+statusTone="draft"/);
+  // Both unpersisted and persisted draft capsules use the stable "草稿" status
+  assert.match(appSource, /status="草稿"\s+statusTone="draft"/);
 
   // Draft capsules do not toggle raw "保存中" or "草稿已保存" inside the capsule status pill
   assert.doesNotMatch(appSource, /status=\{draftSaving \? "保存中"/);
@@ -553,7 +553,7 @@ test("recurring task draft autosave, draft list presentation, and label unificat
   assert.doesNotMatch(appSource, /生效开始/);
 
   // Type is a property of each persisted draft; both variants share one list and save flow.
-  assert.match(appSource, /draft: taskDrafts\.length/);
+  assert.match(appSource, /taskViewCounts\(tasks, taskDrafts\.length, recurringItems\)/);
   assert.match(appSource, /visibleTaskDrafts\.map/);
   assert.match(appSource, /const itemType = isEditingActiveDraft \? createItemType : item.item_type/);
   assert.match(appSource, /confirmCreationDraft\(persisted\)/);
@@ -574,9 +574,10 @@ test("recurring task page keeps frequency controls and shares cross-day schedule
   assert.match(appSource, /recurring-weekday-btn/);
   assert.match(stylesSource, /\.recurring-weekday-btn\.is-active\s*\{/);
 
-  // Monthly 3-column inline grid & info banner
+  // Monthly 3-column inline grid without redundant skip-month banner, plus cannot-save empty preview copy
   assert.match(appSource, /每月日期/);
-  assert.match(appSource, /若当月没有所选日期，将跳过该月。/);
+  assert.doesNotMatch(appSource, /若当月没有所选日期，将跳过该月。/);
+  assert.match(appSource, /暂无匹配发生日，不能保存/);
   assert.doesNotMatch(appSource, /自动适配到当月最后一天/);
   // User explicitly discarded the switch to weekly shortcut button
   assert.doesNotMatch(appSource, /切换为每周重复/);
@@ -594,7 +595,7 @@ test("execution records live in timeline dialogs, not a separate Today subview",
   assert.match(navigation, /label: "今日"/);
   assert.match(navigation, /label: "任务"/);
   assert.doesNotMatch(navigation, /label: "设置"/);
-  assert.match(appSource, /onOpenSettings=\{\(\) => setSettingsOpen\(true\)\}/);
+  assert.match(appSource, /className="settings-nav-btn"[\s\S]*?onClick=\{\(\) => setSettingsOpen\(true\)\}/);
   assert.doesNotMatch(navigation, /label: "复盘"/);
   assert.doesNotMatch(appSource, /today-section-tabs|todaySection|<ReviewPage|复盘与记录/);
   assert.match(appSource, /normalizeTodayNavigation\(intent.active\)/);
@@ -640,13 +641,13 @@ test("recurring items allow optional per-occurrence completion without changing 
   assert.doesNotMatch(appSource, /到期展示，复盘时处理/);
 });
 
-test("Escape returns to month only when no floating dialog is open", () => {
-  assert.match(appSource, /if \(!visible \|\| todayView !== "timeline"\) return;/);
-  assert.match(appSource, /\[todayView, selection, Boolean\(timelineTooltip\), visible\]/);
+test("timeline does not bind an extra Escape-to-month view shortcut", () => {
+  assert.doesNotMatch(appSource, /returnToMonthOnEscape/);
 });
 
-test("task status filters are flat chips and empty states keep concise copy", () => {
-  assert.match(appSource, /id="task-status-filter"[^>]*task-tag-filter-options[^>]*statusFilterExpanded/);
+test("status and tag dropdown filters and empty states keep concise copy", () => {
+  assert.match(appSource, /<TaskStatusDropdown id="task-status-filter"/);
+  assert.match(appSource, /<TaskTagFilter id="task-tag-filter"/);
   assert.match(appSource, /className="ledger-empty"><Icon name=\{taskViewIcon\[view\]\}/);
   assert.match(appSource, /className="inspector-empty"><Icon name=\{taskViewIcon\[view\]\}/);
   assert.match(appSource, /const taskEmptyCopy: Record<TaskView, string>/);

@@ -48,6 +48,26 @@ test("note-only task history names the action instead of reporting an incomplete
   assert.doesNotMatch(html, /任务未完成|状态更新为/);
 });
 
+test("save deltas stay independent at the same timestamp and distinguish clearing a note", () => {
+  const state = { React, Icon: () => null, taskListStatus: () => "scheduled" };
+  vm.runInNewContext(compile(["taskDisplayHistory", "TaskStatusHistory"].map(name => functions.get(name)).join("\n")), state);
+  const date = "2026-11-01";
+  const task = { id: "t", created_at: date, earliest_start_date: date, due_date: date };
+  const event = { occurred_at: `${date}T12:00:00+08:00`, plan_date: date, status: null, note: null };
+  const history = [
+    { ...event, id: "capture:1", kind: "note", note: "111222" },
+    { ...event, id: "capture:2", kind: "execution", status: "done" },
+    { ...event, id: "capture:3", kind: "cleared", status: "scheduled" },
+    { ...event, id: "capture:4", kind: "note", note_cleared: true },
+  ];
+  const html = renderToStaticMarkup(state.TaskStatusHistory({ task, metadata: { history }, busy: false }));
+  assert.equal((html.match(/<li /g) ?? []).length, 4);
+  assert.equal((html.match(/111222/g) ?? []).length, 1);
+  assert.match(html, /<strong>随手记<\/strong>.*111222.*<strong>任务已完成<\/strong>.*<strong>已取消任务完成<\/strong>.*已清空随手记/);
+  const independent = { ...event, id: "independent", kind: "status", status: "done" };
+  assert.equal(state.taskDisplayHistory(task, [history[1], independent]).length, 2);
+});
+
 function navigationHarness(context, dirty = false) {
   const state = { active: "任务", timelineReturnContext: context, selectedDate: "2026-11-01", planPreview: null, taskEditorDirty: dirty, settingsEditorDirty: false, normalizeTodayNavigation: active => ({ active }), refreshSchedule() {}, setScheduleLoading() {}, setSelectedDate(date) { state.selectedDate = date; }, setRequestedTaskView() {}, setTimelineReturnContext(value) { state.timelineReturnContext = value; }, setActive(value) { state.active = value; }, setMobileNavOpen() {}, setPendingNavigation(value) { state.pendingNavigation = value; } };
   vm.runInNewContext(compile(["requestNavigation", "applyNavigation", "resolvePendingNavigation"].map(name => functions.get(name)).join("\n")), state);

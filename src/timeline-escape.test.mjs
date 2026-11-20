@@ -10,7 +10,7 @@ let panelKeyDown, closePanel;
 function collect(node) {
   if (ts.isFunctionDeclaration(node) && node.name?.text === "closeTimelinePanel") closePanel = node.getText(source);
   if (ts.isCallExpression(node) && node.expression.getText(source) === "useEffect"
-    && (node.arguments[0]?.getText(source).includes("if (!timelineTooltip) return;") || node.arguments[0]?.getText(source).includes("const returnToMonthOnEscape"))) {
+    && node.arguments[0]?.getText(source).includes("if (!timelineTooltip) return;")) {
     effects.push({ body: node.arguments[0].getText(source), deps: node.arguments[1].getText(source) });
   }
   if (ts.isJsxOpeningElement(node) && node.attributes.properties.some(attr => attr.name?.getText(source) === "id" && attr.initializer?.getText(source) === '"timeline-context-panel"')) {
@@ -19,7 +19,7 @@ function collect(node) {
   ts.forEachChild(node, collect);
 }
 collect(source);
-assert.equal(effects.length, 2);
+assert.equal(effects.length, 1);
 assert.ok(panelKeyDown);
 const compile = code => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 
@@ -70,19 +70,19 @@ function harness(overrides = {}) {
   };
 }
 
-test("Escape dismisses a newly opened task tooltip before month navigation, then the next Escape returns", () => {
+test("Escape dismisses a newly opened task tooltip and keeps the user on the timeline without switching to month view", () => {
   const h = harness();
   h.state.timelineTooltip = { title: "task" };
   h.render();
   h.state.document.activeElement = new (h.state.HTMLElement)(h.card);
   const event = h.key();
-  assert.equal(h.state.todayView, "timeline", "an earlier navigation listener must not leave the timeline");
+  assert.equal(h.state.todayView, "timeline");
   assert.equal(h.state.timelineTooltip, null);
   assert.equal(event.defaultPrevented, true);
   assert.equal(h.state.document.activeElement, h.trigger);
   h.render();
   h.key();
-  assert.equal(h.state.todayView, "month");
+  assert.equal(h.state.todayView, "timeline");
 });
 
 test("task detail panel consumes Escape even when closing immediately updates its selection", () => {

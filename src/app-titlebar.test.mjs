@@ -32,7 +32,7 @@ function mount({ desktop = true, fail = null, delayedListener = false } = {}) {
     if (id === "./logo") return { ProductBrand: () => null };
     throw new Error(id);
   }});
-  const tree = exports.AppTitlebar({ viewSlotRef() {}, weekLabel: "2026 第44周", onError: error => errors.push(error), onOpenSettings: () => calls.push("settings") });
+  const tree = exports.AppTitlebar({ viewSlotRef() {}, weekLabel: "2026 第44周", onError: error => errors.push(error) });
   const cleanups = effects.map(run => run());
   const nodes = [];
   function visit(node) { if (!node?.props) return; nodes.push(node); const children = node.props.children; (Array.isArray(children) ? children : [children]).forEach(visit); }
@@ -51,17 +51,16 @@ test("window buttons call native close request, never destroy, and refresh maxim
   assert.doesNotMatch(source, /\.destroy\(/);
 });
 
-test("settings gear precedes the divider outside native window controls", () => {
+test("title bar keeps only native window controls; settings moved to the sidebar footer", () => {
   const h = mount();
-  h.button("设置").props.onClick();
-  assert.deepEqual(h.calls, ["settings"]);
-  assert.equal(h.button("设置").props["aria-haspopup"], "dialog");
-  const actions = h.tree.props.children.find(node => node.props?.className === "app-titlebar-actions");
-  const [settings, divider, controls] = actions.props.children;
-  assert.equal(settings, h.button("设置"));
-  assert.equal(divider.props.className, "app-window-divider");
-  assert.equal(controls.props.className, "app-window-controls");
-  assert.deepEqual(Array.from(controls.props.children, node => node.props["aria-label"]), ["最小化", "最大化", "关闭窗口"]);
+  assert.equal(h.button("设置"), undefined);
+  assert.equal(h.button("偏好设置"), undefined);
+  const list = value => (Array.isArray(value) ? value : [value]).filter(Boolean);
+  const actions = list(h.tree.props.children).find(node => node.props?.className === "app-titlebar-actions");
+  const controls = list(actions.props.children);
+  assert.equal(controls.length, 1);
+  assert.equal(controls[0].props.className, "app-window-controls");
+  assert.deepEqual(Array.from(list(controls[0].props.children), node => node.props["aria-label"]), ["最小化", "最大化", "关闭窗口"]);
   h.cleanup();
 });
 
@@ -103,8 +102,9 @@ test("frameless configuration grants only required window mutation actions and r
   assert.match(native, /ui\.desktop\.close_to_tray/);
 });
 
-test("brand week uses the existing ISO week calculation including year boundaries", () => {
+test("ISO week helper handles year boundaries while titlebar stays compact at 42px", () => {
   const app = read("./App.tsx");
+  const css = read("./app-titlebar.css");
   const ast = ts.createSourceFile("App.tsx", app, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const fn = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "isoWeekParts");
   const context = vm.createContext({});
@@ -114,23 +114,23 @@ test("brand week uses the existing ISO week calculation including year boundarie
     assert.equal(result.year, year, date);
     assert.equal(result.week, week, date);
   }
-  assert.match(app, /const brandWeek = isoWeekParts\(today\)/);
-  assert.ok(app.includes('weekLabel={`${brandWeek.year} 第${brandWeek.week}周`}'));
-  assert.match(source, /<ProductBrand weekLabel=\{weekLabel\} \/>/);
+  assert.match(source, /<ProductBrand \/>/);
+  assert.match(css, /\.desktop-app \{ --app-titlebar-height: 42px;/);
+  assert.match(css, /\.app-window-controls button \{ display: grid; width: 46px; height: 100%;/);
+  assert.match(css, /\.app-window-controls \.app-window-close:hover \{ color: #ffffff; background: #e81123; \}/);
 });
 
-test("brand renders the week beside its name and keeps both subtitle languages", () => {
+test("brand renders single-line Chinese/English title without second-line slogan clutter", () => {
   const brand = read("./logo.tsx");
   const ast = ts.createSourceFile("logo.tsx", brand, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const fn = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "ProductBrand");
   const context = vm.createContext({ React, Logo: () => null, CopySeparator });
   vm.runInContext(ts.transpileModule(fn.getText(ast).replace("export ", ""), { compilerOptions: { jsx: ts.JsxEmit.React } }).outputText, context);
-  const html = renderToStaticMarkup(context.ProductBrand({ weekLabel: "2026 第44周" }));
-  assert.match(html, /product-brand-name-row/);
-  assert.match(html, /<span class="product-brand-week">2026 第44周<\/span>/);
-  assert.match(html, /让今天，井然有序/);
-  assert.match(html, /Bring order to your day\./);
-  assert.doesNotMatch(renderToStaticMarkup(context.ProductBrand()), /product-brand-week/);
+  const defaultHtml = renderToStaticMarkup(context.ProductBrand());
+  assert.match(defaultHtml, /product-brand-name-row/);
+  assert.match(defaultHtml, /今序[\s\S]*Dayweave/);
+  assert.doesNotMatch(defaultHtml, /product-brand-copy|product-brand-week/);
+  assert.match(renderToStaticMarkup(context.ProductBrand({ weekLabel: "2026 第44周" })), /<span class="product-brand-week">2026 第44周<\/span>/);
 });
 
 test("calendar view switch fills three equal columns with uniform frame insets", () => {
@@ -142,4 +142,25 @@ test("calendar view switch fills three equal columns with uniform frame insets",
   assert.match(frame, /box-sizing: border-box; width: 204px; height: 34px; padding: 3px; border: 1px/);
   assert.match(css, /\.app-titlebar \.timeline-view-switch button \{ width: 100%; min-width: 0; min-height: 26px; height: 26px;/);
   assert.match(css, /@media \(max-width: 600px\)[\s\S]*\.app-titlebar \.timeline-view-switch \{ width: 170px; \}/);
+});
+
+test("title bar exposes optional task creation without adding keyboard shortcut badges", () => {
+  let created = 0;
+  const exports = {};
+  vm.runInNewContext(compiled, { exports, require(id) {
+    if (id === "react") return { useState: value => [value, () => {}], useEffect: () => {} };
+    if (id === "react/jsx-runtime") return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
+    if (id === "@tauri-apps/api/core") return { isTauri: () => true };
+    if (id === "@tauri-apps/api/window") return { getCurrentWindow: () => ({}) };
+    if (id === "./logo") return { ProductBrand: () => null };
+    throw new Error(id);
+  }});
+  const tree = exports.AppTitlebar({ viewSlotRef() {}, weekLabel: "2026 第44周", onError() {}, onCreateTask: () => { created++; } });
+  const nodes = [];
+  (function visit(node) { if (!node?.props) return; nodes.push(node); const c = node.props.children; (Array.isArray(c) ? c : [c]).forEach(visit); })(tree);
+  const createBtn = nodes.find(node => node.props?.className === "app-create-button");
+  assert.ok(createBtn);
+  createBtn.props.onClick();
+  assert.equal(created, 1);
+  assert.doesNotMatch(source, /<kbd\b/);
 });

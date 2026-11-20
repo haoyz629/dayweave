@@ -29,7 +29,7 @@ const handlerCode = ts.transpileModule(snippets.join("\n"), { compilerOptions: {
 function editor({ saved = true } = {}) {
   const defaults = () => ({ title: "", notes: "", tags: [], priority: "high", earliest_start_date: "2026-09-25", earliest_start_time: "10:00", due_date: "2026-09-25", due_time: "11:00" });
   const taskForm = { ...defaults(), title: "团队周会", notes: "准备材料" };
-  const recurringDefaults = () => ({ title: "", notes: "", tags: [], frequency: "weekly", weekdays: [1], display_time: "09:00", display_duration_minutes: 60, ends_on: "" });
+  const recurringDefaults = () => ({ title: "", notes: "", tags: [], frequency: "weekly", weekdays: [1], starts_on: "2026-09-23", ends_on: "", display_time: "09:00", display_duration_minutes: 60 });
   const db = new Map();
   let sequence = 0;
   const makeDraft = (input) => ({ ...input, id: `draft-${++sequence}`, version: 1, draft_kind: "create", item_type: input.item_type ?? "task" });
@@ -46,6 +46,7 @@ function editor({ saved = true } = {}) {
     today: "2026-09-23", setTimeout, Date: class extends Date { static now() { return Date.parse("2026-09-23T12:00:00+08:00"); } }, syncFormCommonFields, validDraftClock: () => true,
     historicalTaskCreationError, historicalTaskCompletionLocked, isHistoricalResultDate, resultToday, HISTORICAL_TASK_CREATION_NOTE,
     recurringTimeBlockIssue,
+    recurringItemPreviewDates: (form) => form.starts_on ? [form.starts_on] : [],
     normalizeTaskWorkloadAfterScheduleChange: (_previous, next) => next,
     taskDraftInputForForm: (form) => ({ ...form }), taskFormForPersistedDraft: (draft) => ({ ...defaults(), ...draft }),
     uiErrorMessage: String, preferredSelection: { current: null }, taskListStatus,

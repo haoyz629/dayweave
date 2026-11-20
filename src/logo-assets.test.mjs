@@ -68,21 +68,17 @@ test("homepage uses the shared tile without a second CSS shadow",()=>{
   assert(!css.includes('.product-brand-logo img { filter: drop-shadow('));
   assert(asset("index.html").includes('/src/assets/logo-favicon.ico'));
 });
-test("integrated brand keeps approved logo assets, shared separators and native text",()=>{
+test("integrated brand keeps approved logo assets, shared separators and single-line native text",()=>{
   const component=asset("src/logo.tsx"), css=asset("src/app-titlebar.css");
   assert(!component.includes('brand-wordmark.svg'));
   const name = component.match(/<h1 className="product-brand-name">([\s\S]*?)<\/h1>/)?.[1];
   assert(name, "Brand name heading is present");
-  assert.match(name, /今序[\s\S]+dayweave/);
+  assert.match(name, /今序[\s\S]+Dayweave/);
   assert(component.includes('import { CopySeparator } from "./copy-separator";'));
   const separator = "<CopySeparator />";
   assert(name.includes(separator), "Brand name uses shared decorative separator markup");
-  const copy = component.match(/<p className="product-brand-copy">([\s\S]*?)<\/p>/)?.[1];
-  assert(copy?.includes(separator), "Name and tagline use identical separator markup");
-  assert.match(component, /className="product-brand-chinese">让今天，井然有序<\/span>/);
-  assert(!component.includes('让今天，井然有序。'));
-  assert(component.includes('Bring order to your day.'));
-  assert.match(css,/product-brand-logo \{[^}]*width: 44px; height: 44px/);
+  assert(!component.includes("product-brand-copy"), "Compact Windows 11 titlebar omits second-line slogan");
+  assert.match(css,/product-brand-logo \{[^}]*width: 24px; height: 24px/);
   assert.match(css,/product-brand-logo img \{ width: 100%; height: 100%; \}/);
   assert(!css.includes('filter: drop-shadow('));
 });

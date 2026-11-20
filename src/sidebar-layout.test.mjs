@@ -5,57 +5,47 @@ import test from "node:test";
 const asset = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 const app = asset("./App.tsx");
 const styles = asset("./styles.css");
+const colors = asset("./color-system.css");
 const brand = asset("./logo.tsx");
 
-test("sidebar uses a responsive proportion without draggable or saved width controls", () => {
+test("prototype sidebar uses 236px expanded and preserves the saved 52px collapsed rail", () => {
   assert.doesNotMatch(app, /ShellResizeSession|shellResize|resizingShell|sidebarWidth|shell_sidebar_width|shell-resize-handle/);
   assert.match(app, /className="shell-divider" aria-hidden="true"/);
-  assert.match(styles, /\.next-shell \{[^}]*--sidebar-width: max\(252px, 18vw\);[^}]*grid-template-columns: var\(--sidebar-width\) 1px minmax\(0, 1fr\)/);
-  assert.match(styles, /\.next-shell\.sidebar-collapsed \{[^}]*--sidebar-width: 52px/);
+  assert.match(colors, /\.next-shell \{ --sidebar-width: 236px/);
+  assert.match(colors, /\.next-shell\.sidebar-collapsed \{ --sidebar-width: 52px/);
+  assert.match(styles, /grid-template-columns: var\(--sidebar-width\) 1px minmax\(0, 1fr\)/);
   assert.match(app, /setUiSetting\(SHELL_SIDEBAR_COLLAPSED_SETTING, String\(nextCollapsed\)\)/);
 });
 
-test("brand lives once in the integrated topbar, not in the collapsible sidebar", () => {
+test("brand lives once in the integrated 42px topbar, not in the collapsible sidebar", () => {
   const titlebar = asset("./app-titlebar.tsx");
-  assert.match(titlebar, /<ProductBrand weekLabel=\{weekLabel\} \/>/);
+  const chrome = asset("./app-titlebar.css");
+  assert.match(titlebar, /<ProductBrand \/>/);
   assert.doesNotMatch(app, /<ProductBrand/);
   assert.match(app, /<AppTitlebar viewSlotRef=\{setHeaderViewSlot\} onError=\{notifyWindowError\}/);
   assert.doesNotMatch(app, /calendarSlotRef|setHeaderCalendarSlot/);
-  assert.match(brand, /<h1 className="product-brand-name">今序<CopySeparator \/>dayweave<\/h1>/);
-  assert.match(brand, /<p className="product-brand-copy"><span className="product-brand-chinese">让今天，井然有序<\/span><CopySeparator \/>/);
-  assert.match(brand, /lang="en">Bring order to your day\./);
-});
-
-test("integrated brand uses one subdued bilingual subtitle and the original logo", () => {
-  const chrome = asset("./app-titlebar.css");
-  assert.match(chrome, /\.app-titlebar \.product-brand-name \{[^}]*font: 650 15px\/18px var\(--jx-font-sans\)/);
-  assert.match(chrome, /\.app-titlebar \.product-brand-copy \{[^}]*color: var\(--color-muted\); font: 400 12px\/16px/);
-  assert.match(chrome, /\.app-titlebar \.product-brand-logo \{[^}]*width: 44px; height: 44px/);
+  assert.match(brand, /<h1 className="product-brand-name">今序<CopySeparator \/><span lang="en">Dayweave<\/span><\/h1>/);
+  assert.doesNotMatch(brand, /product-brand-copy/);
+  assert.match(chrome, /--app-titlebar-height: 42px/);
+  assert.match(chrome, /\.app-titlebar \.product-brand-name \{[^}]*font: 600 13px\/18px var\(--jx-font-sans\)/);
+  assert.match(chrome, /\.app-titlebar \.product-brand-logo \{[^}]*width: 24px; height: 24px/);
   assert.match(brand, /from "\.\/assets\/logo-light\.svg"/);
 });
 
-test("create and navigation actions share an intermediate width without changing the collapsed icon rail", () => {
-  assert.match(styles, /\.next-sidebar \.sidebar-brand, \.next-sidebar \.next-create, \.next-sidebar nav \{ width: calc\(100% - 10px\); max-width: 280px; align-self: center/);
-  assert.match(styles, /\.sidebar-collapsed \.next-sidebar \.next-create \{[^}]*width: 40px/);
-  assert.match(styles, /\.sidebar-collapsed \.next-sidebar nav \{[^}]*width: 100%/);
-  assert.match(styles, /\.sidebar-collapsed \.sidebar-nav-selection \{[^}]*width: 40px/);
-});
-
-test("create action is a compact flat button while navigation keeps the 52px step", () => {
-  assert.match(styles, /--sidebar-action-height: 52px/);
-  assert.match(styles, /\.next-sidebar \.next-create \{[^}]*height: 40px; min-height: 40px/);
-  assert.match(styles, /\.next-sidebar nav \{ --sidebar-nav-height: var\(--sidebar-action-height\); --sidebar-nav-step: calc\(var\(--sidebar-nav-height\) \+ 8px\)/);
-  assert.match(styles, /\.sidebar-collapsed \.next-sidebar \.next-create \{[^}]*height: 44px; min-height: 44px/);
-});
-
-test("create action uses the approved green palette with flat styling in both themes", () => {
-  assert.match(styles, /\.next-sidebar \{ --sidebar-create-bg: #1B633E; --sidebar-create-ink: #f2f6f2;/);
-  assert.match(styles, /html\[data-mode="dark"\] \.next-sidebar \{ --sidebar-create-bg: #228452; --sidebar-create-hover: #1B633E; background: #181a18; \}/);
-  assert.match(styles, /\.next-sidebar \.next-create \{[^}]*border: 0; border-radius: 11px/);
-  assert.match(styles, /\.next-create > \.sidebar-create-icon \{[^}]*filter: brightness\(0\) invert\(1\)/);
-});
-
-test("sidebar tabs use compact 13px labels and a quieter selected weight", () => {
-  assert.match(styles, /\.next-sidebar nav button > \.nav-copy strong \{ color: inherit !important; font: 500 13px\/1\.4 var\(--jx-font-sans\); white-space: nowrap; \}/);
-  assert.match(styles, /\.next-sidebar nav button\.active > \.nav-copy strong \{ font-weight: 600; \}/);
+test("sidebar groups use protected navigation and place settings and collapse toggle in the bottom bar", () => {
+  const sidebar = app.match(/<aside id="main-sidebar"[\s\S]*?<\/aside>/)?.[0];
+  assert.ok(sidebar);
+  assert.match(sidebar, /日程视图[\s\S]*今日安排[\s\S]*任务管理[\s\S]*全部任务/);
+  assert.match(sidebar, /requestNavigation\(\{ active: "任务", taskView: "all" \}\)/);
+  assert.match(sidebar, /requestNavigation\(\{ active: "任务", taskView \}\)/);
+  assert.match(sidebar, /sidebar-footer-group[\s\S]*sidebar-summary-card[\s\S]*sidebar-bottom-bar[\s\S]*setSettingsOpen\(true\)[\s\S]*shell-collapse-button/);
+  assert.doesNotMatch(app.replace(sidebar, ""), /shell-collapse-button/);
+  assert.doesNotMatch(sidebar, /next-create|记一件事/);
+  const sidebarOrder = app.match(/const sidebarTaskViews[^=]*=\s*\[([\s\S]*?)\];/)?.[1] ?? "";
+  const labels = [...sidebarOrder.matchAll(/label:\s*"([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(labels, ["进行中", "草稿箱", "重复规则", "待安排", "未完成", "已完成", "回收站"]);
+  assert.doesNotMatch(colors, /\.sidebar-collapsed \.next-sidebar :is\([^)]*\.sidebar-footer-group\)/);
+  assert.doesNotMatch(colors, /nav > \.sidebar-task-views \{[^}]*border: 0;/);
+  assert.match(colors, /nav > \.sidebar-task-views \{[^}]*border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0;/);
+  assert.match(colors, /@media \(max-width: 860px\)[\s\S]*?\.next-sidebar \.shell-collapse-button \{ display: none; \}/);
 });

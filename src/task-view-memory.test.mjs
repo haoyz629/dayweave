@@ -16,7 +16,7 @@ function collect(node) {
   ts.forEachChild(node, collect);
 }
 collect(source);
-const views = ["draft", "recurring", "open", "scheduled", "not_completed", "done", "deleted"];
+const views = ["all", "draft", "recurring", "open", "scheduled", "not_completed", "done", "deleted"];
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function mount(storage, overrides = {}) {
   const state = {

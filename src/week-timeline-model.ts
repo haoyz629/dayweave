@@ -16,6 +16,10 @@ export type WeekEntry = {
   url: string;
   notes: string | null;
   tags: string[];
+  taskId?: string;
+  blockId?: string;
+  recurringItemId?: string;
+  occurrenceId?: string;
 };
 export type TimedWeekEntry = WeekEntry & { startMinute: number; endMinute: number };
 export const WEEK_HOUR_HEIGHT = 72;
@@ -72,7 +76,8 @@ export function weekEntries(date: string, schedule: DaySchedule, occurrences: Re
     entries.push({ layoutKey: `block:${block.id}`, date, title: block.task_title, status,
       tone: outcome === "planned" ? "plan" : outcome === "not_started" ? "not-started" : outcome,
       ...range, time: `${weekClock(range.startMinute)}–${weekClock(range.endMinute)}`,
-      url, notes: [body, block.review?.notes ?? block.execution_note].filter(Boolean).join("\n\n") || null, tags: task?.tags ?? [] });
+      url, notes: [body, block.review?.notes ?? block.execution_note].filter(Boolean).join("\n\n") || null, tags: task?.tags ?? [],
+      taskId: block.task_id, blockId: block.id });
   }
   for (const item of occurrences.filter(item => item.occurrence_date === date)) {
     const start = item.display_time ? Number(item.display_time.slice(0, 2)) * 60 + Number(item.display_time.slice(3, 5)) : NaN;
@@ -83,7 +88,8 @@ export function weekEntries(date: string, schedule: DaySchedule, occurrences: Re
     entries.push({ layoutKey: `recurring:${item.id}`, date, title: item.title, status: display.label,
       tone: display.outcome === "planned" ? "plan" : display.outcome === "not_started" ? "not-started" : display.outcome,
       startMinute: timed ? start : null, endMinute: timed ? end : null,
-      time: timed ? `${weekClock(start)}–${weekClock(end)}` : "时间未指定", url, notes: [body, item.review_notes].filter(Boolean).join("\n\n") || null, tags: item.tags });
+      time: timed ? `${weekClock(start)}–${weekClock(end)}` : "时间未指定", url, notes: [body, item.review_notes].filter(Boolean).join("\n\n") || null, tags: item.tags,
+      recurringItemId: item.recurring_item_id, occurrenceId: item.id });
   }
   for (const event of schedule.fixed_events.filter(event => !event.deleted_at)) {
     const range = clippedRange(date, event.starts_at, event.ends_at);

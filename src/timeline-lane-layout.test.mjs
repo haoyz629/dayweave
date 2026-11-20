@@ -112,9 +112,10 @@ test("drag previews cover draft blocks, multiple overlaps and exact adjacency", 
   assert.equal(timelineLaneLayout(items, item(key, 795, 855))[key].total, 1);
 });
 
-test("the timeline wires the active drag into shared lanes and freezes the source placeholder", () => {
+test("the timeline keeps dragged task blocks in their current lane and only wires slide-to-create into live preview lanes", () => {
   const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-  assert.match(app, /const timelineItemLanes = timelineLaneLayout\(timelineItems, selectedDate, timelineDrag \?\? \(timelineCreateRange\?\.dragging/);
+  assert.match(app, /const timelineItemLanes = timelineLaneLayout\(timelineItems, selectedDate, timelineCreateRange\?\.dragging/);
+  assert.doesNotMatch(app, /timelineLaneLayout\(timelineItems, selectedDate, timelineDrag/);
   assert.match(app, /drag \? \{ layoutKey: drag.key, startMinute: drag.start, endMinute: drag.end \} : null\)/);
   assert.doesNotMatch(app, /timelineLaneOrderRef|rememberTimelineMove/);
   assert.match(app, /sourceLane: timelineItemLanes\[/);

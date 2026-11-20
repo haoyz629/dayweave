@@ -226,7 +226,7 @@ test("recurring pages reuse the ordinary header with lifecycle status icons", ()
     React, Icon: ({ name }) => React.createElement("svg", { "data-icon": name }),
     TaskTagList: () => null, TaskDetailResources: () => React.createElement("div", { className: "resources" }),
   };
-  const names = ["recurringItemStatusLabel", "recurringScheduleLabel", "TaskPageHeader", "DeletedRecurringItemDetails", "EndedRecurringItemDetails"];
+  const names = ["recurringItemStatusLabel", "recurringScheduleLabel", "TaskPageHeader", "TaskDetailHero", "RecurringDetailFacts", "DeletedRecurringItemDetails", "EndedRecurringItemDetails"];
   Object.assign(state, evaluate(`${names.map(name => functions.get(name).getText(source)).join("\n")}\n({ ${names.join(",")} });`, state));
   for (const [status, label, icon] of [["active", "生效中", "clock"], ["paused", "已暂停", "pause"], ["ended", "已结束", "check"], ["deleted", "回收站", "trash"]]) {
     const task = { ...item, frequency: "weekly", status: status === "deleted" ? "ended" : status, deleted_at: status === "deleted" ? "2026-10-27" : null };
@@ -239,7 +239,7 @@ test("recurring pages reuse the ordinary header with lifecycle status icons", ()
   }
   for (const name of ["DeletedRecurringItemDetails", "EndedRecurringItemDetails"]) {
     const component = functions.get(name).getText(source);
-    assert.match(component, /<TaskPageHeader task=\{item\}/);
+    assert.match(component, /<TaskDetailHero/);
     assert.match(component, /<TaskDetailResources key=\{item.id\} notes=\{item.notes\}/);
     assert.match(component, /ordinary-task-detail/);
   }
@@ -261,7 +261,7 @@ test("recycled recurring details share ordinary bottom actions without a pinned 
     RecurringExecutionHistory: () => React.createElement("section", { "aria-label": "执行记录" }),
     SeparatedCopy: ({ text }) => text
   };
-  const names = ["recurringScheduleLabel", "RecycleBinActions", "DeletedRecurringItemDetails"];
+  const names = ["recurringScheduleLabel", "TaskDetailHero", "RecurringDetailFacts", "RecycleBinActions", "DeletedRecurringItemDetails"];
   Object.assign(state, evaluate(`${names.map(name => functions.get(name).getText(source)).join("\n")}\n({ ${names.join(",")} });`, state));
   const deleted = { ...item, status: "ended", deleted_at: "2026-10-26T18:00:00+08:00", frequency: "weekly", interval_value: 1, weekdays: [2, 4], starts_on: "2026-10-01", ends_on: null, display_time: "14:00", display_duration_minutes: 60, tags: ["开发", "产品"], notes: "保留的备注" };
   const calls = [];
@@ -273,9 +273,9 @@ test("recycled recurring details share ordinary bottom actions without a pinned 
     if (!busy) buttons.forEach(button => button.props.onClick());
     const html = renderToStaticMarkup(state.DeletedRecurringItemDetails({ item: deleted, busy, children: actions }));
     assert.match(html, /ordinary-task-detail recycled-task-detail/);
-    assert.match(html, /aria-label="回收站重复事项详情"><header>/);
-    assert.match(html, /<section class="task-detail-resources">保留的备注<\/section><footer class="task-detail-actions">/);
-    assert.ok(html.indexOf("</footer>") < html.indexOf("terminal-task-help"));
+    assert.match(html, /aria-label="回收站重复事项详情"><div class="detail-fused-header">/);
+    assert.match(html, /<footer class="task-detail-actions">[\s\S]*<section class="task-detail-resources">保留的备注<\/section>/);
+    assert.doesNotMatch(html, /该重复事项已结束并移入回收站/);
     for (const label of ["重复规则", "有效日期", "今日页显示", "显示时长"]) assert.ok(html.includes(label));
     assert.equal((html.match(/<dt><svg/g) ?? []).length, 4);
     assert.match(html, /60<span class="task-detail-unit">分钟<\/span>/);
@@ -342,17 +342,33 @@ test("active and paused details show saved facts and history with an explicit ed
   const state = { React, Icon: () => null, SeparatedCopy: ({ text }) => text,
     TaskPageHeader: () => null, TaskTagList: () => null, TaskDetailResources: ({ notes }) => notes,
     RecurringExecutionHistory: () => React.createElement("section", { "aria-label": "执行记录" }) };
-  evaluate(["recurringScheduleLabel", "RecurringItemDetails"].map(name => functions.get(name).getText(source)).join("\n"), state);
+  evaluate(["recurringScheduleLabel", "TaskDetailHero", "RecurringDetailFacts", "RecurringItemDetails"].map(name => functions.get(name).getText(source)).join("\n"), state);
   for (const status of ["active", "paused"]) {
     const detail = state.RecurringItemDetails({ item: { ...item, status, frequency: "daily", interval_value: 1, starts_on: "2026-10-01", tags: [], notes: "已保存备注" }, busy: false,
       onEdit: () => calls.push("edit"), onPause() {}, onResume() {}, onEnd() {} });
     const html = renderToStaticMarkup(detail);
     for (const label of ["重复事项只读详情", "重复规则", "有效日期", "今日页显示", "显示时长", "已保存备注", "执行记录"]) assert.ok(html.includes(label));
     assert.doesNotMatch(html, /<input|<textarea|recurring-editor-form/);
-    const buttons = nodes(detail, node => node.type === "button");
+    const buttons = nodes(nodes(detail, node => node.type === state.TaskDetailHero)[0].props.actions, node => node.type === "button");
     assert.deepEqual(buttons.map(button => renderToStaticMarkup(button).replace(/<[^>]*>/g, "")), status === "active" ? ["暂停事项", "编辑任务"] : ["恢复事项", "编辑任务", "结束事项"]);
     buttons[1].props.onClick();
     assert.equal(buttons.length, status === "active" ? 2 : 3);
   }
   assert.deepEqual(calls, ["edit", "edit"]);
+});
+
+test("recurring frequency selector uses custom button dropdown without native double arrows", () => {
+  const calls = [];
+  const state = { React, Icon: ({ name }) => React.createElement("svg", { "data-icon": name }), recurringFrequencyOptions: [{ value: "daily", label: "每天" }, { value: "weekly", label: "每周" }, { value: "monthly", label: "每月" }], useState: () => [true, () => {}], useRef: (v) => ({ current: v }), useEffect: () => {} };
+  evaluate(functions.get("RecurringFrequencyDropdown").getText(source), state);
+  const tree = state.RecurringFrequencyDropdown({ id: "new-recurring-frequency", value: "monthly", onChange: (val) => calls.push(val) });
+  const html = renderToStaticMarkup(tree);
+  assert.doesNotMatch(html, /<select/);
+  assert.match(html, /aria-label="频率：每月"/);
+  assert.equal((html.match(/data-icon="chevron-down"/g) || []).length, 1);
+  const options = nodes(tree, (node) => node.type === "button" && node.props.role === "option");
+  assert.deepEqual(options.map((node) => String(node.key).replace(/^\.\$/, "")), ["daily", "weekly", "monthly"]);
+  assert.equal(options[2].props["aria-selected"], true);
+  options[0].props.onClick();
+  assert.deepEqual(calls, ["daily"]);
 });

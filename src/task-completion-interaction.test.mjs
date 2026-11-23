@@ -47,6 +47,7 @@ function harness({ task = baseTask, block = baseBlock, selectedDate = previous, 
     savingDraggedBlock: false, timelineDrag: null, preview: null, draftSaving: false, creating: false,
     selectedTaskIsCrossDay: Boolean(task.earliest_start_date && task.due_date && task.earliest_start_date < task.due_date),
     selectedMetadata: null,
+    pendingRecycledCompletion: null, recycledCompletionNote: "", recycledCompletionError: null,
     hasUnsavedChanges: false, preferredSelection: { current: null }, preparingIndependent: { current: false },
     taskDrafts: [], effectiveOutcome, taskCompleted: false, blockHasFact: false, blockIsSaving: false,
     selectedBlockDialog: rules.timelineTaskDialogState(block),
@@ -75,7 +76,7 @@ function harness({ task = baseTask, block = baseBlock, selectedDate = previous, 
     async saveNewTaskBeforeLeaving() { return true; },
     clearNewTaskForm() { state.creating = false; }
   };
-  for (const key of ["timelineCompletionTask", "timelineCompletionNote", "timelineCompletionError", "quickCompletingBlockId", "busy", "feedback", "view", "selectedId", "pendingTaskChange", "savingExecution", "executionMessage", "selection", "planDraftTimeEdit", "taskDrafts", "search", "tagFilter", "compactTaskEditorDismissed"]) state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = typeof value === "function" ? value(state[key]) : value; };
+  for (const key of ["timelineCompletionTask", "timelineCompletionNote", "timelineCompletionError", "quickCompletingBlockId", "pendingRecycledCompletion", "recycledCompletionNote", "recycledCompletionError", "busy", "feedback", "view", "selectedId", "pendingTaskChange", "savingExecution", "executionMessage", "selection", "planDraftTimeEdit", "taskDrafts", "search", "tagFilter", "compactTaskEditorDismissed"]) state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = typeof value === "function" ? value(state[key]) : value; };
   const context = vm.createContext(state);
   for (const [name, expression] of renderExpressions) vm.runInContext(compile(`${name} = ${expression};`), context);
   for (const name of names) vm.runInContext(compile(handlers.get(name)), context);

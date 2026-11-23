@@ -598,10 +598,10 @@ test("approved A renders one color-dot/name/check row per tag without duplicate 
   assert.deepEqual(host.calls.create, []);
 });
 
-test("A keeps a 44px semantic selection surface and a scoped 8px trigger without changing list chips", () => {
+test("A aligns the tag selection surface with compact desktop dropdowns without changing list chips", () => {
   const css = readFileSync(new URL("./task-tags.css", import.meta.url), "utf8");
   assert.match(css, /\.task-tag-dropdown-trigger \{[^}]*border-radius: 8px/);
-  assert.match(css, /\.task-tag-option \{[^}]*min-height: 44px[^}]*font-size: 14px/);
+  assert.match(css, /\.task-tag-option \{[^}]*min-height: 32px[^}]*font-size: 12\.5px/);
   assert.match(css, /\.task-tag-option:has\(input:checked\) \{[^}]*var\(--task-tag-ink[^}]*var\(--task-tag-bg/);
   assert.match(css, /\.task-tag-option input \{[^}]*opacity: 0/);
   assert.match(css, /\.task-tag-option:has\(input:focus-visible\)/);

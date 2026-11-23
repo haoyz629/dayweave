@@ -3,7 +3,7 @@
 .desktop-app > .next-shell { flex: 1; height: calc(100vh - var(--app-titlebar-height)); min-height: 0; }
 .desktop-app .next-sidebar, .desktop-app .shell-divider, .desktop-app .next-workspace { height: 100%; min-height: 0; }
 .desktop-app .today-workspace { height: 100%; }
-.desktop-app .next-workspace > .settings-page, .desktop-app .next-workspace > .review-page { min-height: 100%; }
+.desktop-app .next-workspace > .settings-page { min-height: 100%; }
 .app-titlebar { position: relative; z-index: 15; display: flex; height: var(--app-titlebar-height); flex: 0 0 var(--app-titlebar-height); align-items: center; justify-content: space-between; gap: 12px; padding: 0 0 0 14px; border-bottom: 1px solid #e2e8f0; color: var(--color-ink); background: var(--color-group); user-select: none; }
 .app-titlebar-lead { display: flex; min-width: 0; align-items: center; gap: 9px; }
 .app-mobile-nav-button { display: none; flex: none; align-items: center; gap: 5px; height: 28px; padding: 0 9px; border: 1px solid #cbd5e1; border-radius: 5px; color: var(--color-ink); background: var(--color-panel); font: 600 12px/1 var(--jx-font-sans); cursor: pointer; }

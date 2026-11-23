@@ -71,7 +71,12 @@ test("real list completion and reopen handlers commit before refreshing and keep
     await (action === "transition" ? state.run("done", " 完成备注 ") : state.run());
     if (fail) {
       assert.equal(calls.some(([name]) => ["commit", "reload", "TaskMetadataRevision"].includes(name)), false);
-      assert.ok(calls.some(([name, text]) => name === "Feedback" && /写入失败/.test(text)));
+      if (action === "transition") {
+        assert.ok(calls.some(([name, text]) => name === "CompletionError" && /写入失败/.test(text)));
+        assert.equal(calls.some(([name]) => name === "Feedback"), false);
+      } else {
+        assert.ok(calls.some(([name, text]) => name === "Feedback" && /写入失败/.test(text)));
+      }
     } else {
       assert.ok(calls.findIndex(([name]) => name === "commit") < calls.findIndex(([name]) => name === "reload"));
       assert.ok(calls.some(([name, value]) => name === "TaskMetadataRevision" && value === 1));

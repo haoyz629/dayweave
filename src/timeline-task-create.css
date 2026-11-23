@@ -84,18 +84,18 @@ body:has(.selection-create-track) .floating-assistant:not(.open) { right: 60px; 
   display: grid;
   place-items: center;
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
-  color: var(--color-muted, #4a5c75);
+  color: var(--color-gray-solid, #52647a);
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 .selection-close-btn:hover:not(:disabled) {
-  background: #e2e8f0;
-  color: var(--color-ink, #0f172a);
+  background: var(--color-hover, #e3ebf5);
+  color: var(--color-ink, #172b4d);
 }
 
 /* Form & Scrollable Body */
@@ -565,7 +565,7 @@ html:root:not([data-mode="dark"]) .selection-create-dialog {
   box-shadow: 0 12px 32px rgb(15 23 42 / 10%);
 }
 html:root:not([data-mode="dark"]) .selection-create-dialog::backdrop {
-  background: rgb(15 23 42 / 24%);
+  background: rgb(20 38 61 / 20%);
 }
 html:root:not([data-mode="dark"]) .selection-create-dialog :is(.selection-dialog-header, .selection-dialog-footer) {
   background: transparent;

@@ -22,8 +22,10 @@ function navigationContext(overrides = {}) {
   const calls = [];
   const context = vm.createContext({
     active: "今日", selectedDate: "2026-11-11", planPreview: null, taskEditorDirty: false,
-    timelineReturnContext: null, reminderNavigationRef: { current: null },
+    mobileNavOpen: false, timelineReturnContext: null, reminderNavigationRef: { current: null },
     normalizeTodayNavigation: active => ({ active }),
+    setMobileNavOpen(open) { context.mobileNavOpen = open; },
+    setPlanLeaveError() {},
     setPendingPlanLeave: value => calls.push(["plan-guard", value]),
     setPendingNavigation: value => calls.push(["task-guard", value]),
     applyNavigation: value => calls.push(["navigate", value]),

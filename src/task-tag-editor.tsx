@@ -238,7 +238,7 @@ export function TaskTagEditor({ tags, suggestions = [], disabled, id, inlineChip
         else options[(index + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length]?.focus();
       }}>
       <div className="task-tag-search-header">
-        <header><strong>任务标签</strong><button type="button" aria-label="关闭标签选择" onClick={() => close(true)}>×</button></header>
+        <header><strong>任务标签</strong><button type="button" aria-label="关闭标签选择" onClick={() => close(true)}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button></header>
         <label className="sr-only" htmlFor={id}>搜索或新建标签</label>
         <div className="task-tag-entry">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><circle cx="10" cy="10" r="6" /><path d="m15 15 5 5" /></svg>
@@ -360,7 +360,7 @@ export function TaskTagFilter({ id, tags, counts, value, onChange }: {
         aria-label="清除标签筛选"
         title="清除标签筛选"
         onClick={() => { onChange(""); setOpen(false); }}
-      >×</button>}
+      ><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button>}
     </div>
     {open && <div id={`${id}-popover`} className="task-filter-popover task-tag-filter-popover" role="dialog" aria-label="按标签筛选">
       <div className="task-filter-popover-search">

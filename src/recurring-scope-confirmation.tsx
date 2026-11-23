@@ -20,7 +20,7 @@ export function RecurringScopeConfirmation({ change, busy, error, onCancel, onCo
         <dt>原安排</dt><dd>{change.occurrence.occurrence_date} {recurringTimeRange(change.occurrence)}</dd>
         <dt>改为</dt><dd>{change.targetDate} {recurringTimeRange(change.input)}</dd>
       </dl>
-      <p>历史任务块保持不变。仅修改本次不改变重复规则；修改本次及以后将从本次起应用新安排。</p>
+      <p>历史任务块保持不变。仅修改本次，不改变重复规则；修改本次及以后，将从本次起应用新安排。</p>
       {error && <p className="plan-draft-edit-error" role="alert">{error}</p>}
     </div>
     <div className="dialog-actions">

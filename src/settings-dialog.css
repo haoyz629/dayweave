@@ -804,16 +804,19 @@ html:root:not([data-mode="dark"]) .settings-dialog .holiday-calendar-settings.is
 }
 
 /* Modal-scoped overlays */
-.settings-discard-backdrop {
+.settings-dialog .settings-discard-backdrop {
   position: absolute;
   inset: 0;
   z-index: 2;
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgb(15 23 42 / 26%);
+  background: var(--color-mask, rgb(20 38 61 / 60%));
 }
-.settings-discard-backdrop .feedback-confirm { max-width: 100%; }
+html:root:not([data-mode="dark"]) .settings-dialog .settings-discard-backdrop {
+  background: rgb(20 38 61 / 20%);
+}
+.settings-dialog .settings-discard-backdrop .feedback-confirm { max-width: 100%; }
 .settings-dialog .settings-feedback-viewport {
   position: absolute;
   top: 62px;
@@ -836,7 +839,8 @@ html:root:not([data-mode="dark"]) .settings-dialog .holiday-calendar-settings.is
   animation: settings-toast-enter .2s cubic-bezier(.16, 1, .3, 1);
   will-change: transform, opacity;
 }
-.settings-dialog .settings-feedback-viewport .feedback-toast-content { font-size: 13px; }
+.settings-dialog .settings-feedback-viewport .feedback-toast-content { font-size: 13.5px; line-height: 1.5; }
+.settings-dialog .settings-feedback-viewport .feedback-toast-content strong { font-weight: 600; }
 .settings-dialog .settings-feedback-viewport .feedback-close { top: 6px; }
 
 @keyframes settings-toast-enter {

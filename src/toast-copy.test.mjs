@@ -48,7 +48,7 @@ function harness() {
     async onUpdatePlan(input) { return input; }
   };
   state.preview = state.planPreview;
-  for (const key of ["saving", "draft", "saveMessage", "preferenceBusy", "preferenceMessage", "planBusy", "message", "daySchedule", "planPreview"]) {
+  for (const key of ["saving", "draft", "saveMessage", "preferenceBusy", "preferenceMessage", "planBusy", "message", "daySchedule", "planPreview", "planLeaveError"]) {
     state[`set${key[0].toUpperCase()}${key.slice(1)}`] = (value) => { state[key] = value; };
   }
   vm.runInContext(code, vm.createContext(state));
@@ -176,6 +176,7 @@ test("draft creation removes redundant manual save button, places discard on the
     setBusy(value) { state.busy = value; },
     setTaskDrafts(update) { state.taskDrafts = update(state.taskDrafts); },
     setPendingDiscardTaskDraft() {},
+    setDiscardDraftError(value) { state.discardDraftError = value; },
     setFeedback(value) { state.feedback = value; },
     setSuccessToast(value) { state.toasts.push(value); },
     uiErrorMessage: String
@@ -190,24 +191,24 @@ test("draft creation removes redundant manual save button, places discard on the
   assert.match(text, /className="task-compact-lifecycle">[\s\S]*task-action-discard[\s\S]*放弃草稿[\s\S]*task-draft-save-state/);
 });
 
-test("recurring review uses either an undo toast or inline success, never both", async () => {
-  for (const undo of [{ id: "undo" }, null]) {
+test("recurring occurrence completion notifies cleanly with undo only when completed", async () => {
+  for (const undo of [{ id: "undo", target_type: "recurring_review", target_id: "item" }, null]) {
+    let undoCalls = 0;
     const state = {
-      recurringRef: { current: { item: { notes: "备注" } } }, occurrences: [], messages: {}, toast: null,
-      queue: { current: { forget() {} } }, identity: (...args) => args.join(":"),
-      run(_id, action) { state.pending = action(); },
+      recurringResultSavingRef: { current: false }, quickCompletingBlockId: null, savingExecution: false, busy: false, loading: false, preview: null, savingDraggedBlock: false, timelineDrag: null, savingRecurringChange: false, pendingRecurringChange: null,
+      notifications: [],
+      canRecordRecurringOccurrence: () => true,
+      setQuickCompletingBlockId(value) { state.quickCompletingBlockId = value; },
       async saveRecurringOccurrenceReview() { return { id: "item", outcome: "completed" }; },
-      async latestUndo() { return undo; }, async loadReviewSchedule() {}, async onFactsChanged() {}, reviewDate: "2026-10-20",
-      setToast(value) { state.toast = value; },
-      setOccurrences(update) { state.occurrences = update(state.occurrences); },
-      setMessages(update) { state.messages = update(state.messages); }
+      async clearRecurringOccurrenceReview() {},
+      async latestUndo() { return ++undoCalls === 1 ? null : undo; },
+      async onFactsChanged() {},
+      onNotify(...args) { state.notifications.push(args); },
+      uiErrorMessage: String
     };
-    executeHandler("./review-page.tsx", "saveRecurring", state);
-    state.saveRecurring({ id: "item" }, "completed");
-    await state.pending;
-    assert.equal(state.toast?.message ?? null, undo ? "本次结果已保存" : null);
-    assert.equal(state.toast?.id ?? null, undo?.id ?? null);
-    assert.equal(state.messages.item, undo ? "" : "本次结果已保存。");
+    executeHandler("./App.tsx", "saveRecurringResult", state);
+    await state.saveRecurringResult({ id: "item", occurrence_date: "2026-10-20", outcome: null, review_notes: null }, "completed", "备注");
+    assert.deepEqual(state.notifications, [["本次已完成", "", "check", undo?.id]]);
   }
 });
 

@@ -23,15 +23,14 @@ test("application canvases use the right workspace gray and a separate left side
   assert.equal(declarations(".next-sidebar").background, "var(--app-sidebar-bg)");
   for (const selector of [
     ".next-shell", ".next-workspace", ".tasks-workspace",
-    ".next-workspace > .settings-page", ".next-workspace > .review-page",
+    ".next-workspace > .settings-page",
     ".calendar-composition", ".timeline-page-shell",
     ".next-workspace .today-workspace", ".next-workspace .today-schedule-pane",
     ".next-workspace .today-page", ".next-workspace .today-page .timeline-main",
     ".today-page .is-timeline-view .timeline-design-topbar", ".today-page .timeline-week",
     ".next-workspace .today-page .timeline-lanes", ".next-workspace .today-page .calendar-topbar",
     ".next-workspace .today-page .month-sheet", ".next-workspace .today-page .today-month-sheet",
-    ".next-workspace .today-page .date-inspector", ".next-workspace .today-page .today-calendar-resize-handle",
-    ".next-workspace .today-workspace > .review-page"
+    ".next-workspace .today-page .date-inspector", ".next-workspace .today-page .today-calendar-resize-handle"
   ]) assert.equal(declarations(selector).background, "var(--app-workspace-bg)", selector);
   assert.equal(declarations(":root")["--jx-raised"], "#ffffff");
   assert.equal(declarations(ledger)["--task-workspace-bg"], declarations(":root")["--app-workspace-bg"]);

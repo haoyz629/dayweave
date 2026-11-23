@@ -275,7 +275,7 @@ test("timeline detail flows provide contextual return actions", () => {
   assert.match(appSource, /planDraftTimeEdit\.sourceBlockId && <TaskContextReturnButton label="返回任务块详情" disabled=\{busy\} onClick=\{returnToSelectedBlockDetails\}/);
   assert.match(appSource, /<TaskContextReturnButton label="返回任务块详情" disabled=\{savingRecurringChange \|\| Boolean\(quickCompletingBlockId\)\} onClick=\{returnToRecurringOccurrenceDetails\}/);
   assert.match(appSource, /<TaskPageHeader task=\{selectedTask\} editing busy=\{busy\} onBack=\{\(\) => void requestTaskChange\(\{ kind: "detail" \}\)\} \/>/);
-  assert.match(appSource, /<TaskContextReturnButton label=\{backLabel \?\? \(editing \? "返回任务详情"/);
+  assert.match(appSource, /const fallbackBack = editing \? \(recurring \? "返回重复事项详情" : "返回任务详情"\) : "返回今日计划中的任务块";[\s\S]*<TaskContextReturnButton label=\{backLabel \?\? fallbackBack\}/);
   assert.match(appSource, /onOpenTasks\(taskId, \{ date: selectedDate, blockId \}\)/);
   assert.match(appSource, /setSelection\(null\);\s*setExecutionDraft\(null\);\s*setExecutionMessage\(""\);\s*const frame/);
   assert.match(appSource, /requestNavigation\(\{ active: "今日", timelineReturnContext: returnContext \}\)/);

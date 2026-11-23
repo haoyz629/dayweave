@@ -47,7 +47,7 @@ function harness({ fail = false, loaded = true } = {}) {
     onTaskCommitted(committed) { calls.push(["commit", committed.status]); state.taskCommitted(committed); },
     async onReload(showLoading) { calls.push(["reload", showLoading]); state.tasks = [saved]; }
   };
-  for (const key of ["busy", "selectedId", "draft", "taskMetadata", "pendingTrashTask", "feedback", "successToast", "view", "taskMetadataRevision", "selectedRecurringId"]) {
+  for (const key of ["busy", "selectedId", "draft", "taskMetadata", "pendingTrashTask", "trashTaskError", "feedback", "successToast", "view", "taskMetadataRevision", "selectedRecurringId"]) {
     state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = typeof value === "function" ? value(state[key] ?? 0) : value; };
   }
   const context = vm.createContext(state);
@@ -97,7 +97,7 @@ test("failed deletion and busy state leave the timeline unchanged", async () => 
     assert.deepEqual(current.state.daySchedule, before);
     assert.equal(current.state.tasks[0].status, "scheduled");
     assert.equal(current.calls.some(([name]) => ["commit", "schedule", "reload"].includes(name)), false);
-    if (!busy) assert.match(current.state.feedback, /删除失败/);
+    if (!busy) assert.match(current.state.trashTaskError, /删除失败/);
   }
 });
 

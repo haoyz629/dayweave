@@ -66,7 +66,10 @@ function editor({ saved = true } = {}) {
     async onRecurringChanged() {}, onTaskCommitted() {}, async onReload() {}, async showCommittedToast() {}
   };
   state.pendingHistoricalCreation = null;
-  for (const key of ["busy", "newTaskError", "newTaskForm", "persistedNewTaskDraft", "taskDrafts", "recurringForm", "newTaskAutosaveArmed", "createItemType", "draftSaving", "feedback", "creating", "successToast", "pendingDiscardNew", "pendingHistoricalCreation", "view", "selectedRecurringId", "selectedId", "draft", "search", "tagFilter"]) {
+  state.historicalCreationError = null;
+  state.pendingDiscardNew = false;
+  state.discardNewError = null;
+  for (const key of ["busy", "newTaskError", "newTaskForm", "persistedNewTaskDraft", "taskDrafts", "recurringForm", "newTaskAutosaveArmed", "createItemType", "draftSaving", "feedback", "creating", "successToast", "pendingDiscardNew", "discardNewError", "pendingHistoricalCreation", "historicalCreationError", "view", "selectedRecurringId", "selectedId", "draft", "search", "tagFilter"]) {
     state[`set${key[0].toUpperCase()}${key.slice(1)}`] = (value) => { state[key] = typeof value === "function" ? value(state[key]) : value; };
   }
   const context = vm.createContext(state);
@@ -87,7 +90,7 @@ function editor({ saved = true } = {}) {
     return renderToStaticMarkup(vm.runInContext(code, context));
   }
   function historicalDialog() {
-    Object.assign(state, { React, HISTORICAL_TASK_CREATION_NOTE, ConfirmationDialog: ({ children }) => React.createElement("section", null, children) });
+    Object.assign(state, { React, createPortal: node => node, document: {}, HISTORICAL_TASK_CREATION_NOTE, ConfirmationDialog: ({ children }) => React.createElement("section", null, children) });
     const code = ts.transpileModule(`(${historicalDialogExpression})`, { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 } }).outputText;
     return vm.runInContext(code, context);
   }

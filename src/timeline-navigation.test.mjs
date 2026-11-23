@@ -49,7 +49,7 @@ function harness(overrides = {}) {
     onSelectDate(date) { state.selectedDate = date; return true; },
     ...overrides
   };
-  for (const key of ["todayView", "monthKey", "monthSelectionPending", "followingNow", "selectedDate", "scheduleLoading", "pendingPlanLeave"]) state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = value; };
+  for (const key of ["todayView", "monthKey", "monthSelectionPending", "followingNow", "selectedDate", "scheduleLoading", "pendingPlanLeave", "planLeaveError"]) state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = value; };
   state.setClock = value => {
     state.clock = value;
     const { hour, minute } = state.shanghaiClockParts(value);

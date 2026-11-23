@@ -40,8 +40,9 @@ const item = { id: "repeat-1", title: "晨间计划", status: "active", deleted_
 function harness(overrides = {}) {
   const writes = [];
   const state = {
-    React, Icon: () => null, ConfirmationDialog: ({ children }) => React.createElement("section", null, children), Toast: () => null,
-    item, selectedRecurringId: item.id, view: "recurring", busy: false, hasUnsavedChanges: false, pendingEndRecurringItem: null, pendingTrashRecurringItem: null,
+    React, createPortal: node => node, document: {}, Icon: () => null, ConfirmationDialog: ({ children }) => React.createElement("section", null, children), Toast: () => null,
+    item, selectedRecurringId: item.id, view: "recurring", busy: false, hasUnsavedChanges: false,
+    pendingEndRecurringItem: null, endRecurringError: null, pendingTrashRecurringItem: null, trashRecurringError: null, permanentDeleteError: null,
     writes, refreshed: 0, feedback: "", uiErrorMessage: String,
     async setRecurringItemStatus(...args) { writes.push(args); if (state.failure) throw Error("数据库忙"); },
     async onRecurringChanged() { state.refreshed++; },
@@ -49,7 +50,7 @@ function harness(overrides = {}) {
     changeRecurringItemStatus(status, target) { return state.setRecurringItemStatus(target.id, status); },
     ...overrides
   };
-  for (const key of ["busy", "pendingEndRecurringItem", "pendingTrashRecurringItem", "feedback", "selectedId", "selectedRecurringId", "pendingPermanentRecurringItem"]) {
+  for (const key of ["busy", "pendingEndRecurringItem", "endRecurringError", "pendingTrashRecurringItem", "trashRecurringError", "feedback", "selectedId", "selectedRecurringId", "pendingPermanentRecurringItem", "permanentDeleteError"]) {
     state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = value; };
   }
   const context = vm.createContext(state);
@@ -118,7 +119,7 @@ test("end confirmation can cancel without writing and persists only an ended sta
   assert.equal(h.state.writes.length, 0);
   h.state.pendingEndRecurringItem = item;
   const confirm = nodes(h.renderDialog(), node => node.type === "button" && node.props.children === "结束重复")[0];
-  assert.equal(confirm.props.className, "dialog-save");
+  assert.equal(confirm.props.className, "dialog-discard");
   confirm.props.onClick();
   // The JSX handler intentionally discards its Promise, so allow its two awaits to settle.
   await new Promise(resolve => setImmediate(resolve));
@@ -132,7 +133,8 @@ test("failed end keeps the confirmation available and preserves its failure mess
   const h = harness({ failure: true, pendingEndRecurringItem: item });
   await h.state.endRecurringItemFromList(item);
   assert.equal(h.state.pendingEndRecurringItem, item);
-  assert.match(h.state.feedback, /重复事项未能结束.*数据库忙/);
+  assert.match(h.state.endRecurringError, /重复事项未能结束.*数据库忙/);
+  assert.match(renderToStaticMarkup(h.renderDialog()), /role="alert"[^>]*>重复事项未能结束.*数据库忙/);
   assert.equal(h.state.busy, false);
   assert.equal(h.state.refreshed, 0);
 });
@@ -234,7 +236,8 @@ test("recurring pages reuse the ordinary header with lifecycle status icons", ()
     assert.match(html, /task-compact-header task-page-header/);
     assert.match(html, new RegExp(`data-icon="${icon}"`));
     assert.match(html, new RegExp(`${label}</span>`));
-    assert.match(html, status === "deleted" ? /回收站<\/span>/ : /任务<\/span>/);
+    assert.match(html, status === "deleted" ? /回收站<\/span>/ : /重复事项<\/span>/);
+    assert.match(html, ["ended", "deleted"].includes(status) ? />重复事项详情<\/h2>/ : />编辑重复事项<\/h2>/);
     assert.doesNotMatch(html, /task-compact-source|·重复事项/);
   }
   for (const name of ["DeletedRecurringItemDetails", "EndedRecurringItemDetails"]) {
@@ -350,7 +353,7 @@ test("active and paused details show saved facts and history with an explicit ed
     for (const label of ["重复事项只读详情", "重复规则", "有效日期", "今日页显示", "显示时长", "已保存备注", "执行记录"]) assert.ok(html.includes(label));
     assert.doesNotMatch(html, /<input|<textarea|recurring-editor-form/);
     const buttons = nodes(nodes(detail, node => node.type === state.TaskDetailHero)[0].props.actions, node => node.type === "button");
-    assert.deepEqual(buttons.map(button => renderToStaticMarkup(button).replace(/<[^>]*>/g, "")), status === "active" ? ["暂停事项", "编辑任务"] : ["恢复事项", "编辑任务", "结束事项"]);
+    assert.deepEqual(buttons.map(button => renderToStaticMarkup(button).replace(/<[^>]*>/g, "")), status === "active" ? ["暂停事项", "编辑事项"] : ["恢复事项", "编辑事项", "结束事项"]);
     buttons[1].props.onClick();
     assert.equal(buttons.length, status === "active" ? 2 : 3);
   }

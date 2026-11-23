@@ -102,6 +102,12 @@ test("frameless configuration grants only required window mutation actions and r
   assert.match(native, /ui\.desktop\.close_to_tray/);
 });
 
+test("installer productName stays ASCII dayweave for install path and desktop shortcut", () => {
+  const config = JSON.parse(read("../src-tauri/tauri.conf.json"));
+  assert.equal(config.productName, "dayweave");
+  assert.equal(config.app.windows[0].title, "今序 · Dayweave");
+});
+
 test("ISO week helper handles year boundaries while titlebar stays compact at 42px", () => {
   const app = read("./App.tsx");
   const css = read("./app-titlebar.css");

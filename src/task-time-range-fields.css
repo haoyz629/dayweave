@@ -37,7 +37,7 @@ html:root:not([data-mode="dark"]) .task-time-range-fields .task-time-range-input
   width: 100%;
   min-width: 0;
   height: 36px;
-  padding: 0 10px 0 36px;
+  padding: 0 28px 0 36px;
   border: 1px solid var(--color-edge, #cbd5e1);
   border-radius: 7px;
   background: #ffffff;
@@ -47,6 +47,11 @@ html:root:not([data-mode="dark"]) .task-time-range-fields .task-time-range-input
   text-align: center;
   outline: none;
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.selection-time-box > .time-wheel-trigger,
+html:root:not([data-mode="dark"]) .task-time-range-inputs > .task-time-range-box > .time-wheel-trigger {
+  position: absolute;
+  right: 5px;
 }
 .selection-time-box > input:hover:not(:disabled),
 html:root:not([data-mode="dark"]) .task-time-range-fields .task-time-range-inputs > .task-time-range-box > input:hover:not(:disabled) {

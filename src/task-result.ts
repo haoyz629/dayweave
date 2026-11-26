@@ -5,10 +5,11 @@ export type ExecutionResult = "completed" | "not_completed";
 export type ExecutionOutcome = "completed" | "not_started";
 export const RESULT_GRACE_MS = 6 * 60 * 60 * 1000;
 
-export type TaskListStatus = Task["status"] | "not_completed";
+export type TaskListStatus = "scheduled" | "not_completed" | "done" | "deleted";
 
 export function taskListStatus(task: Pick<Task, "status" | "is_incomplete">): TaskListStatus {
-  return (task.status === "open" || task.status === "scheduled") && task.is_incomplete ? "not_completed" : task.status;
+  const normalized: TaskListStatus = task.status === "open" ? "scheduled" : task.status;
+  return normalized === "scheduled" && task.is_incomplete ? "not_completed" : normalized;
 }
 
 // Legacy final records remain readable; new submissions never create these actions.
@@ -62,6 +63,11 @@ export function historicalTaskCreationError(schedule: {
     return "不支持创建包含历史日期的多日任务；多日任务的开始日期不能早于今天，历史事项请分别补录为单日任务。";
   }
   if (!isHistoricalResultDate(schedule.due_date, now)) return null;
+  if (!schedule.earliest_start_time && !schedule.due_time) {
+    return schedule.earliest_start_date === schedule.due_date
+      ? null
+      : "历史日期只允许创建单日任务；当前内容仍可保存为草稿。";
+  }
   const duration = taskRangeDurationMinutes({
     earliest_start_date: schedule.earliest_start_date ?? "", earliest_start_time: schedule.earliest_start_time ?? "",
     due_date: schedule.due_date ?? "", due_time: schedule.due_time ?? ""
@@ -132,9 +138,40 @@ export function timelineTaskDialogState(block: Pick<PlanBlock, "task_status" | "
   return { status: "executing", label: "执行中", action: null } as const;
 }
 
-// Recycled tasks expose only existing blocks dated today or earlier. Their
-// planned facts remain actionable only through the completed-only path above.
+// Recycled tasks stay hidden from Day, Week, and Sidebar schedule views across
+// all dates until restored from Trash; original blocks remain in SQLite.
 export function visibleTaskScheduleBlocks(blocks: PlanBlock[], date: string, today: string) {
-  return blocks.filter((block) => (block.task_status !== "deleted" || date <= today)
+  return blocks.filter((block) => block.task_status !== "deleted"
     && !(date >= today && block.task_status === "done" && block.execution_status === "planned" && !block.review));
+}
+
+// Untimed ordinary tasks appear and count on selectedDate unless they already have
+// scheduled blocks on that day or were completed on another result date.
+export function visibleUntimedTasksForDate(
+  tasks: Task[],
+  taskBlocks: Pick<PlanBlock, "task_id">[],
+  date: string
+): Task[] {
+  const scheduledTaskIds = new Set(taskBlocks.map((block) => block.task_id));
+  return tasks.filter((task) => {
+    if (task.deleted_at || task.status === "deleted") return false;
+    if (task.earliest_start_at || task.due_at || task.earliest_start_time || task.due_time) return false;
+    if (scheduledTaskIds.has(task.id)) return false;
+    const startDate = task.earliest_start_date ?? task.due_date;
+    const endDate = task.due_date ?? task.earliest_start_date;
+    if (!startDate || !endDate) return false;
+    if (task.status === "done") {
+      return task.result_date ? task.result_date === date : (startDate <= date && date <= endDate);
+    }
+    return startDate <= date && date <= endDate;
+  });
+}
+
+export function formatSidebarSummaryDuration(minutes: number): string {
+  if (minutes <= 0) return "无固定时段";
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  if (hours > 0 && remainder > 0) return `${hours} 小时 ${remainder} 分`;
+  if (hours > 0) return `${hours} 小时`;
+  return `${minutes} 分钟`;
 }

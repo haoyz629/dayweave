@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { timelineDurationHeight, timelineLaneLayout } from "./timeline-lane-layout.ts";
+import { dayTimelineLayout, timelineDurationHeight, timelineLaneLayout } from "./timeline-lane-layout.ts";
 
 const item = (layoutKey, startMinute, endMinute) => ({ layoutKey, startMinute, endMinute });
 const lanesFor = (...items) => timelineLaneLayout(items);
@@ -112,14 +112,15 @@ test("drag previews cover draft blocks, multiple overlaps and exact adjacency", 
   assert.equal(timelineLaneLayout(items, item(key, 795, 855))[key].total, 1);
 });
 
-test("the timeline keeps dragged task blocks in their current lane and only wires slide-to-create into live preview lanes", () => {
+test("the real day timeline uses a dragged interval preview, arrival order, and width-based overflow lanes", () => {
   const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-  assert.match(app, /const timelineItemLanes = timelineLaneLayout\(timelineItems, selectedDate, timelineCreateRange\?\.dragging/);
-  assert.doesNotMatch(app, /timelineLaneLayout\(timelineItems, selectedDate, timelineDrag/);
-  assert.match(app, /drag \? \{ layoutKey: drag.key, startMinute: drag.start, endMinute: drag.end \} : null\)/);
-  assert.doesNotMatch(app, /timelineLaneOrderRef|rememberTimelineMove/);
+  assert.match(app, /const layoutDrag = timelineDrag && dragKey \?/);
+  assert.match(app, /const dayLayout = timelineLaneLayout\(timelineItems, selectedDate, layoutDrag,/);
+  assert.match(app, /timelineDrag\.originalStart !== timelineDrag\.start/);
+  assert.match(app, /timelineCreateRange\?\.dragging/);
   assert.match(app, /sourceLane: timelineItemLanes\[/);
-  assert.match(app, /className="timeline-drag-source"[^\n]+timelineDragRef.current.sourceLane/);
+  assert.match(app, /className="timeline-drag-source"[^\n]+timelineDragRef\.current\.sourceLane/);
+  assert.match(app, /timeline-overflow-trigger/);
 });
 
 test("shared overlap transitions animate horizontally without delaying vertical dragging", () => {
@@ -181,4 +182,31 @@ test("nonchronological placement never puts actual overlapping blocks in the sam
       assert.ok(a.column + a.columnSpan <= b.column || b.column + b.columnSpan <= a.column);
     }
   }
+});
+
+test("dayTimelineLayout keeps the original slot occupied during drag until mouse release", () => {
+  const items = [
+    item("block:a", 960, 1020),
+    item("block:b", 960, 1020),
+    item("block:c", 960, 1020),
+    item("block:moving", 960, 1020)
+  ];
+  const before = dayTimelineLayout(items, null, [], 5, null);
+  const dragging = dayTimelineLayout(
+    items,
+    item("block:moving", 900, 960),
+    [],
+    5,
+    "block:moving",
+    item("__drag_source__", 960, 1020)
+  );
+  assert.deepEqual(dragging.lanes["block:a"], before.lanes["block:a"]);
+  assert.deepEqual(dragging.lanes["block:b"], before.lanes["block:b"]);
+  assert.deepEqual(dragging.lanes["block:c"], before.lanes["block:c"]);
+  assert.deepEqual(dragging.lanes.__drag_source__, before.lanes["block:moving"]);
+  assert.equal(dragging.lanes["block:moving"].total, 1);
+
+  const released = dayTimelineLayout(items, item("block:moving", 900, 960), [], 5, "block:moving", null);
+  assert.equal(released.lanes["block:a"].total, 3);
+  assert.equal(released.lanes.__drag_source__, undefined);
 });

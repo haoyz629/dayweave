@@ -84,10 +84,11 @@ test("returning focuses and centers the exact ordinary or recurring block withou
     const scroller = { scrollTop: 200, clientHeight: 500, scrollHeight: 1800, getBoundingClientRect: () => ({ top: 100 }), querySelectorAll: () => [{ dataset: { timelineKind: kind === "block" ? "recurring" : "block", timelineId: item.id } }, target], scrollTo(options) { this.scrollTop = options.top; } };
     let frame, timeout;
     const state = { timelineReturnContext: { date: "2026-10-29", ...(kind === "recurring" ? { occurrenceId: item.id } : { blockId: item.id }) }, selectedDate: "2026-10-29", loading: false, schedule: {}, error: null, recurringOccurrences: [item], taskBlocks: [item], timelineScrollRef: { current: scroller }, onTimelineReturnHandled() { handled = true; }, window: { requestAnimationFrame(fn) { frame = fn; return 1; }, cancelAnimationFrame() {}, setTimeout(fn) { timeout = fn; }, matchMedia: () => ({ matches: true }) } };
-    setters(state, ["todayView", "followingNow", "timelineTooltip", "planDraftTimeEdit", "selection", "executionDraft", "executionMessage"]);
+    setters(state, ["todayView", "followingNow", "timelineTooltip", "planDraftTimeEdit", "selection", "executionDraft", "executionMessage", "revealedKey"]);
     vm.runInNewContext(compile(`(${returnEffect})()`), state);
     frame();
     assert.equal(state.todayView, "timeline");
+    assert.equal(state.revealedKey, `${kind === "recurring" ? "recurring" : "block"}:${item.id}`);
     assert.equal(state.followingNow, false);
     assert.equal(focused, true);
     assert.equal(handled, true);
@@ -103,12 +104,12 @@ test("return location uses a soft halo rather than a dark outline and retains ke
   const rule = css.match(/\.timeline-event\[data-return-located="true"\]\s*\{([^}]+)\}/)?.[1];
   assert.ok(rule);
   assert.match(rule, /outline:\s*none/);
-  assert.match(rule, /box-shadow:.*color-mix\(in srgb, var\(--state-plan-border\) 50%, transparent\)/);
+  assert.match(rule, /box-shadow:.*0 0 0 2\.5px rgb\(49 104 220 \/ 22%\), 0 4px 14px rgb\(49 104 220 \/ 12%\)/);
   assert.match(css, /\.timeline-event-body:focus-visible\s*\{[^}]*outline:\s*2px solid/);
 });
 
 test("recurring edit header returns to timeline while ordinary edit still returns to details", () => {
-  const state = load(["TaskContextReturnButton", "TaskPageHeader"], { React, Icon: () => null, recurringItemStatusLabel: () => "进行中", taskListStatus: task => task.status, statusCopy: { scheduled: "已安排" } });
+  const state = load(["TaskContextReturnButton", "TaskPageHeader"], { React, Icon: () => null, recurringItemStatusLabel: () => "进行中", taskListStatus: task => task.status, statusCopy: { scheduled: "进行中" } });
   for (const [props, expected] of [
     [{ task: { frequency: "daily", status: "active" }, editing: true, backLabel: "返回今日计划中的任务块" }, "返回今日计划中的任务块"],
     [{ task: { status: "scheduled" }, editing: true }, "返回任务详情"]
@@ -241,8 +242,8 @@ test("recurring block editor reuses an overlay calendar and compact midnight-awa
 
 test("inputs-only range keeps presets and inline labels without the rail, while defaults stay intact", () => {
   const state = load(["timeRangeFields", "BlockEditorTimeRangeRail"], {
-    React, compactBlockDuration, Fragment: React.Fragment, Icon: () => null, useRef: React.useRef, useState: React.useState, useEffect: React.useEffect,
-    MIN_TASK_BLOCK_MINUTES: 15,
+    React, compactBlockDuration, Fragment: React.Fragment, Icon: () => null, TimeWheelTrigger: () => null, TimeWheelPopover: () => null, useRef: React.useRef, useState: React.useState, useEffect: React.useEffect,
+    MIN_TASK_BLOCK_MINUTES: 15, applyTimeWheelSelection: (edge, clock, current) => current,
     clockMinutes: value => { const [h, m] = value.split(":").map(Number); return h * 60 + m; },
     minutesClock: minute => `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`,
     focusedTimeRangePresentation: () => ({ kind: "continuous", window: { start: 480, end: 720 } }),

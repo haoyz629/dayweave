@@ -33,9 +33,10 @@
 .week-day-head-main:hover { background: rgb(15 23 42 / 4%); }
 .week-col-name { color: #475569; font-size: 12px; font-weight: 500; line-height: 16px; }
 .week-day-col-head.weekend .week-col-name { color: #c2410c; }
-.week-day-col-head.today .week-col-name { color: var(--color-red-ink); font-weight: 600; }
+.week-day-col-head.today .week-col-name { color: var(--today-red); font-weight: 600; }
 .week-col-num { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; color: #0f172a; font-size: 16px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
-.week-day-col-head.today .week-col-num { color: var(--today-red-label); background: var(--today-red); font-weight: 700; }
+.week-day-col-head.today.selected .week-col-num { color: var(--today-red-label); background: var(--today-red); font-weight: 700; }
+.week-day-col-head.today:not(.selected) .week-col-num { color: var(--today-red); background: transparent; font-weight: 700; }
 .week-col-count-pill { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px; color: #475569; background: rgb(15 23 42 / 5%); font-size: 11px; font-weight: 500; line-height: 16px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .week-open-day-btn { display: inline-flex; align-items: center; justify-content: center; height: 20px; padding: 0 8px; border: 1px solid transparent; border-radius: 4px; color: #475569; background: transparent; font-size: 11px; font-weight: 500; line-height: 18px; white-space: nowrap; transition: color .12s ease, background .12s ease, border-color .12s ease; }
 .week-open-day-btn:hover { color: var(--color-primary); border-color: #bfdbfe; background: #eff6ff; }

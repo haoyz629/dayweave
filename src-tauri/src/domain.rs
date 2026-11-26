@@ -1,4 +1,4 @@
-use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime, TimeZone};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
@@ -339,8 +339,68 @@ pub fn validate_complete_task_schedule(
     due_time: &Option<String>,
 ) -> AppResult<()> {
     validate_date_constraints(earliest_date, earliest_time, due_date, due_time)?;
-    if earliest_date.is_none() || earliest_time.is_none() || due_date.is_none() || due_time.is_none() {
-        return Err(AppError::Domain("任务开始和结束时间都必须填写；信息不完整时只能保存为草稿".into()));
+    if earliest_date.is_none() || due_date.is_none() {
+        return Err(AppError::Domain("任务开始和结束日期都必须填写；信息不完整时只能保存为草稿".into()));
+    }
+    if earliest_time.is_some() != due_time.is_some() {
+        return Err(AppError::Domain("任务开始和结束时刻需同时填写或同时留空；信息不完整时只能保存为草稿".into()));
+    }
+    Ok(())
+}
+
+/// Validates that a cross-day timed task carries enough workload (>= 15 min/day) and at least one schedulable day.
+pub fn validate_cross_day_timed_workload(
+    earliest_date: &Option<String>,
+    earliest_time: &Option<String>,
+    due_date: &Option<String>,
+    due_time: &Option<String>,
+    total_workload_minutes: Option<i64>,
+) -> AppResult<()> {
+    let (Some(start_date), Some(start_time), Some(end_date), Some(end_time)) =
+        (earliest_date, earliest_time, due_date, due_time)
+    else {
+        return Ok(());
+    };
+    if start_date >= end_date {
+        return Ok(());
+    }
+    let start = parse_shanghai_timestamp(&format!("{start_date}T{start_time}:00+08:00"))?;
+    let end = parse_shanghai_timestamp(&format!("{end_date}T{end_time}:00+08:00"))?;
+    let days = (end.date_naive() - start.date_naive()).num_days() + 1;
+    if days <= 1 {
+        return Ok(());
+    }
+    let total = total_workload_minutes.ok_or_else(|| {
+        AppError::Domain("跨日指定时刻任务必须填写平均每日投入（至少 15 分钟）".into())
+    })?;
+    if total < days * MIN_TASK_BLOCK_MINUTES {
+        return Err(AppError::Domain(format!(
+            "跨日指定时刻任务的平均每日投入至少需要 {MIN_TASK_BLOCK_MINUTES} 分钟"
+        )));
+    }
+    let offset = FixedOffset::east_opt(SHANGHAI_OFFSET_SECONDS)
+        .ok_or_else(|| AppError::Domain("无法创建中国标准时间偏移".into()))?;
+    let midnight = NaiveTime::from_hms_opt(0, 0, 0).expect("valid midnight");
+    let has_schedulable_day = (0..days).any(|day| {
+        let date = start.date_naive() + chrono::Duration::days(day);
+        let Some(lower_day) = offset.from_local_datetime(&date.and_time(midnight)).single() else {
+            return false;
+        };
+        let Some(upper_day) = offset
+            .from_local_datetime(&(date + chrono::Duration::days(1)).and_time(midnight))
+            .single()
+        else {
+            return false;
+        };
+        let lower = lower_day.max(start);
+        let upper = upper_day.min(end);
+        let planned = total / days + i64::from(day < total % days);
+        planned.min((upper - lower).num_minutes()) >= MIN_TASK_BLOCK_MINUTES
+    });
+    if !has_schedulable_day {
+        return Err(AppError::Domain(
+            "跨日任务的可用时段每天均不足 15 分钟，请延长时间范围或改用不限时刻".into(),
+        ));
     }
     Ok(())
 }

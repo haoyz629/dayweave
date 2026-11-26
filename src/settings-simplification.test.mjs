@@ -14,7 +14,6 @@ const settings = source.statements.find((node) => ts.isFunctionDeclaration(node)
 assert.ok(settings);
 const text = settings.getText(source);
 const compile = (value) => ts.transpileModule(value, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
-const availability = { weekdays: [1, 2, 3, 4, 5], workday_start: "09:00", workday_end: "18:00", makeup_workdays_as_workdays: true };
 
 function handler(name) {
   const declaration = settings.body.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === name);
@@ -26,7 +25,7 @@ function harness() {
   const state = {
     taskLead: 10, desktop: { autostart: true, closeToTray: false },
     savedPreferences: { current: { taskLead: 5, desktop: { autostart: false, closeToTray: true } } },
-    draft: structuredClone(availability), availabilityDirty: false, dirty: true, ready: true,
+    dirty: true, ready: true,
     applyingRef: { current: false }, saving: false, saveMessage: "", confirmClose: false,
     writes: [], reads: [], notices: [], localFeedback: [], preferenceMessage: "", failure: null, closes: 0,
     async setUiSetting(key, value) {
@@ -39,22 +38,19 @@ function harness() {
     },
     async getAutostartEnabled() { return true; },
     async setAutostartEnabled(value) { state.writes.push(["autostart", value]); return value; },
-    async saveAvailabilitySettings(value) { state.writes.push(["availability", value]); return value; },
     setSaving(value) { state.saving = value; },
     setSaveMessage(value) { state.saveMessage = value; },
     setConfirmClose(value) { state.confirmClose = value; },
     setPreferenceMessage(value) { state.preferenceMessage = value; },
     setTaskLead(value) { state.taskLead = value; },
     setDesktop(value) { state.desktop = value; },
-    setDraft(value) { state.draft = value; },
-    onSaved(value) { state.savedAvailability = value; },
     onClose() { state.closes++; },
     onNotify(...args) { state.notices.push(args); },
     showFeedback(...args) { state.localFeedback.push(args); },
     uiErrorMessage: String
   };
   const context = vm.createContext(state);
-  for (const name of ["submitAvailability", "savePreferences", "applySettings", "requestClose", "restoreDefaults"])
+  for (const name of ["savePreferences", "applySettings", "requestClose", "restoreDefaults"])
     vm.runInContext(compile(handler(name)), context);
   return { state, context };
 }
@@ -67,23 +63,23 @@ assert.ok(loadEffect);
 test("settings modal retains core controls without bringing back retired settings", () => {
   const context = vm.createContext({
     React, CopySeparator, useState: React.useState, useEffect: React.useEffect, useRef: React.useRef,
-    Logo: () => null, Icon: () => null, BlockEditorTimeRangeRail: () => null, HolidayCalendarSettings: () => React.createElement("p", null, "检查节假日更新")
+    Logo: () => null, Icon: () => null, HolidayCalendarSettings: () => React.createElement("p", null, "检查节假日更新")
   });
   vm.runInContext(compile(text), context);
   const html = renderToStaticMarkup(React.createElement(context.SettingsPage, {
-    availability, availabilityError: null, onSaved() {}, onReload() {}, onClose() {}
+    onClose() {}
   }));
-  for (const removed of ["晨间计划", "晚间复盘", "GitHub", "Codex", "明暗模式", "应用 Logo", "界面字号", "全局快捷键", "本地数据", "未加密", "数据与隐私", "回收站", "可配置", "已接入"])
+  for (const removed of ["晨间计划", "晚间复盘", "GitHub", "Codex", "明暗模式", "应用 Logo", "界面字号", "全局快捷键", "本地数据", "未加密", "数据与隐私", "回收站", "可配置", "已接入", "常规工作日", "调休补班日", "补班日计入工作日"])
     assert.equal(html.includes(removed), false, removed);
-  for (const retained of ["工作日", "调休补班日", "每日工作时段", "检查节假日更新", "任务块提前提醒", "测试通知", "开机启动", "关闭到托盘", "应用并关闭", "0–60 分钟，0 表示关闭"])
+  assert.doesNotMatch(html, /每日工作时段/);
+  for (const retained of ["节假日数据", "检查节假日更新", "任务块提前提醒", "测试通知", "开机启动", "关闭到托盘", "应用并关闭", "0–60 分钟，0 表示关闭"])
     assert.ok(html.includes(retained), retained);
   assert.match(html, /<dialog[^>]+aria-modal="true"/);
   assert.match(html, /role="switch" aria-label="开机启动"/);
   assert.match(html, /role="switch" aria-label="关闭到托盘"/);
-  assert.match(html, /type="checkbox" aria-label="补班日计入工作日" checked=""/);
   assert.match(html, /inputMode="numeric" autoComplete="off" min="0" max="60" step="1" aria-describedby="settings-reminder-help"/);
   assert.doesNotMatch(html, /节假日涉及的补班日自动识别为工作日|任务开始前发送桌面通知/);
-  assert.doesNotMatch(text, /settingsCategories|previewAppearance/);
+  assert.doesNotMatch(text, /settingsCategories|previewAppearance|availability/);
   assert.doesNotMatch(app, /label: "设置"|active === "设置"|settingsEditorDirty/);
 });
 
@@ -132,7 +128,7 @@ test("apply saves only changed settings and closes only after success", async ()
   assert.deepEqual(state.writes, []);
 });
 
-test("invalid reminder or empty weekdays cannot write any settings", async () => {
+test("invalid reminder cannot write any settings", async () => {
   for (const value of [-1, 61, 1.5, NaN]) {
     const { state } = harness(); state.taskLead = value;
     await state.applySettings(true);
@@ -140,10 +136,6 @@ test("invalid reminder or empty weekdays cannot write any settings", async () =>
     assert.match(state.saveMessage, /0 到 60 分钟的整数/);
     assert.equal(state.closes, 0);
   }
-  const { state } = harness(); state.draft.weekdays = [];
-  await state.applySettings(true);
-  assert.deepEqual(state.writes, []);
-  assert.match(state.saveMessage, /至少选择一个工作日/);
 });
 
 test("partial failure waits for all writes, retains successful snapshots, and retries failures only", async () => {
@@ -170,23 +162,12 @@ test("partial failure waits for all writes, retains successful snapshots, and re
   assert.deepEqual(state.writes, [["ui.reminder.task_lead", "10"], ["ui.desktop.close_to_tray", "false"]]);
 });
 
-test("availability failure cannot close the modal or discard successful preferences", async () => {
-  const { state } = harness(); state.availabilityDirty = true;
-  state.saveAvailabilitySettings = async () => { throw "工作时间失败"; };
-  await state.applySettings(true);
-  assert.equal(state.closes, 0);
-  assert.equal(state.savedPreferences.current.taskLead, 10);
-  assert.equal(state.savedAvailability, undefined);
-  assert.match(state.saveMessage, /工作时间失败/);
-});
-
 test("defaults and discard protection never write until Apply", () => {
   const { state } = harness();
   state.restoreDefaults();
   assert.equal(state.taskLead, 5);
   assert.equal(state.desktop.autostart, false);
   assert.equal(state.desktop.closeToTray, true);
-  assert.deepEqual(JSON.parse(JSON.stringify(state.draft)), availability);
   assert.deepEqual(state.writes, []);
   state.requestClose();
   assert.equal(state.confirmClose, true);
@@ -221,14 +202,14 @@ test("startup ignores retired settings while retaining persistence and task noti
   assert.doesNotMatch(app, /--app-font-size/);
 });
 
-test("settings use shared task time fields and transient feedback without replacing save errors", () => {
-  assert.match(text, /<BlockEditorTimeRangeRail[^>]+inputsOnly showPresets=\{false\}[^>]+onChange=\{updateWorkdayRange\}/);
+test("settings remove workday controls and keep transient feedback without replacing save errors", () => {
+  assert.doesNotMatch(app, /workday_start|workday_end|updateWorkdayRange|availabilityWorkdayOn|getAvailabilitySettings|saveAvailabilitySettings/);
   assert.match(text, /<HolidayCalendarSettings compact onResult=\{showFeedback\}/);
   assert.match(text, /sendTestNotification\(\)\.then\(\(\) => showFeedback\("测试通知已发送"\)\)/);
   assert.match(text, /<Toast key=\{feedback.id\} container=\{feedbackHost\}[^>]+duration=\{4000\}/);
   assert.doesNotMatch(text, /setPreferenceMessage\("测试通知已发送"\)/);
   assert.doesNotMatch(text, /onNotify/);
-  assert.match(handler("applySettings"), /showFeedback\(`设置未全部应用：\$\{errors.join\("；"\)\}`, true\)/);
+  assert.match(handler("applySettings"), /showFeedback\(`设置未全部应用：\$\{errorText\}`, true\)/);
   assert.match(text, /className="settings-dialog-content" tabIndex=\{0\} role="region"/);
   assert.match(text, /<fieldset className="settings-dialog-fields" disabled=\{saving\}/);
   const state = { feedbackId: { current: 0 }, setFeedback(value) { state.feedback = value; } };

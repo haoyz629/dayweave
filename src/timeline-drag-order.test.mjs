@@ -3,38 +3,40 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
-import { timelineLaneLayout as calculateTimelineLanes } from "./timeline-lane-layout.ts";
+import { dayTimelineLayout } from "./timeline-lane-layout.ts";
 
 const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const names = ["timelineLaneLayout", "planDraftLayoutKeys", "clearTimelineDrag", "cancelTimelineDrag", "cancelRecurringChange", "finishTimelineDrag", "commitTimelineRecurringChange"];
+names.push("rememberArrival");
 const functions = new Map();
-let lanesInitializer = "";
+const layoutDeclarations = [];
 function collect(node) {
   if (ts.isFunctionDeclaration(node) && names.includes(node.name?.text)) functions.set(node.name.text, node.getText(source));
-  if (ts.isVariableDeclaration(node) && node.name.getText(source) === "timelineItemLanes" && node.initializer) {
-    lanesInitializer = node.initializer.getText(source);
+  if (ts.isVariableDeclaration(node) && ["arrivalKeys", "dragKey", "layoutDrag", "preferredKey", "dayLayout", "timelineItemLanes"].includes(node.name.getText(source))) {
+    layoutDeclarations.push(`const ${node.getText(source)};`);
   }
   ts.forEachChild(node, collect);
 }
 collect(source);
 for (const name of names) assert.ok(functions.has(name), `exercise the real ${name} handler`);
-assert.ok(lanesInitializer, "exercise the real timelineItemLanes initializer");
+assert.equal(layoutDeclarations.length, 6);
 const code = ts.transpileModule([
   ...functions.values(),
-  `function currentTimelineLanes() { return ${lanesInitializer}; }`
+  `function currentTimelineLanes() { ${layoutDeclarations.join("\n")} return timelineItemLanes; }`
 ].join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 const date = "2026-11-03";
 const stamp = minute => `${date}T${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}:00+08:00`;
 
-function harness({ draft = false, recurring = false, fail = false, initialOverlap = false } = {}) {
+function harness({ draft = false, recurring = false, fail = false, initialOverlap = false, tie = false } = {}) {
   const calls = [];
-  const initialStart = initialOverlap ? 540 : 300;
-  const initialEnd = initialOverlap ? 660 : 360;
+  const initialStart = tie ? 540 : initialOverlap ? 540 : 300;
+  const initialEnd = tie ? 600 : initialOverlap ? 660 : 360;
   const block = { id: "moving", task_id: "task", starts_at: stamp(initialStart), ends_at: stamp(initialEnd), estimated_minutes: initialEnd - initialStart };
-  const target = { layoutKey: "block:target", starts_at: stamp(600), ends_at: stamp(720) };
+  const target = { layoutKey: "block:target", starts_at: stamp(600), ends_at: stamp(tie ? 660 : 720) };
   const state = {
-    calculateTimelineLanes, selectedDate: date, timelineItems: [], tasks: [{ id: "task" }],
+    dayTimelineLayout, selectedDate: date, timelineItems: [], tasks: [{ id: "task" }], arrivals: [], selection: null, laneCapacity: 5, revealedKey: null, savingLayoutKey: null,
+    setArrivals(update) { state.arrivals = update(state.arrivals); },
     timelineCreateRange: null,
     timelineDragFrameRef: { current: 0 },
     timelineDragRef: { current: null }, timelineDragSavingRef: { current: false }, timelineDragClickRef: { current: null },
@@ -51,9 +53,9 @@ function harness({ draft = false, recurring = false, fail = false, initialOverla
     async onSaveBlockTime(savedBlock, starts_at, ends_at) {
       calls.push(["save", savedBlock.id]);
       if (fail) throw new Error("save failed");
-      assertInSourceLane(); // Stay in current lane until the new time is committed.
+      assertInSourceLane(); // Preview must not cover the target while the save is pending.
       state.timelineItems = [{ ...savedBlock, layoutKey: "block:moving", starts_at, ends_at }, target];
-      assertChronological();
+      assertInSourceLane();
     },
     async onUpdatePlan(preview) {
       calls.push(["draft"]);
@@ -61,7 +63,7 @@ function harness({ draft = false, recurring = false, fail = false, initialOverla
       assertInSourceLane();
       const key = state.planDraftLayoutKeys(preview.blocks)[0];
       state.timelineItems = [{ ...preview.blocks[0], layoutKey: key }, target];
-      assertChronological(key);
+      assertInSourceLane(key);
     },
     async updateRecurringOccurrence() {
       calls.push(["recurring"]);
@@ -71,17 +73,16 @@ function harness({ draft = false, recurring = false, fail = false, initialOverla
       state.timelineItems = [{ ...block, layoutKey: "recurring:occurrence", starts_at: stamp(newStart), ends_at: stamp(newEnd) }, target];
     }
   };
-  for (const key of ["timelineDrag", "savingDraggedBlock", "timelineTooltip", "pendingRecurringChange", "savingRecurringChange", "recurringChangeError"]) {
+  for (const key of ["timelineDrag", "savingDraggedBlock", "timelineTooltip", "pendingRecurringChange", "savingRecurringChange", "recurringChangeError", "revealedKey", "savingLayoutKey"]) {
     state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = value; };
   }
   vm.runInContext(code, vm.createContext(state));
   const key = recurring ? "recurring:occurrence" : draft ? state.planDraftLayoutKeys([block])[0] : "block:moving";
   state.timelineItems = [{ ...block, layoutKey: key }, target];
   const sourceLane = { ...state.currentTimelineLanes()[key] };
-  const targetSourceLane = { ...state.currentTimelineLanes()["block:target"] };
-  const dragStart = initialOverlap ? 630 : 570;
+  const dragStart = tie ? 600 : initialOverlap ? 630 : 570;
   const dragEnd = dragStart + (initialEnd - initialStart);
-  state.timelineDrag = { key, start: dragStart, end: dragEnd, x: 0, y: 0 };
+  state.timelineDrag = { key, start: dragStart, end: dragEnd, originalStart: initialStart, x: 0, y: 0 };
   state.timelineDragRef.current = {
     key, block, draftIndex: draft ? 0 : null, preview: draft ? { blocks: [block] } : null,
     pointerId: 1, originalStart: initialStart, duration: initialEnd - initialStart, start: dragStart, active: true,
@@ -92,12 +93,12 @@ function harness({ draft = false, recurring = false, fail = false, initialOverla
   function layout() {
     return state.currentTimelineLanes();
   }
-  function assertInSourceLane() {
-    assert.deepEqual(layout()[key], sourceLane, "dragged block stays in its current lane during drag");
-    assert.deepEqual(layout()["block:target"], targetSourceLane, "neighbour blocks keep their current lanes during drag");
+  function assertInSourceLane(movingKey = key) {
+    assert.equal(layout()[movingKey].column, 1, "preview uses the right column");
+    assert.equal(layout()["block:target"].column, 0);
   }
   function assertChronological(movingKey = key) {
-    if (initialOverlap) {
+    if (initialOverlap || tie) {
       assert.equal(layout()["block:target"].column, 0);
       assert.equal(layout()[movingKey].column, 1);
     } else {
@@ -108,7 +109,7 @@ function harness({ draft = false, recurring = false, fail = false, initialOverla
   return { state, calls, key, layout, assertInSourceLane, assertChronological };
 }
 
-test("dragging a task block keeps it in its current lane during drag and repositions after saving", async () => {
+test("dragging uses the target overlap group and restores chronological order after saving a partial overlap", async () => {
   for (const initialOverlap of [false, true]) {
     const current = harness({ initialOverlap });
     current.assertInSourceLane();
@@ -121,7 +122,7 @@ test("dragging a task block keeps it in its current lane during drag and reposit
   }
 });
 
-test("draft drag stays in its current lane while dragging and repositions after its time-based layout key updates", async () => {
+test("draft drag receives its updated time-based layout key after saving", async () => {
   const current = harness({ draft: true });
   current.assertInSourceLane();
   await current.state.finishTimelineDrag({ pointerId: 1 });
@@ -188,5 +189,16 @@ test("cancelled or failed recurring confirmation preserves the original schedule
     assert.equal(pending.state.timelineDrag, null);
     assert.equal(pending.state.timelineItems[0].starts_at, stamp(300));
     assert.equal(pending.layout()[pending.key].total, 1);
+  }
+});
+
+test("identical intervals retain their preview columns after successful ordinary, draft and recurring moves", async () => {
+  for (const variant of [{}, {draft:true}, {recurring:true}]) {
+    const h = harness({...variant, tie:true});
+    const before = h.layout()[h.key];
+    await h.state.finishTimelineDrag({pointerId:1});
+    if (variant.recurring) await h.state.commitTimelineRecurringChange("this");
+    assert.deepEqual(h.layout()[h.state.timelineItems[0].layoutKey], before);
+    assert.equal(h.state.arrivals.length, 1);
   }
 });

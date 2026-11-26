@@ -145,9 +145,10 @@ test("calendar view switch fills three equal columns with uniform frame insets",
   assert.ok(frame);
   assert.match(frame, /display: grid; grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
   assert.match(frame, /gap: 3px;/);
-  assert.match(frame, /box-sizing: border-box; width: 204px; height: 34px; padding: 3px; border: 1px/);
-  assert.match(css, /\.app-titlebar \.timeline-view-switch button \{ width: 100%; min-width: 0; min-height: 26px; height: 26px;/);
-  assert.match(css, /@media \(max-width: 600px\)[\s\S]*\.app-titlebar \.timeline-view-switch \{ width: 170px; \}/);
+  assert.match(frame, /box-sizing: border-box; width: 228px; height: 32px; padding: 3px; border: 1px/);
+  assert.match(css, /\.app-titlebar \.timeline-view-switch button \{[^}]*width: 100%; min-width: 0; min-height: 24px; height: 24px;/);
+  assert.match(css, /\.app-titlebar \.timeline-view-switch\[data-scope="tasks"\] button \{/);
+  assert.match(css, /@media \(max-width: 600px\)[\s\S]*\.app-titlebar \.timeline-view-switch \{ width: 192px; \}/);
 });
 
 test("title bar exposes optional task creation without adding keyboard shortcut badges", () => {

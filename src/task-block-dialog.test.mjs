@@ -27,7 +27,7 @@ export function createDialogHarness({ status = "executing", expired = false, del
   const outcome = status === "completed" ? "completed" : status === "not_completed" ? "not_started" : "planned";
   const taskStatus = deleted ? "deleted" : status === "completed" ? "done" : "scheduled";
   const block = { id: "block", task_id: "task", task_title: "1020", task_status: taskStatus, starts_at: `${date}T09:00:00+08:00`, ends_at: `${date}T10:00:00+08:00`, execution_status: outcome, execution_note: null, execution_captured_at: outcome === "planned" ? null : `${date}T10:00:00+08:00`, actual_minutes: null, review: null };
-  const task = { id: "task", title: "1020", priority: "medium", tags: ["工作"], status: taskStatus, result_date: status === "completed" ? date : null, result_ends_at: block.ends_at };
+  const task = { id: "task", title: "1020", priority: "medium", tags: ["工作"], status: taskStatus, result_date: status === "completed" ? date : null, result_ends_at: block.ends_at, deleted_at: deleted ? `${date}T11:00:00+08:00` : null };
   task.earliest_start_date = date;
   task.due_date = crossDay ? "2026-10-22" : date;
   const calls = [];
@@ -38,10 +38,11 @@ export function createDialogHarness({ status = "executing", expired = false, del
     selectedBlockCompletionAction: timelineTaskCompletionAction(block, task, date, today, now),
     canRecordSelectedBlock: canCaptureTaskResult(date, today, block, now),
     canAdjustSelectedBlock: outcome === "planned" && !expired && !deleted,
+    canTrashSelectedBlock: !deleted && !expired && outcome === "planned" && !block.review && ["open", "scheduled"].includes(taskStatus),
     selectedResultWindowOpen: date === today && resultWindowOpen(date, block.ends_at, now),
     executionDraft: { result: outcome === "planned" ? null : executionResultForOutcome(outcome), outcome: outcome === "planned" ? null : outcome, note: "" },
     executionResultOptions: [["completed", "完成"], ["not_completed", "未完成"]],
-    savingExecution: false, quickCompletingBlockId: null, savingDraggedBlock: false, timelineDrag: null, preview: null,
+    savingExecution: false, quickCompletingBlockId: null, savingDraggedBlock: false, timelineDrag: null, preview: null, trashingBlock: false,
     busy, loading: false, executionMessage: "", selectedDate: date, today,
     recycledCompletionNote: "", setRecycledCompletionNote(value) { state.recycledCompletionNote = value; },
     reviewOutcomeCopy: { completed: "完成", not_started: "未完成" }, taskNextActionLabels: {},
@@ -49,7 +50,7 @@ export function createDialogHarness({ status = "executing", expired = false, del
     closeTimelinePanel() { calls.push(["close"]); },
     openTimelineTask(...args) { calls.push(["open", ...args]); },
     adjustSelectedBlockTime() { calls.push(["adjust"]); },
-    removeSelectedBlock() { calls.push(["remove", block.id]); },
+    requestTrashSelectedBlock() { calls.push(["trash", block.id]); },
     quickCompleteTimelineBlock(block) { calls.push(["reopen", block.id]); },
     onNewTask(seed) { calls.push(["new", seed]); },
     saveSelectedBlockExecution() { calls.push(["save", { ...state.executionDraft }]); },
@@ -86,8 +87,13 @@ test("unsaved outcome choices keep the saved-state action and expose an optional
     const current = createDialogHarness({ status });
     assert.equal(current.elements().filter(node => node.type === "textarea").length, 1);
     const before = current.state.selectedBlockDialog;
-    const choose = current.elements().find(node => node.props["data-outcome"] === "not_completed");
-    choose.props.onClick();
+    const choose = () => current.elements().find(node => node.props["data-outcome"] === "not_completed");
+    choose().props.onClick();
+    if (status === "not_completed") {
+      assert.equal(current.state.executionDraft.result, null);
+      assert.equal(current.state.executionDraft.outcome, null);
+      choose().props.onClick();
+    }
     assert.equal(current.state.executionDraft.result, "not_completed");
     assert.deepEqual(current.state.selectedBlockDialog, before);
     button(current, "primary-action").props.onClick();
@@ -166,20 +172,30 @@ test("dialog state handles legacy incomplete facts without conflicting actions",
   assert.equal(timelineTaskDialogState({ task_status: "scheduled", execution_status: "completed", review: null }).action, "uncomplete-block", "cancellation applies only to this block even while the task remains scheduled");
 });
 
-test("current planned blocks expose direct removal and protected records do not", () => {
+test("current planned blocks expose Move to Trash and protected blocks do not", () => {
   for (const crossDay of [false, true]) {
     const current = createDialogHarness({ crossDay });
-    button(current, "execution-remove-today").props.onClick();
-    assert.deepEqual(current.calls, [["remove", "block"]]);
-    for (const options of [{ status: "completed" }, { status: "not_completed" }, { expired: true }, { deleted: true }]) {
+    const trashButton = button(current, "execution-remove-today");
+    assert.match(renderToStaticMarkup(trashButton), />移入回收站<\/button>/);
+    trashButton.props.onClick();
+    assert.deepEqual(current.calls, [["trash", "block"]]);
+    for (const options of [
+      { status: "completed" },
+      { status: "not_completed" },
+      { expired: true },
+      { deleted: true }
+    ]) {
       assert.equal(button(createDialogHarness({ ...options, crossDay }), "execution-remove-today"), undefined);
     }
-    for (const flags of [{ busy: true }, { loading: true }, { savingExecution: true }, { quickCompletingBlockId: "block" }, { savingDraggedBlock: true }, { timelineDrag: {} }, { preview: {} }]) {
+    for (const flags of [{ busy: true }, { loading: true }, { savingExecution: true }, { quickCompletingBlockId: "block" }, { savingDraggedBlock: true }, { timelineDrag: {} }, { preview: {} }, { trashingBlock: true }]) {
       const current = createDialogHarness({ crossDay });
       Object.assign(current.state, flags);
       assert.equal(Boolean(button(current, "execution-remove-today").props.disabled), true);
     }
   }
+  const lockedCrossDay = createDialogHarness({ crossDay: true });
+  lockedCrossDay.state.canAdjustSelectedBlock = false;
+  assert.ok(button(lockedCrossDay, "execution-remove-today"));
 });
 
 test("cross-day completion choices stay in the dialog until Save while keeping removal for unexecuted blocks", () => {
@@ -304,6 +320,10 @@ test("choosing incomplete overrides saved whole completion until the draft is ch
         assert.deepEqual(current.calls, []);
       };
       choose("not_completed");
+      if (status === "not_completed") {
+        assertChoices([false, false, false]);
+        choose("not_completed");
+      }
       assertIncomplete();
       current.elements().find(node => node.type === "textarea").props.onChange({ target: { value: "尚未完成" } });
       assertIncomplete();
@@ -410,13 +430,38 @@ test("ordinary completed choices toggle off as a draft without a duplicate foote
   }
 });
 
-test("a new completion choice can be unchecked back to the original empty draft", () => {
-  const current = createDialogHarness();
-  const completed = () => current.elements().find(node => node.props["data-outcome"] === "completed");
-  completed().props.onClick();
-  assert.equal(button(current, "primary-action").props.disabled, false);
-  completed().props.onClick();
-  assert.equal(current.state.executionDraft.outcome, null);
-  assert.equal(button(current, "primary-action").props.disabled, true);
-  assert.deepEqual(current.calls, []);
+test("a new completion or incomplete choice can be unchecked back to the original empty draft", () => {
+  for (const outcome of ["completed", "not_completed"]) {
+    const current = createDialogHarness();
+    const choice = () => current.elements().find(node => node.props["data-outcome"] === outcome);
+    choice().props.onClick();
+    assert.equal(button(current, "primary-action").props.disabled, false);
+    choice().props.onClick();
+    assert.equal(current.state.executionDraft.outcome, null);
+    assert.equal(button(current, "primary-action").props.disabled, true);
+    assert.deepEqual(current.calls, []);
+  }
+});
+
+test("saved incomplete choices toggle off on click and restore without persisting until Save", () => {
+  for (const crossDay of [false, true]) {
+    const current = createDialogHarness({ status: "not_completed", crossDay });
+    const incomplete = () => current.elements().find(node => node.props["data-outcome"] === "not_completed");
+    assert.equal(incomplete().props["aria-pressed"], true);
+    incomplete().props.onClick();
+    assert.equal(current.state.executionDraft.result, null);
+    assert.equal(current.state.executionDraft.outcome, null);
+    assert.equal(current.state.executionDraft.wholeTask, false);
+    assert.equal(incomplete().props["aria-pressed"], false);
+    assert.equal(button(current, "primary-action").props.disabled, false, "clearing incomplete is saveable");
+    assert.equal(current.state.selectedBlock.execution_status, "not_started");
+    assert.deepEqual(current.calls, [], "unchecking does not persist before Save");
+    incomplete().props.onClick();
+    assert.equal(incomplete().props["aria-pressed"], true);
+    assert.equal(button(current, "primary-action").props.disabled, true, "restoring saved incomplete is a no-op");
+    incomplete().props.onClick();
+    button(current, "primary-action").props.onClick();
+    assert.equal(current.calls[0][0], "save");
+    assert.equal(current.calls[0][1].outcome, null);
+  }
 });

@@ -73,7 +73,7 @@ fn legacy_database(connection: Connection) -> Database {
     for (id, priority) in [("high", Some("high")), ("medium", Some("medium")), ("low", Some("low")), ("none", None)] {
         connection.execute("INSERT INTO tasks (id,title,notes,priority,status,estimated_minutes,
             total_workload_minutes,remaining_workload_minutes,created_at,updated_at)
-            VALUES (?1,?1,'legacy notes',?2,'open',90,90,45,'created','updated')", params![id, priority]).unwrap();
+            VALUES (?1,?1,'legacy notes',?2,'scheduled',90,90,45,'created','updated')", params![id, priority]).unwrap();
         connection.execute(r#"INSERT INTO task_drafts (id,draft_kind,target_task_id,source_type,title,notes,priority,
             field_states_json,validation_status,version,confirmation_token,status,confirmed_task_id,created_at,updated_at,tags_json)
             VALUES (?1,'update',?1,'manual',?1,'draft notes',?2,'{"priority":"manually_edited"}',

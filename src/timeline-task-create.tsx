@@ -4,7 +4,8 @@ import { confirmCreationDraft, createManualTaskDraft, discardTaskDraft, saveTask
 import { TaskPrioritySelector } from "./task-priority-selector";
 import { TaskTagEditor } from "./task-tag-editor";
 import { joinTaskNotes, splitTaskNotes } from "./task-notes";
-import { constrainTimeRange, normalizeClockInput, sanitizeTimeInput } from "./time-range-control";
+import { applyTimeWheelSelection, constrainTimeRange, normalizeClockInput, sanitizeTimeInput } from "./time-range-control";
+import { TimeWheelPopover, TimeWheelTrigger } from "./time-wheel-picker";
 import "./timeline-task-create.css";
 import { TaskDurationPresets } from "./task-time-range-fields";
 
@@ -40,16 +41,17 @@ type SlideCreateFormState = {
 };
 
 // The task model uses same-date timestamps; 24:00 is not a valid time.
-function selectedRange(anchor: number, end: number): TimelineCreateRange {
-  const start = Math.min(1424, Math.max(0, Math.min(anchor, end)));
+function selectedRange(anchor: number, end: number, minMinute = 0): TimelineCreateRange {
+  const start = Math.min(1424, Math.max(minMinute, Math.min(anchor, end)));
   return { start, end: Math.min(1439, Math.max(start + 15, anchor, end)) };
 }
 
-export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, onRange, onStart, onCreated }: {
+export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, axisStart = 0, onRange, onStart, onCreated }: {
   date: string;
   disabled: boolean;
   scrollRef: RefObject<HTMLDivElement>;
   pixelsPerHour: number;
+  axisStart?: number;
   onRange: (range: TimelineCreateRange | null) => void;
   onStart: () => void;
   onCreated: (task: Task) => Promise<void>;
@@ -66,6 +68,9 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
   const [form, setForm] = useState<SlideCreateFormState | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [openWheel, setOpenWheel] = useState<"start" | "end" | null>(null);
+  const startBoxRef = useRef<HTMLDivElement>(null);
+  const endBoxRef = useRef<HTMLDivElement>(null);
 
   function clearPointer() {
     const active = pointer.current;
@@ -78,7 +83,7 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
   function cancelSelection() { if (pointer.current) { clearPointer(); clearRange(); } }
   function close() {
     if (savingRef.current) return;
-    clearPointer(); clearRange(); setForm(null); setError("");
+    clearPointer(); clearRange(); setForm(null); setError(""); setOpenWheel(null);
     const draft = draftRef.current;
     draftRef.current = null; savedInputRef.current = "";
     if (draft) void discardTaskDraft(draft).catch(() => {});
@@ -87,7 +92,8 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
 
   function snapAt(y: number) {
     const top = trackRef.current!.getBoundingClientRect().top;
-    return Math.max(0, Math.min(1440, Math.round((y - top) / pixelsPerHour * 60 / 15) * 15));
+    const minMinute = typeof axisStart === "number" ? axisStart : 0;
+    return Math.max(minMinute, Math.min(1440, minMinute + Math.round((y - top) / pixelsPerHour * 60 / 15) * 15));
   }
 
   function updateSelection() {
@@ -96,7 +102,7 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
     const end = snapAt(active.y);
     if (end !== active.anchor) active.moved = true;
     if (active.moved && end === active.anchor) { clearRange(); return; }
-    rangeRef.current = selectedRange(active.anchor, end);
+    rangeRef.current = selectedRange(active.anchor, end, typeof axisStart === "number" ? axisStart : 0);
     onRange({ ...rangeRef.current, dragging: true });
   }
 
@@ -111,7 +117,7 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
   }
 
   function open(range: TimelineCreateRange) {
-    rangeRef.current = range; onRange(range); onStart(); setError("");
+    rangeRef.current = range; onRange(range); onStart(); setError(""); setOpenWheel(null);
     setForm({ title: "", start: clock(range.start), end: clock(range.end), priority: "high", tags: [], notes: "", notesExpanded: false });
   }
 
@@ -162,13 +168,34 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
     updateTimes(field, clock(next[field]));
   }
 
+  function applyWheelTime(field: "start" | "end", nextClock: string) {
+    if (!form) return;
+    const currentRange = {
+      start: Number.isFinite(minute(form.start)) ? form.start : clock(rangeRef.current?.start ?? 9 * 60),
+      end: Number.isFinite(minute(form.end)) ? form.end : clock(rangeRef.current?.end ?? 10 * 60)
+    };
+    const next = applyTimeWheelSelection(field, nextClock, currentRange, {
+      minimumDuration: 15,
+      maximumMinute: 23 * 60 + 59
+    });
+    setForm({ ...form, start: next.start, end: next.end });
+    setError("");
+    const nextStart = minute(next.start), nextEnd = minute(next.end);
+    if (Number.isFinite(nextStart) && Number.isFinite(nextEnd) && nextEnd - nextStart >= 15) {
+      rangeRef.current = { start: nextStart, end: nextEnd };
+      onRange(rangeRef.current);
+    }
+  }
+
   function renderTimeInput(field: "start" | "end") {
     if (!form) return null;
     return <input type="text" name={field} inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={5} value={form[field]} aria-label={field === "start" ? "输入开始时间" : "输入结束时间"}
       onFocus={(event) => event.currentTarget.select()}
+      onClick={() => setOpenWheel(field)}
       onChange={(event) => { setForm({ ...form, [field]: sanitizeTimeInput(event.target.value) }); setError(""); }}
       onBlur={(event) => commitTimeInput(field, event.currentTarget.value)}
       onKeyDown={(event) => {
+        if (event.altKey && event.key === "ArrowDown") { event.preventDefault(); setOpenWheel(field); return; }
         if (event.key === "Enter") { event.preventDefault(); commitTimeInput(field, event.currentTarget.value); event.currentTarget.select(); }
         else if (event.key === "ArrowUp" || event.key === "ArrowDown") { event.preventDefault(); commitTimeInput(field, event.currentTarget.value, event.key === "ArrowUp" ? 5 : -5); }
         else if (event.key === "Escape") { event.preventDefault(); updateTimes(field, clock(rangeRef.current![field])); }
@@ -280,20 +307,44 @@ export function TimelineTaskCreate({ date, disabled, scrollRef, pixelsPerHour, o
               <output className="selection-duration-pill">{formatReadableDuration(duration)}</output>
             </div>
             <div className="selection-time-inputs" aria-label="选择开始和结束时间">
-              <div className="selection-time-box">
+              <div ref={startBoxRef} className="selection-time-box">
                 <small aria-hidden="true">开始</small>
                 {renderTimeInput("start")}
+                <TimeWheelTrigger
+                  active={openWheel === "start"}
+                  disabled={saving}
+                  label="打开开始时间滚轴"
+                  controlsId="timeline-create-time-wheel"
+                  onToggle={() => setOpenWheel((current) => current === "start" ? null : "start")}
+                />
               </div>
               <span className="selection-time-arrow" aria-hidden="true">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M5 12h14m-5-5 5 5-5 5" />
                 </svg>
               </span>
-              <div className="selection-time-box">
+              <div ref={endBoxRef} className="selection-time-box">
                 <small aria-hidden="true">结束</small>
                 {renderTimeInput("end")}
+                <TimeWheelTrigger
+                  active={openWheel === "end"}
+                  disabled={saving}
+                  label="打开结束时间滚轴"
+                  controlsId="timeline-create-time-wheel"
+                  onToggle={() => setOpenWheel((current) => current === "end" ? null : "end")}
+                />
               </div>
             </div>
+            <TimeWheelPopover
+              id="timeline-create-time-wheel"
+              open={openWheel !== null}
+              edge={openWheel ?? "start"}
+              value={openWheel === "end" ? form.end : form.start}
+              fallbackValue={clock(rangeRef.current?.[openWheel ?? "start"] ?? 9 * 60)}
+              anchorRef={openWheel === "end" ? endBoxRef : startBoxRef}
+              onSelect={(nextClock) => { if (openWheel) applyWheelTime(openWheel, nextClock); }}
+              onClose={() => setOpenWheel(null)}
+            />
             <TaskDurationPresets duration={duration} maxDuration={maxDuration} disabled={saving} onDuration={(minutes) => updateTimes("end", clock(startMinute + minutes))} />
           </section>
 

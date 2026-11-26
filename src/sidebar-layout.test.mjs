@@ -35,7 +35,10 @@ test("brand lives once in the integrated 42px topbar, not in the collapsible sid
 test("sidebar groups use protected navigation and place settings and collapse toggle in the bottom bar", () => {
   const sidebar = app.match(/<aside id="main-sidebar"[\s\S]*?<\/aside>/)?.[0];
   assert.ok(sidebar);
-  assert.match(sidebar, /日程视图[\s\S]*今日安排[\s\S]*任务管理[\s\S]*全部任务/);
+  assert.match(sidebar, /sidebar-create-task-btn[\s\S]*新建任务[\s\S]*日程视图[\s\S]*今日安排[\s\S]*任务管理[\s\S]*全部任务/);
+  assert.match(sidebar, /className="sidebar-create-task-btn"[\s\S]*onClick=\{\(\) => requestNavigation\(\{ active: "任务", createTask: true \}\)\}/);
+  assert.match(colors, /html:root:not\(\[data-mode="dark"\]\) \.next-sidebar \.sidebar-create-task-btn \{/);
+  assert.match(colors, /html:root:not\(\[data-mode="dark"\]\) \.sidebar-collapsed \.next-sidebar \.sidebar-create-task-btn \{[^}]*width: 40px;/);
   assert.match(sidebar, /requestNavigation\(\{ active: "任务", taskView: "all" \}\)/);
   assert.match(sidebar, /requestNavigation\(\{ active: "任务", taskView \}\)/);
   assert.match(sidebar, /sidebar-footer-group[\s\S]*sidebar-summary-card[\s\S]*sidebar-bottom-bar[\s\S]*setSettingsOpen\(true\)[\s\S]*shell-collapse-button/);
@@ -43,7 +46,7 @@ test("sidebar groups use protected navigation and place settings and collapse to
   assert.doesNotMatch(sidebar, /next-create|记一件事/);
   const sidebarOrder = app.match(/const sidebarTaskViews[^=]*=\s*\[([\s\S]*?)\];/)?.[1] ?? "";
   const labels = [...sidebarOrder.matchAll(/label:\s*"([^"]+)"/g)].map(match => match[1]);
-  assert.deepEqual(labels, ["进行中", "草稿箱", "重复规则", "待安排", "未完成", "已完成", "回收站"]);
+  assert.deepEqual(labels, ["进行中", "草稿箱", "重复规则", "未完成", "已完成", "回收站"]);
   assert.doesNotMatch(colors, /\.sidebar-collapsed \.next-sidebar :is\([^)]*\.sidebar-footer-group\)/);
   assert.doesNotMatch(colors, /nav > \.sidebar-task-views \{[^}]*border: 0;/);
   assert.match(colors, /nav > \.sidebar-task-views \{[^}]*border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0;/);

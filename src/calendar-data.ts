@@ -139,16 +139,6 @@ function nextDate(date: string) {
   return value.toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
 }
 
-export function availabilityWorkdayOn(date: string, weekdays: readonly number[], makeupWorkdaysAsWorkdays = true) {
-  const { holiday, makeup } = officialDayOn(date);
-  if (officialHolidayCoverageFor(date)) {
-    if (holiday) return false;
-    if (makeupWorkdaysAsWorkdays && makeup) return true;
-  }
-  const weekday = new Date(`${date}T00:00:00Z`).getUTCDay() || 7;
-  return weekdays.includes(weekday);
-}
-
 export function calendarDayInfo(date: string): CalendarDayInfo | null {
   const labels: CalendarDayInfo["labels"] = [];
   const { holiday: officialHolidayName, makeup: makeupHoliday } = officialDayOn(date);

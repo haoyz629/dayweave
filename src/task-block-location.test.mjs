@@ -44,9 +44,7 @@ test("past-only arrangements locate the latest date, including month and year bo
 test("missing schedules, unscheduled and recycled tasks have no location action", () => {
   assert.equal(locateDate(null), null);
   assert.equal(locateDate(scheduled([])), null);
-  for (const status of ["open", "deleted"]) {
-    assert.equal(locateDate({ ...scheduled(["2026-10-29"]), status }), null);
-  }
+  assert.equal(locateDate({ ...scheduled(["2026-10-29"]), status: "deleted" }), null);
   assert.equal(locateDate({ ...scheduled(["2026-10-29"]), deleted_at: "2026-10-29T12:00:00+08:00" }), null);
 });
 
@@ -57,7 +55,7 @@ test("completed tasks locate real arrangements, including locked history, but ne
 });
 
 test("only scheduled, completed and incomplete display states locate actual task blocks", () => {
-  for (const [status, is_incomplete] of [["scheduled", false], ["done", false], ["open", true], ["scheduled", true]]) {
+  for (const [status, is_incomplete] of [["open", false], ["scheduled", false], ["done", false], ["open", true], ["scheduled", true]]) {
     const task = { ...scheduled(["2026-10-28"]), status, is_incomplete };
     assert.equal(locateDate(task), "2026-10-28", `${status}, incomplete=${is_incomplete}`);
     assert.equal(locateDate({ ...task, scheduled_dates: [], due_date: "2026-10-29" }), null);

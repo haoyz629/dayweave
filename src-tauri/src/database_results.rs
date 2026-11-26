@@ -72,6 +72,21 @@ pub(super) fn historical_single_day(task: &TaskDto) -> Option<String> {
         && task.due_date.as_deref() == Some(date.as_str())).then_some(date)
 }
 
+pub(super) fn has_schedule_dates(task: &TaskDto) -> bool {
+    task.earliest_start_date.is_some() || task.due_date.is_some()
+}
+
+pub(super) fn historical_untimed_single_day(task: &TaskDto) -> Option<String> {
+    if task.earliest_start_at.is_some() || task.due_at.is_some()
+        || task.earliest_start_time.is_some() || task.due_time.is_some()
+    {
+        return None;
+    }
+    let date = task.due_date.as_deref()?;
+    (task.earliest_start_date.as_deref() == Some(date) && date < shanghai_today().as_str())
+        .then(|| date.to_string())
+}
+
 pub(super) fn historical_completion_recorded_at(connection: &Connection, task_id: &str) -> AppResult<Option<String>> {
     let json: Option<String> = connection.query_row("SELECT before_json FROM task_completion_snapshots WHERE task_id = ?1",
         [task_id], |row| row.get(0)).optional()?;
@@ -87,7 +102,7 @@ fn recorded_window(recorded_at: &str) -> bool {
 }
 
 pub(super) fn can_backfill_completion(connection: &Connection, task: &TaskDto) -> AppResult<bool> {
-    let Some(date) = historical_single_day(task) else { return Ok(false); };
+    let Some(date) = historical_single_day(task).or_else(|| historical_untimed_single_day(task)) else { return Ok(false); };
     if !matches!(task.status.as_str(), "open" | "scheduled") || task.deleted_at.is_some() { return Ok(false); }
     if task.result_date.is_some() && historical_completion_recorded_at(connection, &task.id)?.is_none() {
         // Reopening keeps the original context, but its unfinished block can still be completed later.
@@ -391,7 +406,9 @@ pub(super) fn candidate_context(connection: &Connection, task_id: &str) -> AppRe
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)))?;
     let candidate = completion_candidate(connection, task_id)?;
     let task = load_task_dto_in_transaction(connection, task_id)?;
-    if can_backfill_completion(connection, &task)? { return Ok((historical_single_day(&task), task.due_at)); }
+    if can_backfill_completion(connection, &task)? {
+        return Ok((historical_single_day(&task).or_else(|| historical_untimed_single_day(&task)), task.due_at));
+    }
     if status == "done" || (!active_cross_day(connection, task_id)? && date.is_some() && candidate == saved) { return Ok((date, end)); }
     if let Some(block) = candidate {
         let (_, date, end) = block_context(connection, &block)?;

@@ -42,9 +42,11 @@ test("6x7 card matrix uses crisp weekday pills, sharp outside-month contrast and
   assert.equal(values(".month-grid > button:focus-visible").outline, "2px solid var(--color-primary)");
 });
 
-test("today uses vivid red circle while selection uses blue frame without recoloring count categories", () => {
-  assert.equal(values(".month-grid > button.today .solar-day-number").color, "var(--today-red-label)");
-  assert.equal(values(".month-grid > button.today .solar-day-number").background, "var(--today-red)");
+test("today uses red circle white text when selected and red text when unselected", () => {
+  assert.equal(values(".month-grid > button.today.selected .solar-day-number").color, "var(--today-red-label)");
+  assert.equal(values(".month-grid > button.today.selected .solar-day-number").background, "var(--today-red)");
+  assert.equal(values(".month-grid > button.today:not(.selected) .solar-day-number").color, "var(--today-red)");
+  assert.equal(values(".month-grid > button.today:not(.selected) .solar-day-number").background, "transparent");
   assert.equal(values(".month-grid > button.selected")["border-color"], "var(--color-primary)");
   assert.equal(values(".month-grid > button.selected")["background"], "#eff6ff");
   assert.equal(values(".task-indicator").color, undefined);

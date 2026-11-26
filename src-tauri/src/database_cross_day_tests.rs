@@ -24,9 +24,7 @@ fn create(db: &mut Database, input: TaskDraftInput) -> TaskDto {
 fn cross_day_creation_schedules_inclusive_days_and_retry_is_idempotent() {
     let _clock = TestNow::new("2026-11-06T08:00:00+08:00");
     let mut db = Database::in_memory().unwrap();
-    let mut settings = db.get_availability_settings().unwrap();
-    settings.workday_start = "10:00".into();
-    db.save_availability_settings(settings).unwrap();
+    db.connection.execute("DELETE FROM availability_settings", []).unwrap();
     let draft = db.create_manual_task_draft(input(Some(360))).unwrap();
     assert_eq!(db.count("plan_blocks").unwrap(), 0, "草稿不生成正式安排");
     let task = db.confirm_task_draft(&draft.id, &draft.confirmation_token).unwrap();
@@ -39,8 +37,8 @@ fn cross_day_creation_schedules_inclusive_days_and_retry_is_idempotent() {
         let schedule = db.get_day_schedule(date).unwrap();
         assert_eq!(schedule.task_blocks.len(), 1, "包含首尾日和周末");
         let block = &schedule.task_blocks[0];
-        assert_eq!(block.starts_at, format!("{date}T10:00:00+08:00"));
-        assert_eq!(block.ends_at, format!("{date}T12:00:00+08:00"));
+        assert_eq!(block.starts_at, format!("{date}T09:00:00+08:00"));
+        assert_eq!(block.ends_at, format!("{date}T11:00:00+08:00"));
         ids.push(block.id.clone());
     }
     db.confirm_task_draft(&draft.id, &draft.confirmation_token).unwrap();
@@ -58,6 +56,8 @@ fn cross_day_creation_schedules_inclusive_days_and_retry_is_idempotent() {
 fn cross_day_creation_respects_first_and_last_time_boundaries() {
     let _clock = TestNow::new("2026-11-06T08:00:00+08:00");
     let mut db = Database::in_memory().unwrap();
+    db.connection.execute("UPDATE availability_settings SET workday_start = 'invalid', workday_end = '' WHERE id = 1", []).unwrap();
+    assert!(db.get_availability_settings().is_ok());
     let mut task_input = input(Some(360));
     task_input.earliest_start_time = Some("23:30".into());
     task_input.due_time = Some("01:00".into());
@@ -177,19 +177,68 @@ fn cross_day_creation_failure_rolls_back_task_blocks_plans_and_confirmation() {
 }
 
 #[test]
-fn cross_day_without_schedulable_workload_stays_waiting_and_history_is_not_generated() {
+fn cross_day_timed_requires_daily_minimum_while_untimed_confirms_scheduled_without_blocks() {
     let _clock = TestNow::new("2026-11-06T08:00:00+08:00");
     let mut db = Database::in_memory().unwrap();
-    for total in [None, Some(30)] {
-        let task = create(&mut db, input(total));
-        assert_eq!(task.status, "open");
-        assert_eq!(task.reserved_minutes, 0);
+    for total in [None, Some(30), Some(44)] {
+        let draft = db.create_manual_task_draft(input(total)).unwrap();
+        assert_eq!(draft.validation_status, "needs_confirmation");
+        assert!(db.confirm_task_draft(&draft.id, &draft.confirmation_token).is_err());
     }
+    let mut impossible_window = input(Some(60));
+    impossible_window.due_date = Some(MIDDLE.into());
+    impossible_window.earliest_start_time = Some("23:50".into());
+    impossible_window.due_time = Some("00:10".into());
+    let bad_draft = db.create_manual_task_draft(impossible_window).unwrap();
+    assert_eq!(bad_draft.validation_status, "needs_confirmation");
+    assert!(db.confirm_task_draft(&bad_draft.id, &bad_draft.confirmation_token).is_err());
+
+    let minimum = create(&mut db, input(Some(45)));
+    assert_eq!(minimum.status, "scheduled");
+    assert_eq!(minimum.reserved_minutes, 45);
+    assert_eq!(minimum.scheduled_dates, vec![FIRST, MIDDLE, LAST]);
+
+    let mut untimed_input = input(Some(90));
+    untimed_input.earliest_start_time = None;
+    untimed_input.due_time = None;
+    let untimed_draft = db.create_manual_task_draft(untimed_input).unwrap();
+    assert_eq!(untimed_draft.validation_status, "valid");
+    let untimed = db.confirm_task_draft(&untimed_draft.id, &untimed_draft.confirmation_token).unwrap();
+    assert_eq!(untimed.status, "scheduled");
+    assert_eq!(untimed.reserved_minutes, 0);
+    assert_eq!(untimed.total_workload_minutes, None);
+    assert_eq!(untimed.remaining_workload_minutes, None);
+
+    let timed = db.update_manual_task_with_schedule(&untimed.id, ManualTaskCommandUpdate {
+        title: untimed.title.clone(), notes: None, priority: Some(Priority::Medium),
+        earliest_start_at: Some(format!("{FIRST}T09:00:00+08:00")),
+        due_at: Some(format!("{LAST}T18:00:00+08:00")),
+        earliest_start_date: Some(FIRST.into()), due_date: Some(LAST.into()),
+        estimated_minutes: Some(180),
+    }, None).unwrap();
+    assert_eq!(timed.status, "scheduled");
+    assert_eq!(timed.reserved_minutes, 180);
+    assert_eq!(timed.scheduled_dates, vec![FIRST, MIDDLE, LAST]);
+    assert_eq!(db.count("plan_blocks").unwrap(), 6);
+
+    let reverted_untimed = db.update_manual_task_with_schedule(&timed.id, ManualTaskCommandUpdate {
+        title: timed.title.clone(), notes: None, priority: Some(Priority::Medium),
+        earliest_start_at: None, due_at: None,
+        earliest_start_date: Some(FIRST.into()), due_date: Some(LAST.into()),
+        estimated_minutes: Some(180),
+    }, None).unwrap();
+    assert_eq!(reverted_untimed.status, "scheduled");
+    assert_eq!(reverted_untimed.reserved_minutes, 0);
+    assert_eq!(reverted_untimed.total_workload_minutes, None);
+    assert_eq!(reverted_untimed.remaining_workload_minutes, None);
+    assert!(reverted_untimed.scheduled_dates.is_empty());
+    assert_eq!(db.count("plan_blocks").unwrap(), 3);
+
     let mut historical = input(Some(180));
     historical.earliest_start_date = Some("2026-11-04".into());
     let draft = db.create_manual_task_draft(historical).unwrap();
     assert!(db.confirm_task_draft(&draft.id, &draft.confirmation_token).is_err());
-    assert_eq!(db.count("plan_blocks").unwrap(), 0);
+    assert_eq!(db.count("plan_blocks").unwrap(), 3);
 }
 
 #[test]

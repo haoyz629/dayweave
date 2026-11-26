@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 import React from "react";
-import { normalizeClockInput, sanitizeTimeInput, selectTaskDateBoundary, taskDateRangeIncludesHistory } from "./time-range-control.ts";
-import { taskRangeIsValid } from "./task-workload.ts";
+import { applyTimeWheelSelection, normalizeClockInput, sanitizeTimeInput, selectTaskDateBoundary, taskDateRangeIncludesHistory } from "./time-range-control.ts";
+import { isCrossDayTask, taskDateSpanDays, taskRangeIsValid, totalWorkloadForDaily } from "./task-workload.ts";
 
 const source = ts.createSourceFile("App.tsx", readFileSync(new URL("./App.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const component = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "TaskScheduleEditor");
@@ -28,19 +28,22 @@ function picker({ start = "2026-10-23", end = start, existing = false } = {}) {
   const queued = [], calls = [];
   const form = { title: "测试任务", earliest_start_date: start, due_date: end, earliest_start_time: "09:00", due_time: "10:00", estimated_minutes: 60 };
   const state = {
-    React, Icon: () => null, form, openPicker: null, pickerHoverDate: null, monthKey: start.slice(0, 7), pickerTimeInputs: { start: "", end: "" },
+    React, Icon: () => null, TimeWheelTrigger: () => null, TimeWheelPopover: () => null, disabled: false, form, openPicker: null, openWheelField: null, pickerHoverDate: null, monthKey: start.slice(0, 7), pickerTimeInputs: { start: "", end: "" },
     allowExistingHistoricalRange: existing, pickerOriginalRef: { current: null }, triggerRef: { current: null },
-    shanghaiDateValue: () => today, newTaskDefaultForm: () => ({ ...form }), normalizeClockInput, sanitizeTimeInput,
+    lastTimedRangeRef: { current: null }, lastCrossDayDailyRef: { current: null },
+    crossDayTimed: false, dailyMinutes: null, maximumDailyMinutes: 1440, MIN_TASK_WORKLOAD_MINUTES: 15,
+    startWheelAnchorRef: { current: null }, endWheelAnchorRef: { current: null },
+    shanghaiDateValue: () => today, newTaskDefaultForm: () => ({ ...form }), applyTimeWheelSelection, normalizeClockInput, sanitizeTimeInput,
     pickerDateLabel: value => value,
     shiftMonthKey: (month, offset) => { const date = new Date(`${month}-01T00:00:00Z`); date.setUTCMonth(date.getUTCMonth() + offset); return date.toISOString().slice(0, 7); },
-    selectTaskDateBoundary, taskDateRangeIncludesHistory, taskRangeIsValid,
+    selectTaskDateBoundary, taskDateRangeIncludesHistory, taskRangeIsValid, isCrossDayTask, taskDateSpanDays, totalWorkloadForDaily,
     validDraftClock: value => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value),
     document: { activeElement: null, body: { style: { overflow: "" } } },
     window: { requestAnimationFrame(callback) { callback(); return 1; }, cancelAnimationFrame() {}, addEventListener() {}, removeEventListener() {} },
     dialogRef: { current: { focus() { calls.push("dialog-focus"); } } },
     handleScheduleChange(next) { calls.push(next); }
   };
-  for (const key of ["openPicker", "pickerHoverDate", "pickerTimeInputs", "monthKey", "todayDate"]) state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => {
+  for (const key of ["openPicker", "openWheelField", "pickerHoverDate", "pickerTimeInputs", "monthKey", "todayDate"]) state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => {
     const apply = () => { state[key] = typeof value === "function" ? value(state[key]) : value; };
     if (batching) queued.push(apply); else apply();
   };
@@ -435,6 +438,30 @@ test("a single day crossing midnight remains valid historical backfill", () => {
   assert.equal(calls[0].due_date, "2026-10-23");
 });
 
+test("switching cross-day picker between untimed and timed clears and restores workload", () => {
+  const { state, calls } = picker({ end: "2026-10-24" });
+  state.form.estimated_minutes = 90;
+  state.crossDayTimed = true;
+  state.dailyMinutes = 45;
+  state.openSchedulePicker("end");
+  state.openPicker.timed = false;
+  state.confirmSchedulePicker();
+  assert.equal(calls[0].earliest_start_time, "");
+  assert.equal(calls[0].due_time, "");
+  assert.equal(calls[0].estimated_minutes, null);
+
+  state.form = calls[0];
+  state.crossDayTimed = false;
+  state.dailyMinutes = null;
+  state.openSchedulePicker("start", true);
+  state.updatePickerTimeInput("start", "09:00");
+  state.updatePickerTimeInput("end", "10:00");
+  state.confirmSchedulePicker();
+  assert.equal(calls[1].earliest_start_time, "09:00");
+  assert.equal(calls[1].due_time, "10:00");
+  assert.equal(calls[1].estimated_minutes, 90);
+});
+
 test("reset restores original dates and month, clears the pending anchor; cancel and clear retain their semantics", () => {
   const { state, calls } = picker({ end: "2026-11-02" });
   state.openSchedulePicker("end"); state.updatePickerDate("2026-12-10"); state.resetSchedulePicker();
@@ -501,4 +528,20 @@ test("picker endpoints share compact cross-day rows with a single accessible dat
   }
   state.pickerTimeInputs.end = "99:99";
   assert.equal(timeInput(state.renderBoundaryCard("end", "结束", "2026-10-25")).props["aria-invalid"], true);
+});
+
+test("clicking date on any untimed task opens untimed picker and reset restores initial mode", () => {
+  for (const overrides of [
+    { earliest_start_date: "2026-10-23", due_date: "2026-10-23", earliest_start_time: "", due_time: "" },
+    { earliest_start_date: "", due_date: "2026-10-23", earliest_start_time: "", due_time: "" },
+    { earliest_start_date: "2026-10-23", due_date: "2026-10-25", earliest_start_time: "", due_time: "" }
+  ]) {
+    const { state } = picker();
+    Object.assign(state.form, overrides);
+    state.openSchedulePicker("start");
+    assert.equal(state.openPicker.timed, false);
+    state.openPicker.timed = true;
+    state.resetSchedulePicker();
+    assert.equal(state.openPicker.timed, false);
+  }
 });

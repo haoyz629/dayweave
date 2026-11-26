@@ -151,7 +151,7 @@ fn wait_keeps_boundaries_releases_reservations_and_existing_editor_creates_next_
             let mut request = input(&database,&id,&selected,"wait");
             request.remaining_workload_minutes = explicit;
             let result = database.resolve_task_execution(TODAY,request).unwrap();
-            assert_eq!(result.status,"open");
+            assert_eq!(result.status,"scheduled");
             assert_eq!(result.reserved_minutes,0);
             assert_eq!(result.earliest_start_at,before.earliest_start_at);
             assert_eq!(result.due_at,before.due_at);
@@ -213,7 +213,7 @@ fn stopped_task_recovers_open_with_metadata_and_final_result_without_phantom_sch
     assert_eq!(record.followup_action.as_deref(),Some("stop"));
     database.restore_task(&id).unwrap();
     let restored = database.get_task(&id).unwrap();
-    assert_eq!(restored.status,"open");
+    assert_eq!(restored.status,"scheduled");
     assert_eq!(restored.notes.as_deref(),Some("task metadata"));
     assert_eq!(restored.remaining_workload_minutes,Some(90));
     assert_eq!(restored.actual_minutes,13);

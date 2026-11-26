@@ -7,7 +7,7 @@ import ts from "typescript";
 // Exercise the actual UI handlers without connecting to the desktop database.
 const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const names = new Set(["submitAvailability", "savePreferences", "applySettings", "saveTimelineChange", "saveBlockTime", "discardPlanDraft", "confirmRulePlan", "undoConfirmedPlan", "includeUnscheduledTask"]);
+const names = new Set(["savePreferences", "applySettings", "saveBlockTime", "discardPlanDraft", "confirmRulePlan", "undoConfirmedPlan"]);
 const snippets = [];
 function collect(node) {
   if (ts.isFunctionDeclaration(node) && names.has(node.name?.text)) snippets.push(node.getText(source));
@@ -19,36 +19,27 @@ const code = ts.transpileModule(snippets.join("\n"), { compilerOptions: { target
 
 function harness() {
   const state = {
-    draft: { weekdays: [1], workday_start: "09:00", workday_end: "18:00" }, saving: false,
+    saving: false,
     taskLead: 10, desktop: { autostart: false, closeToTray: true }, savedPreferences: { current: { taskLead: 5, desktop: { autostart: false, closeToTray: true } } },
-    applyingRef: { current: false }, ready: true, dirty: true, availabilityDirty: true, onClose() {},
+    applyingRef: { current: false }, ready: true, dirty: true, onClose() {},
     planBusy: false, today: "2026-10-19", selectedDate: "2026-10-19", selectedDateRef: { current: "2026-10-19" },
     planPreview: { preview_id: "draft", version: 1, plan_date: "2026-10-19", base_plan_id: null, blocks: [], unscheduled: [] },
     undo: { id: "undo-1", target_type: "task", target_id: "task-1" }, saved: { task_blocks: [] },
     discardResult: { restored_task_count: 0, conflicted_task_titles: [] },
-    notifications: [], settingsFeedback: [], toasts: [], failure: null, tasks: [], MIN_TASK_BLOCK_MINUTES: 15,
-    suggestion: { allocations: [], remainingMinutes: 0 },
+    notifications: [], settingsFeedback: [], toasts: [], failure: null,
     onNotify(...args) { state.notifications.push(args); },
     showFeedback(...args) { state.settingsFeedback.push(args); },
     setPlanToast(value) { if (value) state.toasts.push(value); },
-    async saveAvailabilitySettings(input) { if (state.failure) throw state.failure; return input; },
     async setUiSetting() { if (state.failure) throw state.failure; },
-    async setAutostartEnabled() {}, onSaved() {},
+    async setAutostartEnabled() {},
     async refreshTasks() {}, async refreshSchedule() {}, async applyUndo() {},
     async latestUndo() { return state.undo; },
     async updatePlanBlockTime() { return state.saved; },
     async discardRulePlanDraft() { return state.discardResult; },
     async confirmRuleBasedPlan() { return state.saved; },
     uiErrorMessage: String, planDraftErrorMessage: String, shanghaiDateValue: () => "2026-10-19",
-    taskSchedulingBoundaryIssue: () => null,
-    availability: { weekdays: [1], workday_start: "09:00", workday_end: "18:00" },
-    preferredDailyAllocationMinutes: (_task, minutes) => minutes,
-    suggestedDraftAllocations: () => state.suggestion,
-    taskUnreservedMinutes: () => 0,
-    async onUpdatePlan(input) { return input; }
   };
-  state.preview = state.planPreview;
-  for (const key of ["saving", "draft", "saveMessage", "preferenceBusy", "preferenceMessage", "planBusy", "message", "daySchedule", "planPreview", "planLeaveError"]) {
+  for (const key of ["saving", "saveMessage", "preferenceBusy", "preferenceMessage", "planBusy", "message", "daySchedule", "planPreview", "planLeaveError"]) {
     state[`set${key[0].toUpperCase()}${key.slice(1)}`] = (value) => { state[key] = value; };
   }
   vm.runInContext(code, vm.createContext(state));
@@ -70,10 +61,6 @@ test("unified settings apply shows one success sentence and retains each failure
 
 test("timeline success messages omit explanations but retain undo identity", async () => {
   const state = harness();
-  await state.saveTimelineChange("task-1", "已加入时间线", async () => state.saved);
-  assert.equal(state.toasts.at(-1).label, "已加入时间线");
-  assert.equal(state.toasts.at(-1).message, "");
-  assert.equal(state.toasts.at(-1).undoId, "undo-1");
   await state.saveBlockTime({ task_id: "task-1" }, "09:00", "10:00");
   assert.equal(state.toasts.at(-1).label, "时间调整已保存");
   assert.equal(state.toasts.at(-1).message, "");
@@ -116,34 +103,11 @@ test("discard summary distinguishes no changes, restored tasks, conflicts and mi
   }
 });
 
-test("draft allocation keeps partial quantities and does not claim the draft is confirmed", async () => {
-  for (const remaining of [0, 30]) {
-    const state = harness();
-    state.suggestion.remainingMinutes = remaining;
-    await state.includeUnscheduledTask({ task_id: "task-1", task_title: "不重复显示的任务名", estimated_minutes: 90 });
-    assert.deepEqual(state.notifications.at(-1), ["已加入计划草案", remaining ? "已安排 60 分钟，剩余 30 分钟" : "", "check"]);
-  }
-});
-
-test("allocation failures retain duration limits and a next step", async () => {
-  const cases = [
-    ["duration_too_short", 7, "剩余 7 分钟，不足 15 分钟，请调整工作量"],
-    ["available_window_too_short", 90, "当天可用时间不足 15 分钟，请调整时间或更换日期"],
-    ["outside_range", 90, "请调整任务时间或更换日期"]
-  ];
-  for (const [issue, minutes, message] of cases) {
-    const state = harness();
-    state.suggestion.issue = issue;
-    await state.includeUnscheduledTask({ task_id: "task-1", task_title: "任务", estimated_minutes: minutes });
-    assert.deepEqual(state.notifications.at(-1), ["无法安排", message, "clock"]);
-  }
-});
-
 test("short success copy retains existing toast actions and hides empty descriptions", () => {
-  assert.match(text, /persisted.draft_kind === "update" \? "任务已更新" : historicalTaskCompletionLocked\(result.item\) \? "历史任务已创建并自动完成" : result.item.status === "scheduled" \? "任务已创建并安排" : "任务已创建"/);
+  assert.match(text, /persisted.draft_kind === "update" \? "任务已更新" : historicalTaskCompletionLocked\(result.item\) \? "历史任务已创建并自动完成" : result.item.scheduled_dates\.length > 0 \? "任务已创建并安排" : "任务已创建"/);
   assert.match(text, /setSuccessToast\(\{ id: Date.now\(\), message: "已移入回收站" \}\)/);
   assert.match(text, /undo\?\.target_type === "execution_capture"/);
-  assert.match(text, /onNotify\(clearingCompletion \? "已取消当天完成" : executionDraft.wholeTask \? "整个任务已完成" : noteOnly \? "随手记已保存" : incomplete \? "未完成结果已保存" : "当天结果已保存", "", "check", undoId, seed\)/);
+  assert.match(text, /onNotify\(clearingCompletion \? "已取消当天完成" : clearingIncomplete \? \(resultDate < resultToday\(Date\.now\(\)\) \? "已取消本次未完成" : "已取消未完成"\) : executionDraft\.wholeTask \? "整个任务已完成" : noteOnly \? "随手记已保存" : incomplete \? "未完成结果已保存" : "当天结果已保存", "", "check", undoId, seed\)/);
   assert.match(text, /onNotify\("任务已创建", "", "check"\)/);
   assert.match(text, /duration=\{planToast.undoId \|\| planToast.taskSeed \? 10_000/);
   assert.match(text, /label: "撤销"/);
@@ -210,11 +174,4 @@ test("recurring occurrence completion notifies cleanly with undo only when compl
     await state.saveRecurringResult({ id: "item", occurrence_date: "2026-10-20", outcome: null, review_notes: null }, "completed", "备注");
     assert.deepEqual(state.notifications, [["本次已完成", "", "check", undo?.id]]);
   }
-});
-
-test("date-boundary warnings retain the reason without repeating long task titles", async () => {
-  const state = harness();
-  state.taskSchedulingBoundaryIssue = () => "已于 10月19日 截止，请调整任务时间范围后再安排";
-  await state.includeUnscheduledTask({ task_id: "task-1", task_title: "很长的任务名".repeat(100), estimated_minutes: 90 });
-  assert.deepEqual(state.notifications, [["当前日期不能安排", state.taskSchedulingBoundaryIssue(), "clock"]]);
 });

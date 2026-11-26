@@ -115,10 +115,10 @@ test("month shortcut keeps its existing dialog, visibility and handled-key guard
 });
 
 test("closing details restores task focus without immediately reopening its hover card", () => {
-  for (const savingExecution of [false, true]) for (const recurringSaving of [false, true]) {
+  for (const savingExecution of [false, true]) for (const recurringSaving of [false, true]) for (const trashingBlock of [false, true]) {
     const frames = [];
     const state = {
-      savingExecution, recurringResultSavingRef: { current: recurringSaving }, selection: { kind: "block", id: "task" }, tooltip: null,
+      savingExecution, recurringResultSavingRef: { current: recurringSaving }, trashingBlockRef: { current: trashingBlock }, selection: { kind: "block", id: "task" }, tooltip: null,
       setSelection(value) { state.selection = value; }, setPlanDraftTimeEdit() {}, setRecurringTimeEdit() {}, setRecycledCompletionNote() {},
       timelineSelectionAnchorRef: { current: {} }, timelineScrollRef: { current: null },
       timelineSelectionTriggerRef: { current: { isConnected: true, focus() { state.focused = true; state.tooltip = { title: "reopened by focus" }; } } },
@@ -126,8 +126,8 @@ test("closing details restores task focus without immediately reopening its hove
     };
     vm.runInNewContext(compile(`${closePanel}\ncloseTimelinePanel();`), state);
     frames.forEach(fn => fn());
-    assert.equal(state.selection === null, !savingExecution && !recurringSaving);
-    assert.equal(Boolean(state.focused), !savingExecution && !recurringSaving);
+    assert.equal(state.selection === null, !savingExecution && !recurringSaving && !trashingBlock);
+    assert.equal(Boolean(state.focused), !savingExecution && !recurringSaving && !trashingBlock);
     assert.equal(state.tooltip, null, "focus recovery must not create another floating card");
   }
 });

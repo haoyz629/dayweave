@@ -57,7 +57,7 @@ function harness({ task = baseTask, block = baseBlock, selectedDate = previous, 
     executionDraft: { outcome: "not_started", result: "not_completed", note: "已更新的备注" },
     Icon: () => null, TaskTagList: () => null, priorityCopy: {},
     TaskDetailContent: ({ children }) => React.createElement("section", null, React.createElement("footer", null, children)),
-    statusCopy: { open: "待处理", scheduled: "已安排", not_completed: "未完成", done: "已完成", deleted: "回收站" },
+    statusCopy: { scheduled: "进行中", not_completed: "未完成", done: "已完成", deleted: "回收站" },
     timelineSelectionTriggerRef: { current: null }, window: { requestAnimationFrame(fn) { fn(); } },
     async reopenManualTask(id, date) { calls.push(["reopen", id, date]); return { ...task, status: "scheduled", remaining_workload_minutes: 60 }; },
     async resolveTaskExecution(date, input) { calls.push(["result", date, input]); },
@@ -596,6 +596,35 @@ test("saving an unchecked completed dialog cancels atomically with its current n
     assert.equal(current.state.savingExecution, false);
     assert.ok(current.calls.some(([type, title]) => type === "toast" && title.includes("已取消当天")));
   }
+});
+
+test("saving an unchecked incomplete dialog clears the saved result atomically without falling back to note-only", async () => {
+  for (const date of [today, previous]) for (const crossDay of [false, true]) for (const note of ["", "  保留或清空备注  "]) {
+    const end = `${date}T10:00:00+08:00`;
+    const task = { ...baseTask, status: "scheduled", earliest_start_date: crossDay ? previous : date, due_date: date, result_date: null, result_ends_at: null };
+    const block = { ...baseBlock, task_status: "scheduled", execution_status: "not_started", result_date: date, result_ends_at: end, ends_at: end, review: null };
+    const current = harness({ task, block, selectedDate: date, now: `${today}T12:00:00+08:00` });
+    current.state.clearExecutionCapture = async (...args) => current.calls.push(["clear", ...args]);
+    current.state.executionDraft = { result: null, outcome: null, wholeTask: false, note };
+    await current.state.saveSelectedBlockExecution();
+    assert.deepEqual(current.calls[0], ["clear", date, "block", note.trim()]);
+    assert.equal(current.calls.filter(([type]) => type === "history").length, 0);
+    assert.ok(current.calls.some(([type]) => type === "refresh"));
+    assert.equal(current.state.selection, null);
+    assert.equal(current.state.savingExecution, false);
+    assert.ok(current.calls.some(([type, title]) => type === "toast" && title === (date < today ? "已取消本次未完成" : "已取消未完成")));
+  }
+  // A still-planned block with no saved outcome and a changed note stays on the note-only path.
+  const planned = harness({
+    task: { ...baseTask, status: "scheduled", result_date: null },
+    block: { ...baseBlock, task_status: "scheduled", execution_status: "planned", result_date: today, review: null },
+    selectedDate: today,
+    now: `${today}T12:00:00+08:00`
+  });
+  planned.state.executionDraft = { result: null, outcome: null, wholeTask: false, note: "  补充随手记  " };
+  await planned.state.saveSelectedBlockExecution();
+  assert.deepEqual(JSON.parse(JSON.stringify(planned.calls[0])), ["history", today, { plan_block_id: "block", outcome: null, note: "补充随手记" }]);
+  assert.ok(planned.calls.some(([type, title]) => type === "toast" && title === "随手记已保存"));
 });
 
 test("unchecked completion save respects history and busy guards and keeps failed drafts", async () => {

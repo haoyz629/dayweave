@@ -4,11 +4,11 @@ import { SeparatedCopy } from "./copy-separator";
 import { TaskTagList } from "./task-tag-editor";
 
 export type TimelineTooltipContent = {
-  kind: "普通任务" | "单日任务" | "多日任务" | "任务安排" | "计划草案" | "固定日程" | "重复事项" | "待安排任务" | "非工作时间";
+  kind: "普通任务" | "单日任务" | "多日任务" | "任务安排" | "计划草案" | "固定日程" | "重复事项";
   title: string;
   time: string;
   detail: string;
-  tone: "execution" | "execution-completed" | "execution-partial" | "execution-blocked" | "execution-cancelled" | "execution-not_started" | "draft" | "fixed" | "recurring" | "task" | "nonworking";
+  tone: "execution" | "execution-completed" | "execution-partial" | "execution-blocked" | "execution-cancelled" | "execution-not_started" | "draft" | "fixed" | "recurring" | "task";
   url?: string;
   note?: string;
   tags?: string[];
@@ -71,8 +71,7 @@ function resolveHoverStatusLabel(content: TimelineTooltipContent) {
     case "execution-cancelled": return "已取消";
     case "draft": return "计划草案";
     case "fixed": return "固定日程";
-    case "task": return "待安排";
-    case "nonworking": return "非工作时间";
+    case "task": return "进行中";
     default: return "已安排";
   }
 }
@@ -81,7 +80,7 @@ function resolveFooterKind(content: TimelineTooltipContent): "hint" | "completed
   if (content.footerKind) return content.footerKind;
   if (content.tone === "execution-completed") return "completed";
   if (content.tone === "execution-not_started" || content.tone === "execution-blocked") return "incomplete";
-  if (content.tone === "fixed" || content.tone === "task" || content.tone === "nonworking") return "info";
+  if (content.tone === "fixed" || content.tone === "task") return "info";
   return "hint";
 }
 

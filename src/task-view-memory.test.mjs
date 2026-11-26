@@ -16,13 +16,13 @@ function collect(node) {
   ts.forEachChild(node, collect);
 }
 collect(source);
-const views = ["all", "draft", "recurring", "open", "scheduled", "not_completed", "done", "deleted"];
+const views = ["all", "draft", "recurring", "scheduled", "not_completed", "done", "deleted"];
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function mount(storage, overrides = {}) {
   const state = {
     loading: false, requestedView: null, taskViewInitialized: { current: false }, handledRequestedView: { current: null },
     TASK_QUEUE_VIEW_SETTING: "ui.task_queue_view", taskViewCopy: Object.fromEntries(views.map(view => [view, view])),
-    counts: { open: 0, scheduled: 2, not_completed: 0 }, view: "open", taskViewReady: false,
+    counts: { scheduled: 2, not_completed: 0 }, view: "scheduled", taskViewReady: false,
     async getUiSetting(key) { return storage.get(key) ?? null; },
     async setUiSetting(key, value) { storage.set(key, value); },
     setView(view) { state.view = view; }, setTaskViewReady(value) { state.taskViewReady = value; },
@@ -53,8 +53,8 @@ test("leaving and remounting tasks restores every last list, including empty lis
   }
 });
 
-test("missing or invalid memory falls back to the first populated operational list", async () => {
-  for (const stored of [null, "old-unknown-view", "__proto__", "toString"]) {
+test("missing, legacy open, or invalid memory falls back to the first populated operational list", async () => {
+  for (const stored of [null, "open", "old-unknown-view", "__proto__", "toString"]) {
     const h = mount(new Map([["ui.task_queue_view", stored]]));
     h.run("restore"); await tick();
     assert.equal(h.state.view, "scheduled");

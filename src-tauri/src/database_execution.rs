@@ -157,7 +157,7 @@ impl Database {
                     )?;
                 }
             }
-            transaction.execute("UPDATE tasks SET status = 'open', remaining_workload_minutes = ?2, updated_at = ?3 WHERE id = ?1",
+            transaction.execute("UPDATE tasks SET status = 'scheduled', remaining_workload_minutes = ?2, updated_at = ?3 WHERE id = ?1",
                 params![task_id, input.remaining_workload_minutes.or(task.remaining_workload_minutes), timestamp])?;
             if let Some(date) = schedule {
                 let plan_id: String = transaction.query_row(
@@ -189,8 +189,10 @@ impl Database {
 
 pub(super) fn complete_historical_creation(transaction: &Transaction<'_>, task_id: &str) -> AppResult<()> {
     let task = load_task_dto_in_transaction(transaction, task_id)?;
-    if database_results::historical_single_day(&task).is_none() {
-        return Err(AppError::Domain("历史补录需要完整有效的单日起止时间".into()));
+    if database_results::historical_single_day(&task).is_none()
+        && database_results::historical_untimed_single_day(&task).is_none()
+    {
+        return Err(AppError::Domain("历史补录需要有效的单日日期，填写具体时刻时需起止完整".into()));
     }
     complete_in_transaction(transaction, task_id, None, Some("创建历史任务自动完成"))?;
     // Creation is already an execution fact; do not advertise an unusable completion undo.
@@ -231,14 +233,24 @@ fn complete_result_in_transaction(transaction: &Transaction<'_>, task_id: &str, 
         return Err(AppError::Domain("任务已删除".into()));
     }
     let backfill = plan_block_id.is_none() && database_results::can_backfill_completion(transaction, &before_task)?;
-    let block_id: Option<String> = if backfill {
+    let untimed_backfill_date = if backfill && database_results::historical_single_day(&before_task).is_none() {
+        database_results::historical_untimed_single_day(&before_task)
+    } else {
+        None
+    };
+    let block_id: Option<String> = if backfill && untimed_backfill_date.is_none() {
         Some(historical_completion_block(transaction, &before_task)?)
+    } else if untimed_backfill_date.is_some() {
+        None
     } else if let Some(id) = plan_block_id {
         let (owner, _, _) = database_results::block_context(transaction, id)?;
         if owner != task_id { return Err(AppError::Domain("执行块不属于该任务".into())); }
         Some(id.into())
     } else { database_results::completion_candidate(transaction, task_id)? };
-    if backfill {
+    if let Some(date) = &untimed_backfill_date {
+        transaction.execute("UPDATE tasks SET result_date = ?2, result_ends_at = NULL, result_block_id = NULL WHERE id = ?1",
+            params![task_id, date])?;
+    } else if backfill {
         let id = block_id.as_deref().unwrap();
         database_results::freeze_block(transaction, id)?;
         let (_, date, end) = database_results::block_context(transaction, id)?;
@@ -286,6 +298,18 @@ fn complete_result_in_transaction(transaction: &Transaction<'_>, task_id: &str, 
                 ORDER BY rowid DESC LIMIT 1", [task_id], |row| row.get(0)).optional()?.flatten();
             if last_note.as_deref() != Some(note) {
                 record_task_change(transaction, task_id, "completion_note_changed", None, Some(note), "manual", Some(note))?;
+                if database_results::has_schedule_dates(&before_task) {
+                    let result_date: Option<String> = transaction.query_row(
+                        "SELECT result_date FROM tasks WHERE id = ?1",
+                        [task_id],
+                        |row| row.get(0),
+                    )?;
+                    if let Some(date) = untimed_backfill_date.as_deref().or(result_date.as_deref()) {
+                        database_history::record_untimed_capture_change(
+                            transaction, task_id, date, audit_cursor, &timestamp, Some(note), true,
+                        )?;
+                    }
+                }
             }
         }
         transaction.execute("UPDATE tasks SET updated_at = ?2 WHERE id = ?1", params![task_id, now()])?;
@@ -317,6 +341,17 @@ fn complete_result_in_transaction(transaction: &Transaction<'_>, task_id: &str, 
     if let Some(before) = &before_capture {
         let (_, date, _) = database_results::block_context(transaction, &before.id)?;
         database_history::record_capture_change(transaction, task_id, &date, before, audit_cursor, &timestamp)?;
+    } else if database_results::has_schedule_dates(&before_task) {
+        let result_date: Option<String> = transaction.query_row(
+            "SELECT result_date FROM tasks WHERE id = ?1",
+            [task_id],
+            |row| row.get(0),
+        )?;
+        if let Some(date) = untimed_backfill_date.as_deref().or(result_date.as_deref()) {
+            database_history::record_untimed_capture_change(
+                transaction, task_id, date, audit_cursor, &timestamp, note, false,
+            )?;
+        }
     }
     let mut before_task = before_task;
     if backfill { before_task.status = "scheduled".into(); }
@@ -458,13 +493,13 @@ pub(super) fn reopen_in_transaction(transaction: &Transaction<'_>, task_id: &str
             params![Uuid::new_v4().to_string(), task_id, current.remaining_workload_minutes, remaining, now()])?;
     }
     transaction.execute("UPDATE tasks SET remaining_workload_minutes = ?2 WHERE id = ?1", params![task_id, remaining])?;
-    let scheduled: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM plan_blocks pb
-        JOIN daily_plans dp ON dp.id = pb.daily_plan_id WHERE pb.task_id = ?1 AND dp.plan_date = ?2 AND dp.status = 'confirmed')",
-        params![task_id, current.result_date.as_deref().unwrap_or(&shanghai_today())], |row| row.get(0))?;
-    set_task_status(transaction, task_id, if scheduled { TaskStatus::Scheduled } else { TaskStatus::Open }, "manual")?;
+    set_task_status(transaction, task_id, TaskStatus::Scheduled, "manual")?;
     if let Some(before) = &before_capture {
         let date = current.result_date.as_deref().unwrap_or(&today);
         database_history::record_capture_change(transaction, task_id, date, before, audit_cursor, &now())?;
+    } else if database_results::has_schedule_dates(&current) {
+        let date = current.result_date.as_deref().unwrap_or(&today);
+        database_history::record_untimed_capture_change(transaction, task_id, date, audit_cursor, &now(), None, false)?;
     }
     transaction.execute("UPDATE undo_entries SET status = 'conflicted' WHERE target_type = 'task_completion'
         AND target_id = ?1 AND status = 'available'", [task_id])?;
@@ -542,7 +577,7 @@ fn sync_block_result_inner(transaction: &Transaction<'_>, block_id: &str, cleare
             current.remaining_workload_minutes.filter(|minutes| *minutes > 0)
                 .or(current.total_workload_minutes).or(current.estimated_minutes)
         };
-        (if count > 0 { "scheduled" } else { "open" }, remaining)
+        ("scheduled", remaining)
     };
     if completed {
         let payload = FactUndo { task: Some(current.clone()), block: None, occurrence: None, review: None, after_facts: String::new() };

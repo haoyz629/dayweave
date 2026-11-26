@@ -12,7 +12,7 @@ const effects = app.body.statements.filter(ts.isExpressionStatement)
   .map(node => node.expression)
   .filter(node => ts.isCallExpression(node) && node.expression.getText(source) === "useEffect")
   .map(node => node.arguments[0].getText(source))
-  .filter(code => code.includes("refreshAvailability()") || code.includes("setPlanPreview(null)"));
+  .filter(code => code.includes("listTaskDrafts") || code.includes("setPlanPreview(null)"));
 const requested = app.body.statements.filter(ts.isVariableStatement)
   .flatMap(node => [...node.declarationList.declarations])
   .find(node => node.name.getText(source) === "tasksRequested");
@@ -20,15 +20,14 @@ const compile = code => ts.transpileModule(code, { compilerOptions: { target: ts
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function mount(overrides = {}) {
-  const calls = { tasks: 0, recurring: 0, availability: 0, dates: [], loading: [] };
+  const calls = { tasks: 0, recurring: 0, drafts: 0, dates: [], loading: [] };
   const state = {
     selectedDate: "2026-11-12", document: { documentElement: { dataset: {} } },
     useRef: current => ({ current }),
     listTasks: async () => { calls.tasks++; return [{ id: "task" }]; },
     listRecurringItems: async () => { calls.recurring++; return [{ id: "recurring" }]; },
-    listTaskDrafts: async () => [{ id: "draft-one" }, { id: "draft-two" }],
+    listTaskDrafts: async () => { calls.drafts++; return [{ id: "draft-one" }, { id: "draft-two" }]; },
     setSidebarDraftCount(value) { state.draftCount = value; },
-    refreshAvailability() { calls.availability++; },
     refreshSchedule(date) { calls.dates.push(date); },
     setTasks(value) { state.tasks = value; }, setRecurringItems(value) { state.recurring = value; },
     setTasksLoading(value) { calls.loading.push(value); }, setTasksError(value) { state.error = value; },
@@ -52,10 +51,12 @@ test("mount reads each task collection once; later date changes still refresh wi
   h.start();
   assert.equal(h.calls.tasks, 1);
   assert.equal(h.calls.recurring, 1);
+  assert.equal(h.calls.drafts, 1);
   assert.deepEqual(h.calls.loading, [true]);
   await tick();
   assert.deepEqual(h.calls.loading, [true, false]);
-  assert.equal(h.calls.availability, 1);
+  assert.equal(h.state.document.documentElement.dataset.theme, "default");
+  assert.equal(h.state.document.documentElement.dataset.mode, "light");
   assert.equal(h.state.tasks[0].id, "task");
   assert.equal(h.state.recurring[0].id, "recurring");
   assert.equal(h.state.draftCount, 2, "sidebar draft count is loaded before opening tasks");

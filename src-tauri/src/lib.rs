@@ -19,7 +19,7 @@ use std::{fs, sync::{Mutex, atomic::{AtomicBool, Ordering}}, thread, time::Durat
 use database::{
     AiConnectionSettingsDto, AiConnectionSettingsInput, AiConversationDto, AiMessageDto, AiRunDto,
     ApplyResult, AvailabilitySettings, CalendarEventDto, Database, DayScheduleDto, ExecutionCaptureInput,
-    ManualCalendarEventInput, ManualTaskUpdate, PlanBlockTimeUpdate, PlanBlockRemove, PlanTaskInclude, ProposalPreview, RulePlanBlock, RulePlanPreview,
+    ManualCalendarEventInput, ManualTaskCommandUpdate, PlanBlockTimeUpdate, PlanBlockRemove, PlanTaskInclude, ProposalPreview, RulePlanBlock, RulePlanPreview,
     RecurringItemDto, RecurringItemInput, RecurringOccurrenceDto, RecurringOccurrenceReviewInput,
     RecurringExecutionEventDto,
     TaskDraftDto, ReviewEntryDto, ReviewEntryInput, TaskDraftInput, TaskDto, TaskMetadataDto,
@@ -639,10 +639,10 @@ pub(crate) fn complete_task_block_reminder(app: &AppHandle, reminder: &database:
 fn update_manual_task(
     state: State<'_, AppState>,
     task_id: String,
-    update: ManualTaskUpdate,
+    update: ManualTaskCommandUpdate,
     tags: Option<Vec<String>>,
 ) -> Result<TaskDto, String> {
-    with_database(&state, |database| database.update_manual_task_with_tags(&task_id, update, tags))
+    with_database(&state, |database| database.update_manual_task_with_schedule(&task_id, update, tags))
 }
 
 #[tauri::command]

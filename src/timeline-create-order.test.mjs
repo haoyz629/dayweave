@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
-import { timelineLaneLayout as calculateTimelineLanes } from "./timeline-lane-layout.ts";
+import { dayTimelineLayout } from "./timeline-lane-layout.ts";
 
 const declarations = [];
 const initializers = new Map();
@@ -13,7 +13,7 @@ for (const file of ["App.tsx", "timeline-task-create.tsx"]) {
   const names = file === "App.tsx" ? ["timelineLaneLayout"] : ["selectedRange", "clearPointer", "clearRange", "cancelSelection", "snapAt", "updateSelection", "autoScroll", "open", "start", "updateTimes"];
   function collect(node) {
     if (ts.isFunctionDeclaration(node) && names.includes(node.name?.text)) declarations.push(node.getText(source));
-    if (ts.isVariableDeclaration(node) && ["timelineItems", "timelineItemLanes"].includes(node.name.getText(source))) {
+    if (ts.isVariableDeclaration(node) && ["timelineItems", "arrivalKeys", "dragKey", "layoutDrag", "preferredKey", "dayLayout", "timelineItemLanes"].includes(node.name.getText(source))) {
       initializers.set(node.name.getText(source), node.initializer.getText(source));
     }
     if (file === "timeline-task-create.tsx" && ts.isJsxAttribute(node) && ["onPointerMove", "onPointerUp", "onKeyDown"].includes(node.name.getText(source))) {
@@ -24,11 +24,11 @@ for (const file of ["App.tsx", "timeline-task-create.tsx"]) {
   collect(source);
 }
 assert.equal(declarations.length, 11, "execute the real layout and creation handlers");
-assert.equal(initializers.size, 2);
+assert.equal(initializers.size, 7);
 assert.equal(handlers.size, 3);
 const code = ts.transpileModule([
   ...declarations,
-  `function currentLanes() { const timelineItems = ${initializers.get("timelineItems")}; return ${initializers.get("timelineItemLanes")}; }`,
+  `function currentLanes() { ${[...initializers].map(([key, value]) => `const ${key} = ${value};`).join("\n")} return timelineItemLanes; }`,
   `function move(event) { return (${handlers.get("onPointerMove")})(event); }`,
   `function release(event) { return (${handlers.get("onPointerUp")})(event); }`,
   `function keyboard(event) { return (${handlers.get("onKeyDown")})(event); }`
@@ -45,7 +45,7 @@ function harness() {
     releasePointerCapture: id => captures.delete(id)
   };
   const state = {
-    calculateTimelineLanes, clock, minute, selectedDate: "2026-11-03", disabled: false, pixelsPerHour: 60,
+    dayTimelineLayout, clock, minute, selectedDate: "2026-11-03", disabled: false, pixelsPerHour: 60, arrivals: [], laneCapacity: 5, selection: null, revealedKey: null, savingLayoutKey: null,
     timelineMinute: timestamp => minute(timestamp.slice(11, 16)),
     planTimestamp: (date, time) => `${date}T${time}:00+08:00`, minutesClock: clock,
     timedEvents: [], draftBlocks: [], draftLayoutKeys: [], recurringTimelineBlocks: [],
@@ -55,7 +55,7 @@ function harness() {
     scrollRef: { current: { getBoundingClientRect: () => ({ top: 510, bottom: 900 }), scrollTop: 0 } },
     requestAnimationFrame: () => 1, cancelAnimationFrame() {}, onStart() {},
     onRange(range) { state.timelineCreateRange = range; },
-    setForm(form) { state.form = form; }, setError(error) { state.error = error; }
+    setForm(form) { state.form = form; }, setOpenWheel() {}, setError(error) { state.error = error; }
   };
   vm.runInContext(code, vm.createContext(state));
   const event = y => ({ button: 0, isPrimary: true, pointerId: 1, clientY: y, currentTarget: track, preventDefault() {}, stopPropagation() {} });
@@ -127,15 +127,15 @@ test("keyboard creation does not acquire sliding priority", () => {
   assert.equal(state.pointer.current, null);
 });
 
-test("a task block drag keeps the task block in its current lane instead of jumping to the rightmost creation lane", () => {
+test("a real task drag takes precedence over the creation selection preview", () => {
   const { state, event } = harness();
   state.start(event(660));
   state.pointer.current.y = 690;
   state.updateSelection();
   state.timelineDrag = { key: "block:target", start: 660, end: 720 };
   const lanes = state.currentLanes();
-  assert.equal(lanes["block:target"].column, 0);
-  assert.equal(lanes["create:selection"].column, 1);
+  assert.equal(lanes["block:target"].column, 1);
+  assert.equal(lanes["create:selection"].column, 0);
 });
 
 test("sliding back into the anchor snap interval clears the preview and cancels on release", () => {

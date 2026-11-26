@@ -4,17 +4,16 @@ import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 import React from "react";
-import { taskResultEditable, taskListStatus, visibleTaskScheduleBlocks, timelineTaskCompletionAction, historicalTaskCompletionLocked, HISTORY_COMPLETION_LOCKED_MESSAGE } from "./task-result.ts";
+import { taskResultEditable, taskListStatus, visibleTaskScheduleBlocks, visibleUntimedTasksForDate, timelineTaskCompletionAction, historicalTaskCompletionLocked, HISTORY_COMPLETION_LOCKED_MESSAGE } from "./task-result.ts";
 
 const source = ts.createSourceFile("App.tsx", readFileSync(new URL("./App.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const handlers = new Map(), summaries = new Map();
-let poolButton, detailCompletionButton, editableCompletionButton;
+let detailCompletionButton, editableCompletionButton;
 function collect(node) {
   if (ts.isFunctionDeclaration(node) && ["transition", "reopen", "taskCommitted"].includes(node.name?.text)) handlers.set(node.name.text, node.getText(source));
-  if (ts.isVariableDeclaration(node) && ["summaryTaskBlocks", "plannedTaskCount", "completedPlannedTaskCount", "plannedMinutes", "summaryRecurringOccurrences", "recurringItemCount", "completedRecurringItemCount", "summaryArrangementCount", "completedArrangementCount", "summaryProgress"].includes(node.name.getText(source))) summaries.set(node.name.getText(source), node.initializer.getText(source));
+  if (ts.isVariableDeclaration(node) && ["summaryTaskBlocks", "summaryUntimedTasks", "plannedTaskCount", "completedPlannedTaskCount", "plannedMinutes", "summaryRecurringOccurrences", "recurringItemCount", "completedRecurringItemCount", "summaryArrangementCount", "completedArrangementCount", "summaryProgress"].includes(node.name.getText(source))) summaries.set(node.name.getText(source), node.initializer.getText(source));
   if (ts.isJsxElement(node) && node.openingElement.tagName.getText(source) === "button") {
     const attribute = node.openingElement.attributes.properties.find(attr => attr.name?.getText(source) === "className");
-    if (attribute?.initializer?.getText(source) === '"waiting-pool-add"') poolButton = node.getText(source);
     if (attribute?.initializer?.getText(source).includes('task.status === "done" ? "secondary-action" : "task-compact-complete"')) detailCompletionButton = node.getText(source);
     if (attribute?.initializer?.getText(source) === '"task-compact-complete"' && node.getText(source).includes('requestTaskChange({ kind: "transition", status: "done" })')) editableCompletionButton = node.getText(source);
   }
@@ -40,26 +39,11 @@ test("historical list completion follows backend eligibility without widening le
   assert.equal(taskResultEditable({ ...done, deleted_at: recorded }, now, completedMetadata), false);
 });
 
-test("historical pool action opens the task list instead of a disabled or duplicate schedule insertion", () => {
-  for (const isPastDate of [false, true]) {
-    const calls = [];
-    const state = { React, task, item: { task_id: task.id, task_title: task.title }, suggestedMinutes: 30, actionLabel: "加入时间线", isPastDate,
-      busy: false, includingTaskId: null, Icon: props => props,
-      onOpenTasks: id => calls.push(["open", id]), includeWaitingTask: item => calls.push(["include", item.id]) };
-    const button = vm.runInNewContext(compile(`(${poolButton})`), state);
-    assert.equal(button.props.disabled, false);
-    button.props.onClick({ currentTarget: {} });
-    assert.deepEqual(calls, [[isPastDate ? "open" : "include", task.id]]);
-    assert.equal(button.props.children.props.name, isPastDate ? "external-link" : "plus");
-    if (isPastDate) assert.match(button.props.title, /任务列表.*自动补录/);
-  }
-});
-
 test("real list completion and reopen handlers commit before refreshing and keep metadata current", async () => {
   for (const action of ["transition", "reopen"]) for (const fail of [false, true]) {
     const calls = [];
     const state = { selectedTask: { ...task, status: action === "reopen" ? "done" : "open", result_date: "2026-11-01" }, busy: false, today: "2026-11-01", preferredSelection: { current: null }, taskListStatus,
-      uiErrorMessage: String, statusCopy: { scheduled: "已安排" }, taskResultEditable, historicalTaskCompletionLocked, HISTORY_COMPLETION_LOCKED_MESSAGE, selectedMetadata: null,
+      uiErrorMessage: String, statusCopy: { scheduled: "进行中" }, taskResultEditable, historicalTaskCompletionLocked, HISTORY_COMPLETION_LOCKED_MESSAGE, selectedMetadata: null,
       Date: class extends Date { static now() { return Date.parse("2026-11-01T12:00:00+08:00"); } },
       async completeTask(id, block, note) { calls.push(["complete", id, block, note]); if (fail) throw Error("写入失败"); return { ...task, status: "done" }; },
       async reopenManualTask(id, date) { calls.push(["reopen", id, date]); if (fail) throw Error("写入失败"); return { ...task, status: "scheduled" }; },
@@ -93,7 +77,7 @@ test("committed historical tasks refresh the selected schedule and statistics fo
   assert.equal(state.tasks[0].status, "done");
   assert.deepEqual(calls, [["2026-10-21", false]]);
   for (const execution_status of ["completed", "planned"]) {
-    const context = vm.createContext({ visibleTaskScheduleBlocks, recurringOccurrences: [], selectedDate: "2026-10-21", today: "2026-11-01", daySchedule: { task_blocks: [{ task_status: execution_status === "completed" ? "done" : "scheduled", execution_status, starts_at: "2026-10-21T09:00:00+08:00", ends_at: "2026-10-21T09:30:00+08:00", review: null }] } });
+    const context = vm.createContext({ visibleTaskScheduleBlocks, visibleUntimedTasksForDate, tasks: [], recurringOccurrences: [], selectedDate: "2026-10-21", today: "2026-11-01", daySchedule: { task_blocks: [{ task_status: execution_status === "completed" ? "done" : "scheduled", execution_status, starts_at: "2026-10-21T09:00:00+08:00", ends_at: "2026-10-21T09:30:00+08:00", review: null }] } });
     for (const [name, expression] of summaries) vm.runInContext(compile(`this.${name} = ${expression};`), context);
     assert.equal(context.plannedTaskCount, 1);
     assert.equal(context.completedPlannedTaskCount, execution_status === "completed" ? 1 : 0);

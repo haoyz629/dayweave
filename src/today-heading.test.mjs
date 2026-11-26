@@ -19,8 +19,10 @@ test("date and secondary metadata align on a single baseline row across day, wee
   assert.doesNotMatch(primary, /timeline-heading-plan-status|confirmed-plan-status|计划已确认|timeline-week-number-badge/);
   assert.match(styles, /\.timeline-date-meta\.timeline-day-subline \{[^}]*gap: 6px; align-items: baseline/);
   assert.match(styles, /\.timeline-day-subline > span \{ color: inherit/);
-  assert.match(app, /aria-label="上一天" onClick=\{\(\) => selectCalendarDate\(shiftDateValue\(selectedDate, -1\)\)\}/);
-  assert.match(app, /aria-label="下一天" onClick=\{\(\) => selectCalendarDate\(shiftDateValue\(selectedDate, 1\)\)\}/);
+  assert.match(app, /prevLabel: "上一天"[\s\S]*onPrev: \(\) => selectCalendarDate\(shiftDateValue\(selectedDate, -1\)\)/);
+  assert.match(app, /nextLabel: "下一天"[\s\S]*onNext: \(\) => selectCalendarDate\(shiftDateValue\(selectedDate, 1\)\)/);
+  assert.match(app, /aria-label=\{periodNavigation\.prevLabel\}[^>]*onClick=\{periodNavigation\.onPrev\}/);
+  assert.match(app, /aria-label=\{periodNavigation\.nextLabel\}[^>]*onClick=\{periodNavigation\.onNext\}/);
 });
 
 test("historical and view headings omit redundant status or instructional copy", () => {
@@ -46,9 +48,22 @@ test("month and week metadata helpers compute prototype lunar year, solar terms,
   assert.match(app, /<span>\{monthMeta\.lunarYear\}<\/span>/);
 });
 
-test("return-today and week return feedback follow the viewed period and reserve a stable button width", () => {
-  assert.match(app, /className="timeline-return-today" onClick=\{returnToday\}>\{selectedDate === today \? "今天" : "回到今天"\}/);
-  assert.match(styles, /\.timeline-date-navigation \.timeline-return-today \{ width: 60px; flex: 0 0 60px; white-space: nowrap; \}/);
+test("period navigation separates neutral return button from right-anchored chevron steppers without dots or blue fills", () => {
+  const colors = readFileSync(new URL("./color-system.css", import.meta.url), "utf8");
+  assert.match(app, /isCurrent: selectedDate === today,\s*currentLabel: "今天",\s*awayLabel: "回到今天"/);
+  assert.match(app, /isCurrent: isCurrentWeek,\s*currentLabel: "本周",\s*awayLabel: "回到本周"/);
+  assert.match(app, /isCurrent: monthKey === todayMonthKey,\s*currentLabel: "本月",\s*awayLabel: "回到本月"/);
+  const navBlock = app.match(/<div className="timeline-date-navigation"[\s\S]*?<\/div>\s*<\/div>/)?.[0] ?? "";
+  assert.ok(navBlock);
+  assert.ok(navBlock.indexOf('className="timeline-return-today"') < navBlock.indexOf('className="timeline-date-steppers"'));
+  assert.match(navBlock, /data-period-state=\{periodNavigation\.isCurrent \? "current" : "away"\}[\s\S]*className="timeline-return-today"[\s\S]*onClick=\{returnToday\}/);
+  assert.match(navBlock, /className="timeline-date-steppers"[\s\S]*timeline-date-stepper-divider/);
+  assert.doesNotMatch(navBlock, /data-period-kind/);
+  assert.match(styles, /\.timeline-date-navigation \{ display: inline-flex; flex: none; align-items: center; gap: 6px; \}/);
+  assert.match(colors, /\.timeline-return-today \{[^}]*justify-content: center; width: 74px; height: 30px;[^}]*padding: 0;[^}]*font: 500 12\.5px\/18px "Microsoft YaHei UI", var\(--jx-font-sans\)/);
+  assert.match(colors, /\.timeline-return-today\[data-period-state="current"\] \{[^}]*color: #4a5c75; background: #f8fafc;/);
+  assert.match(colors, /\.timeline-return-today\[data-period-state="away"\] \{[^}]*color: #0f172a; background: #ffffff;/);
+  assert.doesNotMatch(colors, /\.timeline-return-today[^\n]*::before/);
+  assert.doesNotMatch(colors, /\.timeline-return-today\[data-period-state="away"\][^\n]*(?:#eff6ff|--color-selected-bg|--color-selected-ink)/);
   assert.match(app, /const isCurrentWeek = selectedWeekDates\[0\] === weekDatesFor\(today\)\[0\]/);
-  assert.match(app, /className="timeline-return-today" onClick=\{returnToday\}>\{isCurrentWeek \? "本周" : "回到本周"\}/);
 });

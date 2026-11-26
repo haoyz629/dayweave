@@ -5,6 +5,8 @@ import test from "node:test";
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const databaseSource = readFileSync(new URL("../src-tauri/src/database.rs", import.meta.url), "utf8");
 const stylesSource = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const colorSystemSource = readFileSync(new URL("./color-system.css", import.meta.url), "utf8");
+const appTitlebarCss = readFileSync(new URL("./app-titlebar.css", import.meta.url), "utf8");
 const tauriSource = readFileSync(new URL("./tauri.ts", import.meta.url), "utf8");
 const userInterfaceSource = appSource.replace(
   /function uiErrorMessage\(reason: unknown\) \{[\s\S]*?\r?\n\}\r?\n\r?\nfunction pickerDateLabel/,
@@ -152,12 +154,12 @@ test("task schedule picker edits the full range with the shared timeline rail", 
   assert.match(appSource, /const \[pickerTimeInputs, setPickerTimeInputs\] = useState/);
   assert.match(appSource, /function updatePickerTimeInput\(/);
   assert.match(appSource, /function commitPickerTimeInput\(/);
-  assert.match(appSource, /className="schedule-boundary-time-control"/);
+  assert.match(appSource, /className="schedule-time-control selection-time-box"/);
   assert.match(appSource, /aria-label=\{`输入\$\{label\}时间`\}/);
   assert.match(appSource, /aria-invalid=\{!inputValid\}/);
   assert.match(appSource, /可输入 9、930 或 09:30，精确到 1 分钟/);
   assert.match(appSource, /请输入有效时间（00:00–23:59）/);
-  assert.match(appSource, /target\?\.closest\("\.schedule-boundary-time-control"\)/);
+  assert.match(appSource, /target\?\.closest\("\.schedule-time-control"\)/);
   assert.match(appSource, /const pickerError = !pickerTimeInputsValid/);
   assert.match(appSource, /startMinuteOffset=\{0\}/);
   assert.match(appSource, /endMinuteOffset=\{pickerEndMinuteOffset\}/);
@@ -170,8 +172,7 @@ test("task schedule picker edits the full range with the shared timeline rail", 
   assert.match(stylesSource, /\.schedule-picker-dialog \{[^}]*width: min\(920px, calc\(100vw - 48px\)\)/);
   assert.match(stylesSource, /\.schedule-picker-body \{[^}]*grid-template-columns: minmax\(360px, \.95fr\) minmax\(410px, 1\.05fr\)/);
   assert.match(stylesSource, /\.schedule-picker-range-panel \.time-range-rail\.block-editor \.time-rail-surface/);
-  assert.match(stylesSource, /\.schedule-boundary-time-control:focus-within/);
-  assert.match(stylesSource, /\.schedule-picker-rows \.schedule-time-control\.is-invalid \.schedule-boundary-time-control/);
+  assert.match(stylesSource, /\.schedule-time-control > input\[aria-invalid="true"\]/);
   assert.match(stylesSource, /\.schedule-picker-footer-error/);
   assert.match(stylesSource, /@media \(max-width: 760px\) \{[\s\S]*?\.schedule-picker-body \{ grid-template-columns: minmax\(0, 1fr\); \}/);
 });
@@ -200,20 +201,20 @@ test("ordinary tasks use one recycle-bin path instead of a cancellation state", 
   assert.doesNotMatch(appSource, /type TaskView = .*"cancelled"/);
   assert.equal(appSource.includes("不再进行"), false);
   assert.equal(appSource.includes("task-more-actions"), false);
-  assert.match(appSource, /const taskStatusFilterOrder: TaskView\[\] = \["all", "scheduled", "draft", "recurring", "open", "not_completed", "done", "deleted"\]/);
+  assert.match(appSource, /const taskStatusFilterOrder: TaskView\[\] = \["all", "scheduled", "draft", "recurring", "not_completed", "done", "deleted"\]/);
   assert.match(appSource, /className="task-compact-trash" disabled=\{busy\} onClick=\{\(\) => requestTaskChange\(\{ kind: "trash" \}\)\}/);
   assert.equal(stylesSource.includes("status-row-cancelled"), false);
   assert.equal(stylesSource.includes("terminal-task-status.cancelled"), false);
 });
 
-test("formal tasks require complete time and Inbox is no longer a product state", () => {
+test("formal tasks allow date-only or timed schedules and Inbox is no longer a product state", () => {
   assert.doesNotMatch(tauriSource, /export type TaskStatus = .*"inbox"/i);
   assert.doesNotMatch(appSource, /type TaskView = .*"inbox"/i);
   assert.equal(appSource.toLowerCase().includes("inbox"), false);
   assert.match(appSource, /const newTaskHasCompleteSchedule = taskScheduleIsComplete\(newTaskForm\)/);
   assert.match(appSource, /!newTaskHasCompleteSchedule \|\| !newTaskHasValidRange/);
-  assert.match(appSource, /时间未完整时只保存为草稿/);
-  assert.match(appSource, /请填写完整的任务开始和结束时间；当前内容仍可保存为草稿。/);
+  assert.match(appSource, /日期未完整时只保存为草稿/);
+  assert.match(appSource, /请填写完整的任务日期（具体时刻可选）；当前内容仍可保存为草稿。/);
   assert.match(appSource, /!editingTaskHasCompleteSchedule \|\| !editingTaskHasValidRange/);
 });
 
@@ -264,9 +265,13 @@ test("confirmed plans expose direct operations without a separate adjustment mod
   assert.doesNotMatch(appSource, /onClick=\{onAdjustPlan\}/);
   assert.match(appSource, /sourceBlockId: selectedBlock\.id/);
   assert.doesNotMatch(appSource, /onAdjustPlan|startPlanAdjustment/);
-  assert.match(appSource, /includeWaitingTask\(task, event\.currentTarget\)/);
+  assert.doesNotMatch(appSource, /待安排池|includeWaitingTask/);
   assert.equal(appSource.includes("移到待安排"), false);
-  assert.match(appSource, /<Icon name="trash" size=\{14\} \/>从今日计划移除/);
+  assert.equal(appSource.includes("移除当前安排"), false);
+  assert.equal(appSource.includes("已移回待安排"), false);
+  assert.match(appSource, /<Icon name="trash" size=\{14\} \/>移入回收站/);
+  assert.match(appSource, /onClick=\{\(\) => requestTrashSelectedBlock\(\)\}/);
+  assert.match(appSource, /!planDraftTimeEdit\.sourceBlockId && <button type="button" className="execution-remove-today" disabled=\{busy\} onClick=\{\(\) => void removePlanDraftBlock\(\)\}><Icon name="trash" size=\{14\} \/>从今日计划移除/);
   assert.match(appSource, /onClick=\{\(\) => void removePlanDraftBlock\(\)\}/);
 });
 
@@ -283,12 +288,6 @@ test("timeline detail flows provide contextual return actions", () => {
   assert.match(stylesSource, /\.task-context-return-icon:focus-visible/);
 });
 
-test("newly included tasks are revealed on the timeline", () => {
-  assert.match(appSource, /function revealTimelineBlock\(kind: "draft" \| "block", id: string\)/);
-  assert.match(appSource, /revealTimelineBlock\("draft", String\(blockIndex\)\)/);
-  assert.match(appSource, /scroller\.scrollTo\(\{[\s\S]*?top: nextTop,[\s\S]*?prefers-reduced-motion: reduce/);
-});
-
 test("time range handles use a hollow start and solid end", () => {
   assert.match(stylesSource, /\.time-rail-handle \{[^}]*background: #fff;/);
   assert.match(stylesSource, /\.time-rail-handle\.end \{[^}]*background: #315cea;/);
@@ -298,12 +297,17 @@ test("task workload copy follows same-day and cross-day scheduling semantics", (
   assert.match(appSource, /className="apple-schedule-workload"/);
   assert.match(appSource, /className="apple-schedule-workload-icon"/);
   assert.match(appSource, /sameDayMinutes === null \? "待计算" : <WorkloadTimeDigits minutes=\{sameDayMinutes\}/);
-  assert.match(appSource, /sameDayMinutes === null \? "补全有效时间" : "自动计算"/);
-  assert.match(appSource, /crossDay && \(/);
+  assert.match(appSource, /sameDayMinutes === null && <small>补全有效时间<\/small>/);
+  assert.doesNotMatch(appSource, /自动计算|只定日期<\/small>/);
+  assert.match(appSource, /className=\{`apple-schedule-untimed-btn\$\{isUntimed \? " is-active" : ""\}`\}/);
+  assert.match(appSource, /aria-pressed=\{isUntimed\}/);
+  assert.match(appSource, /crossDayTimed && \(/);
+  assert.match(appSource, /isUntimed \? <output className="apple-schedule-workload is-untimed" aria-live="polite"><i className="apple-schedule-workload-icon" aria-hidden="true"><Icon name="clock" size=\{15\} \/><\/i><span>安排<\/span><strong>不限时刻<\/strong><\/output>/);
   assert.doesNotMatch(appSource, /workload-auto-field/);
   assert.doesNotMatch(stylesSource, /\.workload-auto-field/);
   assert.match(appSource, /平均每日投入/);
-  assert.match(appSource, /<span>预估总投入<\/span><strong><WorkloadTimeDigits minutes=\{form\.estimated_minutes\}/);
+  assert.match(appSource, /<span>预估总投入<\/span><strong><WorkloadTimeDigits minutes=\{form\.estimated_minutes\} emptyLabel="待填写" \/><\/strong>/);
+  assert.match(appSource, /<small>必填<\/small>/);
   assert.doesNotMatch(appSource, /按时间重算/);
   assert.doesNotMatch(appSource, /使用手动值，不会被时间调整覆盖/);
 });
@@ -323,27 +327,82 @@ test("result notes stay visible and editable without reasons or followup schedul
 });
 
 
-test("calendar, weekly overview and daily plan share the schedule workspace", () => {
+test("calendar, weekly overview and daily plan share the schedule workspace and global titlebar switch", () => {
   assert.doesNotMatch(appSource, /aria-label="今日页视图"/);
-  assert.match(appSource, /className="timeline-view-switch" role="group" aria-label="日程视图"/);
-  assert.match(appSource, /aria-pressed=\{todayView === "timeline"\} aria-label="日视图"[^\n]+onClick=\{\(\) => openTimelineDate\(selectedDate\)\}>日<\/button>/);
-  assert.match(appSource, /aria-pressed=\{todayView === "week"\} aria-label="周视图"[^\n]+setTodayView\("week"\)[^\n]+>周<\/button>/);
+  assert.match(appSource, /<AppTitlebar viewSlotRef=\{setHeaderViewSlot\}[\s\S]*createPortal\([\s\S]*role="group"[\s\S]*aria-label="日程视图"[\s\S]*data-scope=\{active === "今日" \? "schedule" : "tasks"\}/);
+  assert.match(appSource, /\{ view: "timeline", label: "日视图" \}[\s\S]*\{ view: "week", label: "周视图" \}[\s\S]*\{ view: "month", label: "月视图" \}/);
+  assert.match(appSource, /const isCurrent = active === "今日" && todayView === view;/);
+  assert.match(appSource, /onClick=\{\(\) => switchGlobalScheduleView\(view\)\}/);
   assert.match(appSource, /todayView === "week" \? <WeekTimeline selectedDate=\{selectedDate\}/);
   assert.doesNotMatch(appSource, /周视图暂未开放/);
-  assert.match(appSource, /aria-pressed=\{todayView === "month"\} aria-label="月视图"[^\n]+onClick=\{returnToMonth\}>月<\/button>/);
-  assert.match(stylesSource, /\.timeline-view-switch button\.is-active/);
+  const todayTopbar = appSource.match(/<header className="timeline-design-topbar">[\s\S]*?<\/header>/)?.[0] ?? "";
+  assert.ok(todayTopbar);
+  assert.doesNotMatch(todayTopbar, /timeline-view-switch/);
+  assert.match(appTitlebarCss, /\.timeline-view-switch button\.is-active/);
   assert.match(appSource, /onClick=\{\(\) => selectCalendarDate\(cell\.key, true\)\}/);
   assert.match(appSource, /onDoubleClick=\{\(\) => openTimelineDate\(cell\.key\)\}/);
   assert.match(appSource, /function returnToMonth\(\) \{[\s\S]*?setTodayView\("month"\)/);
   assert.doesNotMatch(appSource, /CalendarOverviewButton|aria-label="返回月历"|calendarSlotRef|returnToMonthOnEscape/);
+  assert.match(appSource, /className="today-day-split"/);
+  assert.doesNotMatch(appSource, /className="today-focus-strip"/);
+  assert.match(appSource, /className="today-rail"/);
+  assert.match(appSource, /className="today-rail-card today-untimed-card"/);
+  assert.match(appSource, /className="today-rail-card today-agenda-card"/);
+  assert.match(appSource, /className="today-rail-card today-mini-calendar-card"/);
+  assert.match(appSource, /className="timeline-night-fold"/);
+  assert.match(appSource, /className="return-to-now-dot"/);
+  assert.doesNotMatch(appSource, /className="timeline-week"/);
+  assert.doesNotMatch(appSource, /className="timeline-lanes"/);
   const dateContent = readFileSync(new URL("./timeline-week-date-content.tsx", import.meta.url), "utf8");
-  assert.match(appSource, /<TimelineWeekDateContent date=\{date\} weekday=\{weekday\} \/>/);
   assert.match(dateContent, /className="timeline-week-calendar-meta"/);
   assert.match(dateContent, /primaryCalendarLabel\.kind/);
   assert.match(dateContent, /timeline-week-heading"><small>\{weekday\}<\/small>/);
   assert.equal(stylesSource.includes(".timeline-week-count"), false);
   assert.match(stylesSource, /button\.today:not\(\.selected\) \.timeline-week-date \{ color: var\(--today-red\); \}/);
   assert.match(stylesSource, /button\.today\.selected \.timeline-week-date \{ color: #fff; background: var\(--today-red\);/);
+  assert.match(appSource, /const \[sidebarCollapsed, setSidebarCollapsed\] = useState\(true\)/);
+  assert.match(appSource, /const nightCollapsed = !nightExpanded && !hasNightItems;/);
+  assert.match(appSource, /Math\.max\(0, timelineDrag\.start - axisStart\) \/ 60 \* pixelsPerHour/);
+  assert.match(appSource, /当日暂无不限时安排/);
+  assert.match(appSource, /当日暂无安排/);
+  assert.match(appSource, /className="today-agenda-time" dateTime=\{entry\.startsAt\}>\{timeInputValue\(entry\.startsAt\)\}/);
+  assert.doesNotMatch(appSource, /toggleAgendaRecurring/);
+  assert.match(appSource, /const timer = window\.setTimeout\(\(\) => \{[\s\S]*?delete target\.dataset\.returnLocated;[\s\S]*?\}, 3000\)/);
+  assert.match(appSource, /locateTimerRef\.current = window\.setTimeout\(\(\) => \{[\s\S]*?delete target\.dataset\.returnLocated;[\s\S]*?\}, 3000\)/);
+  assert.match(appSource, /<TimelineOverflowDialog[\s\S]*onLocate=\{key => \{\s*setOverflowKeys\(null\);\s*locateTimelineKey\(key\);\s*\}\}/);
+  assert.match(appSource, /type TimelineReturnContext = \{[^}]*eventId\?: string/);
+  const colorSystemSource = readFileSync(new URL("./color-system.css", import.meta.url), "utf8");
+  assert.match(colorSystemSource, /\.today-untimed-list \{\s*max-height: 114px;/);
+  assert.match(colorSystemSource, /\.today-agenda-time \{[^}]*background: #f1f5f9;/);
+  assert.doesNotMatch(colorSystemSource, /\.today-untimed-item,\s*html:root:not\(\[data-mode="dark"\]\) \.today-agenda-item \{[^}]*border-left:\s*3px/);
+  assert.match(appSource, /right\.created_at\.localeCompare\(left\.created_at\) \|\| left\.id\.localeCompare\(right\.id\)/);
+  assert.match(appSource, /taskBlockTypeLabels\.multi\.short : taskBlockTypeLabels\.single\.short/);
+  assert.match(appSource, /taskBlockTypeLabels\.recurring\.short/);
+  assert.match(colorSystemSource, /\.today-untimed-check::before \{[^}]*border-radius: 5px;/);
+  assert.match(colorSystemSource, /\.timeline-event\[data-return-located="true"\] \{\s*z-index: 4;\s*outline: none;\s*border-color: var\(--color-primary, #3168dc\);\s*box-shadow: 0 0 0 2\.5px rgb\(49 104 220 \/ 22%\), 0 4px 14px rgb\(49 104 220 \/ 12%\);/);
+  const feedbackCss = readFileSync(new URL("./feedback.css", import.meta.url), "utf8");
+  const feedbackTsx = readFileSync(new URL("./feedback.tsx", import.meta.url), "utf8");
+  assert.match(feedbackCss, /\.feedback-toast-viewport \{[^}]*z-index: 260;/);
+  assert.match(feedbackTsx, /export function lockBackgroundElements/);
+  assert.match(feedbackTsx, /sibling\.id !== "feedback-toast-viewport"/);
+  assert.match(appSource, /timelineItemLanes\[left\.layoutKey\]\?\.column/);
+  assert.match(appSource, /today-agenda-item kind-\$\{entry\.kind\}\$\{entry\.outcome \? ` execution-\$\{entry\.outcome\}` : ""\}/);
+  assert.match(colorSystemSource, /\.today-agenda-item\.execution-completed \{[^}]*border-color: #95d5b2;[^}]*background: #d6f2e3;/);
+  assert.match(colorSystemSource, /\.today-agenda-title \{[^}]*font: 600 13px/);
+  assert.match(colorSystemSource, /\.timeline-night-fold > button \{[^}]*border: 0;[^}]*background: transparent;/);
+  assert.match(colorSystemSource, /\.timeline-night-fold-rule \{[^}]*border-top: 1px dashed #cbd5e1;/);
+  assert.match(appSource, /aria-expanded=\{nightExpanded\}/);
+  assert.match(appSource, /className="timeline-night-fold-gutter"[^>]*>00–07<\/span>/);
+  assert.match(appSource, /<Icon name="moon" size=\{12\} \/>/);
+  assert.match(colorSystemSource, /\.return-to-now-layer > button \{[^}]*border: 1px solid #cbd5e1;[^}]*border-radius: 6px;/);
+  assert.doesNotMatch(colorSystemSource, /\.return-to-now-layer > button \{[^}]*backdrop-filter:/);
+  assert.match(colorSystemSource, /\.timeline-event\[data-return-located="true"\] \{\s*z-index: 4;/);
+  assert.match(appSource, /suppressTooltipFocusRef\.current = true/);
+  assert.match(appSource, /className="today-agenda-live-dot"/);
+  assert.match(colorSystemSource, /\.today-agenda-live-dot \{[^}]*animation: today-live-pulse/);
+  assert.doesNotMatch(colorSystemSource, /\.today-agenda-item\.is-now\b/);
+  assert.match(appSource, /ref=\{agendaListRef\}/);
+  assert.match(appSource, /data-agenda-key=\{entry\.layoutKey\}/);
 });
 
 test("timeline task blocks use the centered editor and completing checkbox ends the task", () => {
@@ -420,7 +479,6 @@ test("task capsule titles stay on one line and timeline task blocks fit their av
   assert.match(appSource, /<strong title=\{title\}>\{title\}<\/strong>/);
   assert.match(stylesSource, /\.task-capsule-heading > strong \{[^}]*display: block;[^}]*flex: 1 1 auto;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
   assert.doesNotMatch(stylesSource, /\.task-capsule-heading > strong \{[^}]*-webkit-line-clamp:/);
-  assert.match(stylesSource, /\.timeline-lanes \.task-capsule-content\.compact \{[^}]*height: auto;[^}]*min-height: 76px;/);
   assert.match(stylesSource, /\.timeline-task-body, \.timeline-event\.execution-block \.timeline-task-body \{[^}]*display: flex;[^}]*height: 100%;[^}]*overflow: hidden;/);
   assert.match(stylesSource, /\.timeline-event-body \{[^}]*min-width: 0;[^}]*width: 100%;[^}]*overflow: hidden;/);
 });
@@ -450,7 +508,7 @@ test("ordinary and recurring task time inputs enforce 4-digit limit and preserve
   assert.match(appSource, /sanitizeTimeInput/);
   assert.match(appSource, /function updatePickerTimeInput\(field: TaskSchedulePicker\["activeField"\], value: string\) \{[\s\S]*?sanitizeTimeInput\(value\)/);
   assert.match(appSource, /function commitPickerTimeInput\(field: TaskSchedulePicker\["activeField"\], value: string\) \{[\s\S]*?sanitizeTimeInput\(value\)/);
-  assert.match(appSource, /<input type="text" inputMode="numeric" autoComplete="off" spellCheck=\{false\} maxLength=\{5\} value=\{inputValue\}/);
+  assert.match(appSource, /<input type="text" inputMode="numeric" autoComplete="off" spellCheck=\{false\} maxLength=\{5\}[^>]*value=\{inputValue\}/);
   assert.match(appSource, /function updateTimeInput\(field: TimeRangeEdge, raw: string, commit = false\)/);
   assert.match(appSource, /function commitTimeInput\(field: TimeRangeEdge, raw: string\)/);
   assert.match(appSource, /function handleTimeKeyDown\(event: KeyboardEvent<HTMLInputElement>, field: TimeRangeEdge\)/);
@@ -651,9 +709,14 @@ test("status and tag dropdown filters and empty states keep concise copy", () =>
   assert.match(appSource, /className="ledger-empty"><Icon name=\{taskViewIcon\[view\]\}/);
   assert.match(appSource, /className="inspector-empty"><Icon name=\{taskViewIcon\[view\]\}/);
   assert.match(appSource, /const taskEmptyCopy: Record<TaskView, string>/);
-  for (const text of ["暂无待确认草稿", "暂无重复事项", "暂无待处理任务", "暂无已安排任务", "暂无已完成任务", "回收站为空", "无匹配结果", "选择一项查看详情"]) {
+  for (const text of ["暂无待确认草稿", "暂无重复规则", "暂无进行中任务", "暂无未完成任务", "暂无已完成任务", "回收站为空", "无匹配结果", "选择一项查看详情"]) {
     assert.ok(appSource.includes(text), text);
   }
+  assert.equal(appSource.includes("暂无待安排任务"), false);
+  assert.doesNotMatch(appSource, /open:\s*"待安排"/);
+  assert.equal(appSource.includes("待处理"), false);
+  assert.match(appSource, /const statusCopy: Record<TaskListStatus, string> = \{\s*scheduled: "进行中",\s*not_completed: "未完成",\s*done: "已完成",\s*deleted: "回收站"\s*\}/);
+  assert.match(appSource, /const taskViewCopy: Record<TaskView, string> = \{\s*all: "全部任务",\s*draft: "草稿箱",\s*recurring: "重复规则",\s*\.\.\.statusCopy\s*\}/);
   assert.doesNotMatch(appSource, /taskEmptyCopy\[view\]\.description/);
 });
 
@@ -674,4 +737,18 @@ test("tasks are independent and new drafts never use association fields", () => 
   assert.doesNotMatch(appSource, /status_locked|\.origin\b|followupSourceId|linked-select/);
   assert.doesNotMatch(tauriSource, /TaskOrigin|TaskFollowup|prepareTaskFollowup|status_locked/);
   assert.doesNotMatch(databaseSource, /ensure_status_editable|origin\.source_task_id = task.id/);
+});
+
+test("task and recurring schedule pickers share unified untimed note and confirm button copy", () => {
+  const noteText = "不占用时间线时段，会在对应日期的「不限时事项」中显示，可随时勾选完成或补充具体时段。";
+  assert.match(appSource, new RegExp(`const UNTIMED_SCHEDULE_NOTE = "${noteText}";`));
+  assert.match(appSource, /function UntimedScheduleNote\(\) \{[\s\S]*className="schedule-picker-untimed-note"[\s\S]*<strong>当前为不限时刻<\/strong>[\s\S]*<p>\{UNTIMED_SCHEDULE_NOTE\}<\/p>/);
+  const taskPicker = appSource.slice(appSource.indexOf("function TaskScheduleEditor("), appSource.indexOf("function RecurringValidityPicker("));
+  const recurringPicker = appSource.slice(appSource.indexOf("function RecurringValidityPicker("), appSource.indexOf("function RecurringItemEditor("));
+  assert.match(taskPicker, /<UntimedScheduleNote \/>/);
+  assert.match(recurringPicker, /<UntimedScheduleNote \/>/);
+  assert.doesNotMatch(colorSystemSource, /html:root:not\(\[data-mode="dark"\]\) \.schedule-picker-untimed-note\s*\{[^}]*dashed/);
+  assert.match(taskPicker, /className="schedule-picker-confirm" disabled=\{!pickerRangeValid\} onClick=\{confirmSchedulePicker\}>确认安排<\/button>/);
+  assert.match(recurringPicker, /className="schedule-picker-confirm" disabled=\{!validityRangeValid\} onClick=\{confirmRange\}>确认安排<\/button>/);
+  assert.doesNotMatch(taskPicker, />确认时间</);
 });

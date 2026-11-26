@@ -28,7 +28,7 @@ test("holiday details retain scheduling rules without implementation copy", () =
   assert.match(html, /尚未成功检查/);
   assert.match(html, /检查节假日更新/);
   assert.match(html, /离线使用/);
-  assert.match(html, /缺失年份按每周设置安排，不推测调休/);
+  assert.match(html, /缺失年份不显示法定休\/班标记，也不推测调休/);
   assert.match(html, /法定工作日重复事项待对应年份补齐后恢复推演/);
   assert.match(html, /以国务院公告为准/);
   assert.match(html, /更新不影响已有任务和执行记录/);

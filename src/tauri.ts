@@ -198,6 +198,8 @@ export type ManualTaskUpdate = {
   priority: Priority | null;
   earliest_start_at: string | null;
   due_at: string | null;
+  earliest_start_date?: string | null;
+  due_date?: string | null;
   estimated_minutes: number | null;
 };
 
@@ -217,13 +219,6 @@ export type ManualCalendarEventInput = {
   starts_at: string;
   ends_at: string;
   is_all_day: boolean;
-};
-
-export type AvailabilitySettings = {
-    weekdays: number[];
-    workday_start: string;
-    workday_end: string;
-    makeup_workdays_as_workdays: boolean;
 };
 
 export type RulePlanBlock = {
@@ -639,14 +634,6 @@ export function listCalendarEvents(rangeStart: string, rangeEnd: string) {
   return invokeDesktop<CalendarEvent[]>("list_calendar_events", { rangeStart, rangeEnd });
 }
 
-export function getAvailabilitySettings() {
-  return invokeDesktop<AvailabilitySettings>("get_availability_settings");
-}
-
-export function saveAvailabilitySettings(settings: AvailabilitySettings) {
-  return invokeDesktop<AvailabilitySettings>("save_availability_settings", { settings });
-}
-
 export function previewRuleBasedPlan(planDate: string) {
   return invokeDesktop<RulePlanPreview>("preview_rule_based_plan", { planDate });
 }
@@ -694,13 +681,6 @@ export function updatePlanBlockTime(planDate: string, block: PlanBlock, startsAt
 
 export function getDaySchedule(planDate: string) {
   return invokeDesktop<DaySchedule>("get_day_schedule", { planDate });
-}
-
-export function includePlanTask(planDate: string, task: Task, blocks: RulePlanBlock[]) {
-  return invokeDesktop<DaySchedule>("include_plan_task", { input: {
-    plan_date: planDate, task_id: task.id, expected_updated_at: task.updated_at,
-    expected_reserved_minutes: task.reserved_minutes, blocks
-  } });
 }
 
 export function removePlanBlock(planDate: string, block: PlanBlock) {

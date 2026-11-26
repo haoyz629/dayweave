@@ -1,0 +1,12 @@
+.timeline-width-probe { position: absolute; inset: 0 0 auto; height: 0; pointer-events: none; }
+.timeline-overflow-trigger { min-width: 0; border: 1px dashed var(--jx-edge); border-radius: 4px; background: var(--jx-raised); color: var(--jx-ink-soft); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.timeline-events > .timeline-overflow-trigger { position: absolute; top: var(--timeline-top); height: var(--timeline-height); min-height: 0; padding: 0 3px; overflow: hidden; }
+.timeline-events:has(.is-dragging, .is-drag-saving) .timeline-event { transition: none; }
+.timeline-overflow-outside { display: flex; gap: 4px; padding: 3px 8px; max-height: 54px; overflow: auto; flex: none; }
+.timeline-overflow-outside button { flex: none; }
+.timeline-overflow-members { display: grid; gap: 4px; max-height: min(50vh, 340px); overflow: auto; }
+.timeline-overflow-members button { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 7px 9px; text-align: start; }
+.timeline-overflow-members strong { overflow-wrap: anywhere; }
+.timeline-overflow-members small { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.timeline-overflow-dialog .confirmation-body { margin-top: 10px; }
+.timeline-overflow-members button:focus-visible, .timeline-overflow-trigger:focus-visible { z-index: 4; outline: 2px solid var(--jx-focus); outline-offset: 2px; }

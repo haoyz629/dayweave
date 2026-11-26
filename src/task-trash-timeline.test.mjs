@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 import { visibleTaskScheduleBlocks } from "./task-result.ts";
+import { taskAppearsOnDate } from "./calendar-task-placement.ts";
 
 const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -59,7 +60,7 @@ function harness({ fail = false, loaded = true } = {}) {
   return { state, calls, summary, refresh: () => releaseRefresh?.() };
 }
 
-test("moving a task to trash preserves existing blocks and statistics before refresh completes", async () => {
+test("moving a task to trash hides its schedule blocks immediately while preserving cached blocks for restore", async () => {
   const current = harness();
   const before = structuredClone(current.state.daySchedule);
   assert.deepEqual(current.summary(), { count: 3, completed: 1, minutes: 90 });
@@ -67,13 +68,13 @@ test("moving a task to trash preserves existing blocks and statistics before ref
   assert.equal(current.state.tasks[0].status, "deleted");
   assert.deepEqual(current.state.daySchedule.task_blocks.map(item => item.id), ["block", "completed", "other-block"]);
   assert.equal(current.state.daySchedule.task_blocks[0].task_status, "deleted");
-  assert.deepEqual(current.summary(), { count: 3, completed: 1, minutes: 90 });
+  assert.deepEqual(current.summary(), { count: 1, completed: 0, minutes: 30 });
   assert.deepEqual(current.state.daySchedule.fixed_events, before.fixed_events);
   assert.equal(current.state.daySchedule.plan_id, before.plan_id);
   assert.ok(current.calls.some(([name, selectedDate, loading]) => name === "schedule" && selectedDate === date && loading === false));
   assert.equal(current.state.successToast.message, "已移入回收站");
   current.refresh();
-  assert.deepEqual(current.summary(), { count: 3, completed: 1, minutes: 90 });
+  assert.deepEqual(current.summary(), { count: 1, completed: 0, minutes: 30 });
   assert.equal(before.task_blocks.length, 3, "UI cache changes do not mutate the original schedule");
 });
 
@@ -108,13 +109,23 @@ test("deletion with no loaded schedule does not manufacture a schedule", async (
   assert.equal(current.state.tasks[0].status, "deleted");
 });
 
-test("recycled task blocks remain visible only on today or past dates", () => {
-  for (const selectedDate of ["2026-10-21", date]) {
-    const recycled = { ...block, task_status: "deleted" };
-    const before = structuredClone(recycled);
-    assert.deepEqual(visibleTaskScheduleBlocks([recycled, block], selectedDate, date), [recycled, block]);
-    assert.deepEqual(recycled, before, "showing the block must not mutate its saved facts");
+test("recycled task blocks stay hidden across past, today and future views until restored", () => {
+  const recycled = { ...block, task_status: "deleted" };
+  const completedDeleted = { ...recycled, id: "completed", execution_status: "completed" };
+  const notedDeleted = { ...recycled, id: "noted", execution_note: "已完成前两项", execution_captured_at: `${date}T10:00:00+08:00` };
+  for (const selectedDate of ["2026-10-21", date, "2026-10-23"]) {
+    assert.deepEqual(visibleTaskScheduleBlocks([recycled, completedDeleted, notedDeleted, block], selectedDate, date), [block]);
   }
-  const future = { ...block, task_status: "deleted" };
-  assert.deepEqual(visibleTaskScheduleBlocks([future, block], "2026-10-23", date), [block]);
+  const restoredCompleted = { ...completedDeleted, task_status: "scheduled" };
+  assert.deepEqual(visibleTaskScheduleBlocks([restoredCompleted, block], date, date), [restoredCompleted, block]);
+});
+
+test("month grid hides recycled tasks across all dates and shows them again after restore", () => {
+  const monthFilter = text.match(/const dayTasks = (tasks\.filter\([^\n]+\));/)?.[1];
+  assert.ok(monthFilter, "month cell task filter expression exists in App.tsx");
+  const activeTask = { id: "t1", status: "scheduled", deleted_at: null, scheduled_dates: [date], due_date: date, due_at: null };
+  const deletedTask = { ...activeTask, status: "deleted", deleted_at: `${date}T12:00:00+08:00` };
+  const evalMonth = (tasks) => vm.runInNewContext(compile(monthFilter), { tasks, cell: { key: date }, taskAppearsOnDate });
+  assert.deepEqual(evalMonth([deletedTask]).length, 0);
+  assert.deepEqual(evalMonth([activeTask]).length, 1);
 });

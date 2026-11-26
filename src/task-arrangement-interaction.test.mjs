@@ -63,7 +63,7 @@ function locationHarness(overrides = {}) {
     },
     ...overrides
   };
-  for (const key of ["todayView", "followingNow", "timelineTooltip", "planDraftTimeEdit", "selection", "executionDraft", "executionMessage"]) state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = value; };
+  for (const key of ["todayView", "followingNow", "timelineTooltip", "planDraftTimeEdit", "selection", "executionDraft", "executionMessage", "revealedKey"]) state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = value; };
   const effect = run(`(${locateEffect})`, state);
   return { state, calls, target, effect, flush() { frames.splice(0).forEach(callback => callback()); } };
 }
@@ -75,6 +75,7 @@ test("arrangement navigation locates, centers and highlights the new task block"
     assert.equal(current.state.todayView, "timeline");
     assert.equal(current.state.followingNow, false);
     assert.equal(current.target.dataset.returnLocated, "true");
+    assert.equal(current.state.revealedKey, "block:new-block");
     assert.deepEqual(JSON.parse(JSON.stringify(current.calls)), [["focus", { preventScroll: true }], ["scroll", { top: 430, behavior: "auto" }], ["handled"]]);
   }
 });
@@ -109,26 +110,45 @@ test("same-date arrangement navigation refreshes schedule before looking for a n
   assert.equal(calls[1][1].taskId, "new-task");
 });
 
-test("direct removal affects only the selected block, retains errors and respects guards", async () => {
+test("timeline Move to Trash opens confirmation, updates schedule via onTrashTask, retains errors and respects guards", async () => {
   const make = (overrides = {}) => {
     const calls = [];
     const state = {
-      selectedBlock: { id: "one-block", task_id: "task" }, canAdjustSelectedBlock: true,
+      selectedBlock: { id: "one-block", task_id: "task-1", task_title: "整理设计文档" }, canTrashSelectedBlock: true,
+      pendingTrashBlock: null, trashingBlock: false, trashBlockError: "old-error", trashingBlockRef: { current: false },
       busy: false, loading: false, savingExecution: false, quickCompletingBlockId: null, savingDraggedBlock: false, timelineDrag: null, preview: null,
-      async onRemoveBlock(block) { calls.push(["remove", block.id]); }, closeTimelinePanel() { calls.push(["close"]); },
-      onNotify(...args) { calls.push(["error", ...args]); }, uiErrorMessage: String, ...overrides
+      setPendingTrashBlock(value) { state.pendingTrashBlock = value; },
+      setTrashingBlock(value) { state.trashingBlock = value; },
+      setTrashBlockError(value) { state.trashBlockError = value; },
+      async onTrashTask(taskId) { calls.push(["trash", taskId]); },
+      closeTimelinePanel() { calls.push(["close"]); },
+      uiErrorMessage: String, ...overrides
     };
-    run(functions.get("removeSelectedBlock"), state);
+    run(functions.get("requestTrashSelectedBlock"), state);
+    run(functions.get("confirmTrashSelectedBlock"), state);
     return { state, calls };
   };
-  const current = make(); await current.state.removeSelectedBlock();
-  assert.deepEqual(current.calls, [["remove", "one-block"], ["close"]]);
-  for (const flags of [{ busy: true }, { loading: true }, { savingExecution: true }, { quickCompletingBlockId: "block" }, { savingDraggedBlock: true }, { timelineDrag: {} }, { preview: {} }, { canAdjustSelectedBlock: false }]) {
-    const blocked = make(flags); await blocked.state.removeSelectedBlock(); assert.deepEqual(blocked.calls, []);
+  const current = make();
+  current.state.requestTrashSelectedBlock();
+  assert.deepEqual(JSON.parse(JSON.stringify(current.state.pendingTrashBlock)), { taskId: "task-1", title: "整理设计文档" });
+  assert.equal(current.state.trashBlockError, null);
+  await current.state.confirmTrashSelectedBlock();
+  assert.deepEqual(JSON.parse(JSON.stringify(current.calls)), [["trash", "task-1"], ["close"]]);
+  assert.equal(current.state.pendingTrashBlock, null);
+  assert.equal(current.state.trashingBlock, false);
+  assert.equal(current.state.trashingBlockRef.current, false);
+
+  for (const flags of [{ busy: true }, { loading: true }, { savingExecution: true }, { quickCompletingBlockId: "block" }, { savingDraggedBlock: true }, { timelineDrag: {} }, { preview: {} }, { canTrashSelectedBlock: false }, { trashingBlockRef: { current: true } }]) {
+    const blocked = make(flags);
+    blocked.state.requestTrashSelectedBlock();
+    assert.equal(blocked.state.pendingTrashBlock, null);
   }
-  const failed = make({ async onRemoveBlock() { throw "记录已变化"; } });
-  await failed.state.removeSelectedBlock();
-  assert.deepEqual(failed.calls, [["error", "安排未移除", "记录已变化", "review"]]);
+  const failed = make({ async onTrashTask() { throw "记录已变化"; } });
+  failed.state.requestTrashSelectedBlock();
+  await failed.state.confirmTrashSelectedBlock();
+  assert.equal(failed.state.trashBlockError, "未移入回收站：记录已变化");
+  assert.deepEqual(JSON.parse(JSON.stringify(failed.state.pendingTrashBlock)), { taskId: "task-1", title: "整理设计文档" });
+  assert.deepEqual(JSON.parse(JSON.stringify(failed.calls)), []);
 });
 
 test("deadline capsule fact uses an icon and keeps its complete accessible date and time", () => {

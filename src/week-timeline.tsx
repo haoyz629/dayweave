@@ -36,7 +36,7 @@ export function WeekTimeline({ selectedDate, today, tasks, recurringItems, onOpe
   today: string;
   tasks: Task[];
   recurringItems: RecurringItem[];
-  onOpenDay?: (date: string, returnContext?: { date: string; blockId?: string; taskId?: string; occurrenceId?: string }) => void;
+  onOpenDay?: (date: string, returnContext?: { date: string; blockId?: string; taskId?: string; occurrenceId?: string; eventId?: string }) => void;
   onOpenTasks?: (taskId: string, returnContext: { date: string; blockId?: string; taskId?: string }) => void;
   onOpenRecurringItem?: (recurringItemId: string, returnContext: { date: string; occurrenceId?: string }) => void;
 }) {
@@ -266,7 +266,7 @@ export function WeekTimeline({ selectedDate, today, tasks, recurringItems, onOpe
           {(entry.taskId && onOpenTasks || entry.recurringItemId && onOpenRecurringItem || onOpenDay) && <div className="detail-item-actions">
             {entry.taskId && onOpenTasks && <button type="button" className="detail-action-button" onClick={() => { const date = details.date; setDetails(null); onOpenTasks(entry.taskId!, { date, blockId: entry.blockId, taskId: entry.taskId }); }}>查看任务</button>}
             {entry.recurringItemId && onOpenRecurringItem && <button type="button" className="detail-action-button" onClick={() => { const date = details.date; setDetails(null); onOpenRecurringItem(entry.recurringItemId!, { date, occurrenceId: entry.occurrenceId }); }}>查看重复规则</button>}
-            {onOpenDay && <button type="button" className="detail-action-button is-locate" onClick={() => { const date = details.date; setDetails(null); onOpenDay(date, { date, blockId: entry.blockId, taskId: entry.taskId, occurrenceId: entry.occurrenceId }); }}>定位到当日时间线</button>}
+            {onOpenDay && <button type="button" className="detail-action-button is-locate" onClick={() => { const date = details.date; setDetails(null); onOpenDay(date, { date, blockId: entry.blockId, taskId: entry.taskId, occurrenceId: entry.occurrenceId, ...(entry.layoutKey.startsWith("event:") ? { eventId: entry.layoutKey.slice(6) } : {}) }); }}>定位到当日时间线</button>}
           </div>}
         </article>) : <p className="detail-empty">这一天没有安排。</p>}</div>
         <footer className="detail-footer">

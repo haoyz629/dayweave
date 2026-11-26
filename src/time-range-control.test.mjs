@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  applyTimeWheelSelection,
   closestTimeRangeEdge,
   continuousTimeRangeGeometry,
   continuousTimeScaleMarks,
   constrainTimeRange,
   focusedTimeRangePresentation,
   focusedTimeRangeWindow,
+  formatClockMinutes,
   normalizeClockInput,
+  parseClockMinutes,
   sanitizeTimeInput,
   selectDateBoundary,
   selectTaskDateBoundary,
@@ -252,4 +255,52 @@ test("task block rail collapses the middle of a long range", () => {
     endWindow: { start: 21 * 60 + 15, end: 23 * 60 + 45 },
     omittedMinutes: 18 * 60 + 45
   });
+});
+
+test("clock parsing and formatting honor optional recurring 24:00 midnight", () => {
+  assert.equal(parseClockMinutes("09:30"), 570);
+  assert.equal(parseClockMinutes("24:00", false), null);
+  assert.equal(parseClockMinutes("24:00", true), 1440);
+  assert.equal(parseClockMinutes("25:00", true), null);
+  assert.equal(formatClockMinutes(1440, true), "24:00");
+  assert.equal(formatClockMinutes(1440, false), "23:59");
+  assert.equal(formatClockMinutes(-15, false), "00:00");
+});
+
+test("time wheel selection keeps valid span on same day and clamps near day boundaries", () => {
+  assert.deepEqual(
+    applyTimeWheelSelection("start", "08:15", { start: "09:30", end: "11:00" }),
+    { start: "08:15", end: "11:00" }
+  );
+  assert.deepEqual(
+    applyTimeWheelSelection("start", "11:30", { start: "09:30", end: "10:30" }),
+    { start: "11:30", end: "12:30" }
+  );
+  assert.deepEqual(
+    applyTimeWheelSelection("end", "08:45", { start: "09:30", end: "10:30" }),
+    { start: "07:45", end: "08:45" }
+  );
+  assert.deepEqual(
+    applyTimeWheelSelection("start", "23:45", { start: "22:00", end: "23:00" }),
+    { start: "23:44", end: "23:59" }
+  );
+  assert.deepEqual(
+    applyTimeWheelSelection("end", "24:00", { start: "23:30", end: "23:45" }, { allowMidnightEnd: true, minimumDuration: 1 }),
+    { start: "23:30", end: "24:00" }
+  );
+});
+
+test("independent wheel selection only updates the chosen boundary across multiple days", () => {
+  assert.deepEqual(
+    applyTimeWheelSelection("start", "21:15", { start: "09:00", end: "10:00" }, { independent: true }),
+    { start: "21:15", end: "10:00" }
+  );
+  assert.deepEqual(
+    applyTimeWheelSelection("end", "07:30", { start: "09:00", end: "10:00" }, { independent: true }),
+    { start: "09:00", end: "07:30" }
+  );
+  assert.deepEqual(
+    applyTimeWheelSelection("end", "24:00", { start: "23:50", end: "23:55" }, { independent: true, allowMidnightEnd: true }),
+    { start: "23:50", end: "24:00" }
+  );
 });

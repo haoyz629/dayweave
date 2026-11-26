@@ -50,10 +50,10 @@ test("capsule keeps title with right-slot status and puts priority, timing and t
   const { state } = harness();
   state.TaskTagList = ({ tags, limit = 3 }) => React.createElement("span", { className: "task-list-tags", "data-limit": limit }, tags.slice(0, limit).join("、"));
   for (const sourceType of ["manual", "ai_assistant"]) {
-    const markup = renderToStaticMarkup(state.TaskCapsuleContent({ title: "一个很长的任务标题", priority: "medium", tags: ["开发", "产品"], sourceType, timing: "今天 09:00—10:00", status: "已安排" }));
+    const markup = renderToStaticMarkup(state.TaskCapsuleContent({ title: "一个很长的任务标题", priority: "medium", tags: ["开发", "产品"], sourceType, timing: "今天 09:00—10:00", status: "进行中" }));
     const heading = markup.slice(0, markup.indexOf('<span class="task-capsule-footer">'));
     const footer = markup.slice(markup.indexOf('<span class="task-capsule-footer">'));
-    assert.match(heading, /<span class="task-capsule-heading"><strong title="一个很长的任务标题">一个很长的任务标题<\/strong><span class="task-capsule-right-slot"><span class="task-capsule-status">已安排<\/span><\/span><\/span>/);
+    assert.match(heading, /<span class="task-capsule-heading"><strong title="一个很长的任务标题">一个很长的任务标题<\/strong><span class="task-capsule-right-slot"><span class="task-capsule-status">进行中<\/span><\/span><\/span>/);
     assert.doesNotMatch(heading, /priority-badge|task-list-tags/);
     assert.match(footer, /<span class="priority-badge priority-medium">P2<\/span><span[^>]*>今天 09:00—10:00<\/span>/);
     assert.match(footer, /class="task-list-tags" data-limit="1">开发<\/span>/);
@@ -66,9 +66,9 @@ test("capsule keeps title with right-slot status and puts priority, timing and t
 test("unfinished is a separate filter with exclusive counts, not open or scheduled", () => {
   const tasks = [original, { ...original, id: "pending", is_incomplete: false }, { ...original, id: "open", status: "open", is_incomplete: false }, { ...original, id: "done", status: "done" }, { ...original, id: "deleted", status: "deleted" }];
   const { state } = harness(tasks);
-  assert.deepEqual(JSON.parse(JSON.stringify(state.counts)), { all: 4, draft: 0, recurring: 0, open: 1, scheduled: 1, not_completed: 1, done: 1, deleted: 1 });
+  assert.deepEqual(JSON.parse(JSON.stringify(state.counts)), { all: 4, draft: 0, recurring: 0, scheduled: 2, not_completed: 1, done: 1, deleted: 1 });
   for (const task of tasks) {
-    const matches = ["open", "scheduled", "not_completed", "done", "deleted"].filter(view => state.taskMatchesView(task, view));
+    const matches = ["scheduled", "not_completed", "done", "deleted"].filter(view => state.taskMatchesView(task, view));
     assert.deepEqual(matches, [taskListStatus(task)]);
     assert.equal(state.taskMatchesView(task, "draft"), false);
     assert.equal(state.taskMatchesView(task, "recurring"), false);
@@ -94,7 +94,7 @@ test("all ordinary tasks excludes recycled tasks and keeps drafts and recurring 
 });
 
 test("capsule and read-only details share derived labels and status tones", () => {
-  for (const [status, is_incomplete, label, tone] of [["scheduled", true, "未完成", "not_completed"], ["scheduled", false, "已安排", "scheduled"], ["open", false, "待处理", "open"], ["done", true, "已完成", "done"]]) {
+  for (const [status, is_incomplete, label, tone] of [["scheduled", true, "未完成", "not_completed"], ["scheduled", false, "进行中", "scheduled"], ["open", false, "进行中", "scheduled"], ["done", true, "已完成", "done"]]) {
     const { state, context } = harness();
     state.task = { ...original, status, is_incomplete };
     const row = renderToStaticMarkup(vm.runInContext(compile(`(${capsule});`), context));
@@ -114,6 +114,70 @@ test("new independent task keeps its own classification while original remains u
   assert.equal(state.counts.scheduled, 1);
   assert.equal(taskListStatus(original), "not_completed");
   assert.equal(taskListStatus(created), "scheduled");
+});
+
+test("new independent task replicates source date, time and untimed status", () => {
+  const timedDraft = independentTaskDraft({
+    ...original,
+    earliest_start_date: "2026-10-25",
+    earliest_start_time: "14:00",
+    due_date: "2026-10-25",
+    due_time: "16:30",
+    estimated_minutes: 150,
+  }, "2026-10-20");
+  assert.equal(timedDraft.earliest_start_date, "2026-10-25");
+  assert.equal(timedDraft.earliest_start_time, "14:00");
+  assert.equal(timedDraft.due_date, "2026-10-25");
+  assert.equal(timedDraft.due_time, "16:30");
+  assert.equal(timedDraft.total_workload_minutes, 150);
+  assert.equal(timedDraft.remaining_workload_minutes, 150);
+
+  const untimedOriginal = {
+    ...original,
+    earliest_start_date: "2026-10-20",
+    earliest_start_time: null,
+    due_date: "2026-10-20",
+    due_time: null,
+    earliest_start_at: null,
+    due_at: null,
+    estimated_minutes: null,
+    total_workload_minutes: null,
+    remaining_workload_minutes: null,
+    status: "open",
+    is_incomplete: false,
+  };
+  const untimedDraft = independentTaskDraft(untimedOriginal, "2026-10-20");
+  assert.equal(untimedDraft.earliest_start_date, "2026-10-20");
+  assert.equal(untimedDraft.due_date, "2026-10-20");
+  assert.equal(untimedDraft.earliest_start_time, null);
+  assert.equal(untimedDraft.due_time, null);
+  assert.equal(untimedDraft.total_workload_minutes, null);
+  assert.equal(untimedDraft.remaining_workload_minutes, null);
+
+  const crossDayDraft = independentTaskDraft({
+    ...untimedOriginal,
+    earliest_start_date: "2026-10-22",
+    earliest_start_time: "09:30",
+    due_date: "2026-10-24",
+    due_time: "18:00",
+    total_workload_minutes: 180,
+  }, "2026-10-20");
+  assert.equal(crossDayDraft.earliest_start_date, "2026-10-22");
+  assert.equal(crossDayDraft.earliest_start_time, "09:30");
+  assert.equal(crossDayDraft.due_date, "2026-10-24");
+  assert.equal(crossDayDraft.due_time, "18:00");
+  assert.equal(crossDayDraft.total_workload_minutes, 180);
+
+  const undatedDraft = independentTaskDraft({
+    ...untimedOriginal,
+    earliest_start_date: null,
+    due_date: null,
+  }, "2026-10-20");
+  assert.equal(undatedDraft.earliest_start_date, null);
+  assert.equal(undatedDraft.due_date, null);
+  assert.equal(undatedDraft.earliest_start_time, null);
+  assert.equal(undatedDraft.due_time, null);
+  assert.equal(undatedDraft.total_workload_minutes, null);
 });
 
 test("unfinished colors have light and dark tokens and cover row, capsule and details", () => {
@@ -569,10 +633,49 @@ test("single-day execution and cancellation labels omit the redundant date for c
   }
 });
 
+test("untimed task execution records keep dated labels for single-day and cross-day completions", () => {
+  const { state } = harness();
+  const singleUntimed = {
+    ...original,
+    earliest_start_date: "2026-10-20",
+    earliest_start_time: null,
+    due_date: "2026-10-20",
+    due_time: null,
+    earliest_start_at: null,
+    due_at: null
+  };
+  const singleExecution = {
+    id: "capture:untimed-1",
+    occurred_at: "2026-10-20T10:00:00+08:00",
+    plan_date: "2026-10-20",
+    kind: "execution",
+    status: "done",
+    note: null,
+    review_note: null,
+    task_status: "done"
+  };
+  const singleHtml = renderToStaticMarkup(state.TaskStatusHistory({
+    task: { ...singleUntimed, status: "done" },
+    metadata: { history: [singleExecution] },
+    busy: false,
+    ...callbacks
+  }));
+  assert.match(singleHtml, /<span class="task-detail-plan-date">安排日期 10月20日<\/span><strong>任务已完成<\/strong>/);
+
+  const crossUntimed = { ...singleUntimed, due_date: "2026-10-22", status: "done" };
+  const crossHtml = renderToStaticMarkup(state.TaskStatusHistory({
+    task: crossUntimed,
+    metadata: { history: [singleExecution] },
+    busy: false,
+    ...callbacks
+  }));
+  assert.match(crossHtml, /<span class="task-detail-plan-date">安排日期 10月20日<\/span><strong>整个任务已完成<\/strong>/);
+});
+
 test("detail and editor headers share breadcrumb, derived status and status icon", () => {
   const { state } = harness();
   state.Icon = ({ name }) => React.createElement("svg", { "data-icon": name, "aria-hidden": true });
-  for (const [status, is_incomplete, label, icon] of [["scheduled", false, "已安排", "clock"], ["open", false, "待处理", "clock"], ["scheduled", true, "未完成", "clock"], ["done", false, "已完成", "check"], ["deleted", false, "回收站", "trash"]]) {
+  for (const [status, is_incomplete, label, icon] of [["scheduled", false, "进行中", "clock"], ["open", false, "进行中", "clock"], ["scheduled", true, "未完成", "clock"], ["done", false, "已完成", "check"], ["deleted", false, "回收站", "trash"]]) {
     const task = { ...original, status, is_incomplete };
     for (const editing of [false, true]) {
       const html = renderToStaticMarkup(React.createElement(state.TaskPageHeader, { task, editing }));
@@ -595,7 +698,7 @@ test("completion primary text overrides the shared neutral confirmation-button c
 test("task cards and details retain each legacy priority and show P0 through P3", () => {
   const { state } = harness();
   for (const [priority, label] of Object.entries(priorityCopy)) {
-    const markup = renderToStaticMarkup(state.TaskCapsuleContent({ title: "任务", priority, tags: [], status: "待处理" }));
+    const markup = renderToStaticMarkup(state.TaskCapsuleContent({ title: "任务", priority, tags: [], status: "进行中" }));
     assert.ok(markup.includes(label));
     assert.ok(markup.includes(`priority-${priority}`));
     const details = renderToStaticMarkup(state.TaskDetailContent({ task: { ...original, priority }, metadata: null, busy: false, children: null, onNewTask() {} }));
@@ -625,12 +728,12 @@ test("status dropdown filter exposes all views with counts, quick reset and guar
     : Array.isArray(node) ? node.flatMap(findButtons)
     : [...(node.type === "button" ? [node] : []), ...findButtons(node.props?.children)];
   const options = findButtons(tree).filter(button => button.props.role === "option");
-  assert.equal(options.length, 8);
-  assert.deepEqual(options.map(button => button.key), ["all", "scheduled", "draft", "recurring", "open", "not_completed", "done", "deleted"]);
-  assert.deepEqual(options.map(button => button.props["data-status-color"]), ["all", "scheduled", "draft", "recurring", "open", "not_completed", "done", "deleted"]);
+  assert.equal(options.length, 7);
+  assert.deepEqual(options.map(button => button.key), ["all", "scheduled", "draft", "recurring", "not_completed", "done", "deleted"]);
+  assert.deepEqual(options.map(button => button.props["data-status-color"]), ["all", "scheduled", "draft", "recurring", "not_completed", "done", "deleted"]);
   assert.equal(options[1].props["aria-selected"], true);
   for (const option of options) option.props.onClick();
-  assert.deepEqual(calls, ["all", "scheduled", "draft", "recurring", "open", "not_completed", "done", "deleted"]);
+  assert.deepEqual(calls, ["all", "scheduled", "draft", "recurring", "not_completed", "done", "deleted"]);
   calls.length = 0;
   findButtons(tree).find(button => button.props.className === "task-filter-clear").props.onClick();
   assert.deepEqual(calls, ["all"]);

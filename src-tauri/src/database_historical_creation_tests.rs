@@ -6,12 +6,15 @@ const FUTURE: &str = "2026-11-02";
 const AUTOMATIC_NOTE: &str = "创建历史任务自动完成";
 
 fn input(start: &str, due: &str) -> TaskDraftInput {
+    let start_date = chrono::NaiveDate::parse_from_str(start, "%Y-%m-%d").unwrap();
+    let due_date = chrono::NaiveDate::parse_from_str(due, "%Y-%m-%d").unwrap();
+    let workload = (due_date - start_date).num_days().max(0) * 30 + 30;
     TaskDraftInput {
         item_type: "task".into(), recurring_settings: None, title: "补录历史事项".into(),
         notes: Some("任务备注保留".into()), priority: Some(Priority::Medium),
         earliest_start_date: Some(start.into()), earliest_start_time: Some("09:00".into()),
         due_date: Some(due.into()), due_time: Some("09:30".into()),
-        total_workload_minutes: Some(30), remaining_workload_minutes: Some(30),
+        total_workload_minutes: Some(workload), remaining_workload_minutes: Some(workload),
         field_states_json: "{}".into(), tags: vec!["历史补录".into()], recurrence: None,
     }
 }
@@ -256,13 +259,13 @@ fn existing_historical_multiday_ranges_survive_reload_content_edits_and_can_move
             form.notes = Some("允许修改内容和同日内时间".into());
             form.earliest_start_time = Some("10:00".into());
             form.due_time = Some("10:30".into());
-            let edit = ai_draft(&mut db, "update", Some(&task.id), form);
+            let edit = ai_draft(&mut db, "update", Some(&task.id), form.clone());
             let edited = confirm_edit(&mut db, api, &task, &edit).unwrap();
             assert_eq!(edited.title, "保留历史日期范围的正常编辑");
             assert_eq!(edited.earliest_start_date.as_deref(), Some(PAST));
             assert_eq!(edited.due_date.as_deref(), Some(due));
-            assert_eq!(edited.status, "open");
-            assert_eq!(edited.remaining_workload_minutes, Some(30));
+            assert_eq!(edited.status, "scheduled");
+            assert_eq!(edited.remaining_workload_minutes, form.total_workload_minutes);
             assert_eq!(db.count("plan_blocks").unwrap(), 0);
 
             let rejected = ai_draft(&mut db, "update", Some(&task.id), input("2026-10-20", due));
@@ -274,7 +277,7 @@ fn existing_historical_multiday_ranges_survive_reload_content_edits_and_can_move
             let moved = confirm_edit(&mut db, api, &edited, &future).unwrap();
             assert_eq!(moved.earliest_start_date.as_deref(), Some(FUTURE));
             assert_eq!(moved.due_date.as_deref(), Some("2026-11-03"));
-            assert_eq!(moved.status, "open");
+            assert_eq!(moved.status, "scheduled");
             assert_eq!(db.count("plan_blocks").unwrap(), 0, "do not expand future automatic scheduling");
             assert!(fact_rows(&db.connection, "SELECT * FROM task_completion_snapshots WHERE task_id = ?1", &task.id).unwrap().is_empty());
         }
@@ -294,7 +297,7 @@ fn shanghai_midnight_rechecks_draft_creation_and_edits_without_using_the_utc_dat
         };
         let allowed = make_draft(&mut db, input("2026-10-31", FUTURE));
         let existing = db.confirm_task_draft(&allowed.id, &allowed.confirmation_token).unwrap();
-        assert_eq!(existing.status, "open");
+        assert_eq!(existing.status, "scheduled");
         let stale = make_draft(&mut db, input("2026-10-31", FUTURE));
         let single = make_draft(&mut db, input("2026-10-31", "2026-10-31"));
         let _next = TestNow::new("2026-10-31T16:00:00Z");
@@ -310,7 +313,15 @@ fn shanghai_midnight_rechecks_draft_creation_and_edits_without_using_the_utc_dat
         let completed = db.confirm_task_draft(&single.id, &single.confirmation_token).unwrap();
         assert_eq!(completed.status, "done");
         assert_eq!(completed.result_date.as_deref(), Some("2026-10-31"));
-        assert_eq!(db.get_day_schedule("2026-10-31").unwrap().task_blocks[0].execution_note.as_deref(), Some(AUTOMATIC_NOTE));
+        assert_eq!(
+            db.get_day_schedule("2026-10-31")
+                .unwrap()
+                .task_blocks
+                .into_iter()
+                .find(|block| block.task_id == completed.id)
+                .and_then(|block| block.execution_note),
+            Some(AUTOMATIC_NOTE.into()),
+        );
         let today = make_draft(&mut db, input(TODAY, FUTURE));
         assert_eq!(db.confirm_task_draft(&today.id, &today.confirmation_token).unwrap().status, "scheduled");
     }

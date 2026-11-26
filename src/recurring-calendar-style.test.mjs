@@ -9,8 +9,12 @@ import { recurringClockRange, recurringRangeInput, recurringTimeBlockIssue } fro
 import { CopySeparator } from "./copy-separator.test-helper.mjs";
 
 const app = ts.createSourceFile("App.tsx", readFileSync(new URL("./App.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const names = ["ScheduleDateGrid", "RecurringValidityPicker", "BlockEditorTimeRangeRail", "calendarCells", "shiftDateValue", "shiftMonthKey", "clockMinutes", "minutesClock", "validDraftClock", "shanghaiDateValue"];
-const code = app.statements.filter(node => ts.isFunctionDeclaration(node) && names.includes(node.name?.text)).map(node => node.getText(app)).join("\n");
+const names = ["UntimedScheduleNote", "ScheduleDateGrid", "RecurringValidityPicker", "BlockEditorTimeRangeRail", "calendarCells", "shiftDateValue", "shiftMonthKey", "clockMinutes", "minutesClock", "validDraftClock", "shanghaiDateValue"];
+const code = app.statements
+  .filter(node => (ts.isFunctionDeclaration(node) && names.includes(node.name?.text))
+    || (ts.isVariableStatement(node) && node.declarationList.declarations.some(decl => decl.name.getText(app) === "UNTIMED_SCHEDULE_NOTE")))
+  .map(node => node.getText(app))
+  .join("\n");
 const compiled = ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
 const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
@@ -20,7 +24,7 @@ function mount(name, props) {
   let cursor = 0, tree;
   const globals = {
     React, CopySeparator, Fragment: React.Fragment, ...controls, recurringClockRange, recurringRangeInput, recurringTimeBlockIssue,
-    MIN_TASK_BLOCK_MINUTES: 15, Icon: () => null, createPortal: node => node,
+    MIN_TASK_BLOCK_MINUTES: 15, Icon: () => null, TimeWheelTrigger: () => null, TimeWheelPopover: () => null, createPortal: node => node,
     TaskDurationPresets: () => null,
     pickerDateLabel: value => value, formatWorkloadMinutes: value => `${value} 分钟`,
     recurringItemPreviewDates: form => [form.starts_on, ...(form.ends_on ? [form.ends_on] : [])],
@@ -187,7 +191,11 @@ test("invalid, reversed and cross-midnight recurring inputs block confirmation a
     assert.equal(h.rail().props.start, "09:00");
     assert.equal(h.rail().props.end, "10:00");
   }
-  const incomplete = picker({ displayTime: "", displayDurationMinutes: null });
+  const untimed = picker({ displayTime: "", displayDurationMinutes: null });
+  assert.equal(untimed.confirm().props.disabled, false);
+  untimed.confirm().props.onClick();
+  assert.deepEqual(untimed.confirmed[0], ["2026-10-23", "", "", null]);
+  const incomplete = picker({ displayTime: "09:00", displayDurationMinutes: null });
   assert.equal(incomplete.confirm().props.disabled, true);
 });
 
@@ -229,4 +237,19 @@ test("shared rail preserves 24:00 display, slider boundary and one-minute precis
   const h = mount("BlockEditorTimeRangeRail", { start: "23:30", end: "24:00", minimumDuration: 1, maxMinute: 1440, allowMidnightEnd: true, onChange() {} });
   assert.equal(byLabel(h.render(), "输入结束时间").props.value, "24:00");
   assert.equal(elements(h.render(), node => node.props.className === "time-rail-range end")[0].props["aria-valuetext"], "24:00");
+});
+
+test("untimed recurring validity opens untimed note on date click and timed controls on clock click", () => {
+  for (const initialField of ["start", "end"]) {
+    const h = picker({ displayTime: "", displayDurationMinutes: null, initialField });
+    const tree = h.render();
+    const untimedButton = elements(tree, node => node.type === "button" && node.props.children === "不限时刻")[0];
+    assert.equal(untimedButton.props["aria-pressed"], true);
+    const note = elements(tree, node => node.type === h.globals.UntimedScheduleNote)[0];
+    assert.ok(note);
+    assert.equal(byClass(note.type(note.props), "schedule-picker-untimed-note").props.role, "note");
+  }
+  const timedFromClock = picker({ displayTime: "", displayDurationMinutes: null, initialField: "time" });
+  const timedButton = elements(timedFromClock.render(), node => node.type === "button" && node.props.children === "指定时刻")[0];
+  assert.equal(timedButton.props["aria-pressed"], true);
 });

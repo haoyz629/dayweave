@@ -28,16 +28,19 @@ test('ISO week-year and cross-year heading preserve both date years', () => {
 });
 
 test('production block visibility, review precedence and notes/tags are reused', () => {
-  const schedule={...empty(),task_blocks:[block('plan'),block('done',{execution_status:'completed'}),block('review',{review:{outcome:'not_started',notes:'结果备注'}}),block('deleted',{task_status:'deleted'}),block('future-done',{task_status:'done'}),block('bad',{ends_at:'bad'}),block('zero',{ends_at:'2026-11-02T09:00:00+08:00'})]};
+  const schedule={...empty(),task_blocks:[block('plan'),block('done',{execution_status:'completed'}),block('review',{review:{outcome:'not_started',notes:'结果备注'}}),block('deleted',{task_status:'deleted'}),block('deleted-fact',{task_status:'deleted',execution_note:'已记录说明',execution_captured_at:'2026-11-02T10:00:00+08:00'}),block('future-done',{task_status:'done'}),block('bad',{ends_at:'bad'}),block('zero',{ends_at:'2026-11-02T09:00:00+08:00'})]};
   const rows=weekEntries('2026-11-02',schedule,[],[{id:'plan',tags:['真实标签'],notes:'原备注'}],'2026-11-02');
-  assert.equal(rows.length,4,'recycled planned blocks stay visible today, future-done blocks are hidden');
+  assert.equal(rows.length,3,'all recycled task blocks and future-done blocks are hidden today');
   assert.equal(rows.find(r=>r.layoutKey==='block:plan').tone,'plan');
   assert.deepEqual(rows.find(r=>r.layoutKey==='block:plan').tags,['真实标签']);
   assert.equal(rows.find(r=>r.layoutKey==='block:done').tone,'completed');
   assert.equal(rows.find(r=>r.layoutKey==='block:review').tone,'not-started');
   assert.equal(rows.find(r=>r.layoutKey==='block:review').notes,'结果备注');
-  assert.equal(rows.find(r=>r.layoutKey==='block:deleted').tone,'plan');
-  assert.equal(weekEntries('2026-11-02',schedule,[],[],'2026-11-04').length,5,'historical unfinished facts and recycled blocks remain visible');
+  assert.equal(rows.find(r=>r.layoutKey==='block:deleted'),undefined);
+  assert.equal(rows.find(r=>r.layoutKey==='block:deleted-fact'),undefined);
+  assert.equal(weekEntries('2026-11-02',schedule,[],[],'2026-11-04').length,4,'historical recycled blocks stay hidden while active historical facts remain visible');
+  const restored = { ...schedule, task_blocks: schedule.task_blocks.map(item => item.id === 'deleted-fact' ? { ...item, task_status: 'scheduled' } : item) };
+  assert.equal(weekEntries('2026-11-02', restored, [], [], '2026-11-02').find(r => r.layoutKey === 'block:deleted-fact').tone, 'plan');
 });
 
 test('cross-midnight and UTC-offset timestamps clip to the actual Shanghai day', () => {
@@ -113,7 +116,7 @@ test('week uses prototype 7-day columns, 时间 corner label and explicit 看当
   assert.equal(app.match(/<header className="timeline-design-topbar">/g)?.length, 1);
   assert.doesNotMatch(app, /className="month-controls"/);
   assert.doesNotMatch(week, /week-timeline-toolbar|onDoubleClick|时间 \/ 星期/);
-  assert.match(app, /<TimelineWeekDateContent /);
+  assert.match(app, /className="today-day-split"/);
   assert.match(week, /className="week-timeline-corner" aria-hidden="true">时间<\/div>/);
   assert.match(week, /className="week-open-day-btn"[^>]*onClick=\{\(\) => onOpenDay\(day\.date\)\}>看当日<\/button>/);
   assert.match(css, /--week-columns: 56px repeat\(5, minmax\(0, 1fr\)\) repeat\(2, minmax\(0, \.9fr\)\)/);
@@ -130,10 +133,11 @@ test('week removes redundant copy and legacy fixed-event legend item while keepi
   assert.match(css, /\.tone-not-started[^{}]*\{ --week-tone: var\(--state-not-started\); --week-bg: var\(--state-not-started-surface\); --week-edge: var\(--state-not-started-border\);/);
 });
 
-test('week column headers mark today with vivid red circle and separate drawer trigger from sibling 看当日 action', () => {
+test('week column headers mark selected today with red circle white text and unselected today with red text', () => {
   const css = readFileSync(new URL('./week-timeline.css', import.meta.url), 'utf8');
   assert.match(css, /\.week-day-col-head \{[^}]*border-right: 1px solid #e2e8f0/);
-  assert.match(css, /\.week-day-col-head\.today \.week-col-num \{ color: var\(--today-red-label\); background: var\(--today-red\)/);
+  assert.match(css, /\.week-day-col-head\.today\.selected \.week-col-num \{ color: var\(--today-red-label\); background: var\(--today-red\)/);
+  assert.match(css, /\.week-day-col-head\.today:not\(\.selected\) \.week-col-num \{ color: var\(--today-red\); background: transparent/);
   assert.match(css, /\.week-open-day-btn \{[^}]*height: 20px/);
 });
 
@@ -264,13 +268,14 @@ test('recurring icons and identity labels are independent of week execution tone
   assert.doesNotMatch(app, /tone: "recurring"/);
 });
 
-test('light week highlights today with vivid red circle and keeps incoming day selection neutral', () => {
+test('light week highlights selected today with red circle white text and keeps incoming day selection neutral', () => {
   const css = readFileSync(new URL('./color-system.css', import.meta.url), 'utf8');
   const prefix = 'html:root:not([data-mode="dark"]) .next-workspace .today-page .week-timeline .week-day-col-head';
   assert.ok(css.includes(`${prefix}.selected:not(.today) { background: transparent; }`));
   assert.ok(css.includes(`${prefix}.weekend.selected:not(.today) { background: #faf8f7; }`));
-  assert.ok(css.includes(`${prefix}.today .week-col-name { color: var(--color-red-ink); }`));
-  assert.ok(css.includes(`${prefix}.today .week-col-num { color: var(--today-red-label); background: var(--today-red); }`));
+  assert.ok(css.includes(`${prefix}.today .week-col-name { color: var(--today-red); }`));
+  assert.ok(css.includes(`${prefix}.today.selected .week-col-num { color: var(--today-red-label); background: var(--today-red); }`));
+  assert.ok(css.includes(`${prefix}.today:not(.selected) .week-col-num { color: var(--today-red); background: transparent; }`));
 });
 
 test('mounted WeekTimeline opens drawer on header/card click and only jumps to Day view via 看当日 or drawer button', async () => {

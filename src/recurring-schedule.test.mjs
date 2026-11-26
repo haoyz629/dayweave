@@ -25,7 +25,10 @@ function setters(state, keys) {
   for (const key of keys) state[`set${key[0].toUpperCase()}${key.slice(1)}`] = value => { state[key] = typeof value === "function" ? value(state[key]) : value; };
 }
 
-test("recurring creation requires a valid within-day time block, including exactly midnight end", () => {
+test("recurring creation allows untimed rules and validates within-day timed blocks", () => {
+  assert.equal(recurringTimeBlockIssue({ display_time: null, display_duration_minutes: null }), null);
+  assert.equal(recurringTimeBlockIssue({ display_time: "", display_duration_minutes: null }), null);
+  assert.equal(recurringTimeRange({ display_time: null, display_duration_minutes: null }), "不限具体时间");
   for (const fields of [ { display_time: null }, { display_time: "" }, { display_time: "24:00" }, { display_time: "9:00" }, { display_duration_minutes: null }, { display_duration_minutes: 0 }, { display_duration_minutes: 1.5 }, { display_duration_minutes: 1441 }, { display_time: "23:30", display_duration_minutes: 31 } ]) assert.ok(recurringTimeBlockIssue({ ...input, ...fields }));
   for (const fields of [ {}, { display_time: "23:30", display_duration_minutes: 30 }, { display_time: "00:00", display_duration_minutes: 1440 }, { display_duration_minutes: 1 } ]) assert.equal(recurringTimeBlockIssue({ ...input, ...fields }), null);
   assert.equal(recurringTimeRange({ display_time: "23:30", display_duration_minutes: 30 }), "23:30–24:00");

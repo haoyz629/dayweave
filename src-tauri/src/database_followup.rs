@@ -18,6 +18,37 @@ pub(super) fn enrich_metadata(connection: &Connection, mut metadata: TaskMetadat
         ORDER BY julianday(COALESCE(review.updated_at, pb.execution_captured_at)) DESC, dp.plan_date DESC, pb.id LIMIT 1",
         [&metadata.task_id], |row| Ok(TaskExecutionFactDto { plan_block_id: row.get(0)?, plan_date: row.get(1)?,
             outcome: row.get(2)?, note: row.get(3)?, ends_at: row.get(4)? })).optional()?;
+    if metadata.latest_execution.is_none() {
+        let fallback: Option<(String, Option<String>, Option<String>, Option<String>)> = connection.query_row(
+            "SELECT status, deleted_from_status, result_date, COALESCE(result_ends_at, due_at)
+             FROM tasks WHERE id = ?1",
+            [&metadata.task_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).optional()?;
+        if let Some((status, deleted_from_status, Some(plan_date), end)) = fallback {
+            if status == "done" || (status == "deleted" && deleted_from_status.as_deref() == Some("done")) {
+                let mut note = None;
+                for event in metadata.history.iter().rev() {
+                    if matches!(event.kind.as_str(), "reopened" | "cleared" | "cleared_incomplete") {
+                        break;
+                    }
+                    if matches!(event.kind.as_str(), "execution" | "note" | "status") {
+                        if let Some(text) = event.note.clone().or_else(|| event.review_note.clone()) {
+                            note = Some(text);
+                            break;
+                        }
+                    }
+                }
+                metadata.latest_execution = Some(TaskExecutionFactDto {
+                    plan_block_id: String::new(),
+                    ends_at: end.unwrap_or_else(|| format!("{plan_date}T23:59:59+08:00")),
+                    plan_date,
+                    outcome: "completed".into(),
+                    note,
+                });
+            }
+        }
+    }
     Ok(metadata)
 }
 

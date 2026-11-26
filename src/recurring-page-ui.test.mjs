@@ -240,6 +240,7 @@ test("recurring pages reuse the ordinary header with lifecycle status icons", ()
     assert.match(html, ["ended", "deleted"].includes(status) ? />重复事项详情<\/h2>/ : />编辑重复事项<\/h2>/);
     assert.doesNotMatch(html, /task-compact-source|·重复事项/);
   }
+  assert.equal(state.recurringItemStatusLabel({ ...item, deleted_at: "2026-10-27" }), "回收站");
   for (const name of ["DeletedRecurringItemDetails", "EndedRecurringItemDetails"]) {
     const component = functions.get(name).getText(source);
     assert.match(component, /<TaskDetailHero/);
@@ -374,4 +375,39 @@ test("recurring frequency selector uses custom button dropdown without native do
   assert.equal(options[2].props["aria-selected"], true);
   options[0].props.onClick();
   assert.deepEqual(calls, ["daily"]);
+});
+
+test("recurring untimed toggle stays rendered when active and cancels back to timed defaults or previous time", () => {
+  const editorCode = functions.get("RecurringItemEditor").getText(source);
+  assert.match(editorCode, /function toggleUntimed\(\)/);
+  assert.match(editorCode, /className=\{`apple-schedule-untimed-btn\$\{isUntimed \? " is-active" : ""\}`\}/);
+  let form = { title: "", notes: "", frequency: "weekly", interval_value: 1, weekdays: [1], month_day: 1, starts_on: "2026-10-01", ends_on: "", display_time: "08:30", display_duration_minutes: 45, tags: [] };
+  const slots = [];
+  let cursor = 0;
+  const noop = () => {};
+  const state = {
+    React, Icon: ({ name }) => React.createElement("svg", { "data-icon": name }),
+    RecurringFrequencyDropdown: () => null, TaskTagEditor: () => null, HolidayCoverageNotice: () => null,
+    RecurringValidityPicker: () => null, TaskNotesInputs: () => null,
+    pickerDateLabel: v => v, recurringItemPreviewDates: () => ["2026-10-01"],
+    recurringClockRange, recurringTimeBlockIssue: () => null,
+    recurringItemDefaultForm: () => ({ display_time: "09:00", display_duration_minutes: 60 }),
+    shanghaiDateValue: () => "2026-10-01", shiftDateValue: d => d,
+    useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial; return [slots[i], v => { slots[i] = typeof v === "function" ? v(slots[i]) : v; }]; },
+    useRef(initial) { const i = cursor++; return slots[i] ??= { current: initial }; },
+    useEffect: noop, useLayoutEffect: noop
+  };
+  const evalEditor = evaluate(`(${editorCode})`, state);
+  const render = currentForm => { cursor = 0; return evalEditor({ form: currentForm, disabled: false, idPrefix: "test-rec", onChange: next => { form = next; } }); };
+  let tree = render(form);
+  let btn = nodes(tree, n => n.type === "button" && n.props.className?.includes("apple-schedule-untimed-btn"))[0];
+  assert.equal(btn.props["aria-pressed"], false);
+  btn.props.onClick();
+  assert.deepEqual([form.display_time, form.display_duration_minutes], ["", null]);
+  tree = render(form);
+  btn = nodes(tree, n => n.type === "button" && n.props.className?.includes("apple-schedule-untimed-btn"))[0];
+  assert.ok(btn, "untimed button must remain mounted when active");
+  assert.equal(btn.props["aria-pressed"], true);
+  btn.props.onClick();
+  assert.deepEqual([form.display_time, form.display_duration_minutes], ["08:30", 45]);
 });

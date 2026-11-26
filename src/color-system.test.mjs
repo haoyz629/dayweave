@@ -77,18 +77,17 @@ test("priority editing defaults to P1 and offers four semantic levels", () => {
   assert.doesNotMatch(legacy, /\.priority-dropdown-trigger\.is-open,[^}]+!important/);
 });
 
-test("dark text and waiting-pool dots do not override semantic colors or show unset priority", () => {
+test("dark text and settings surfaces preserve semantic colors", () => {
   const legacy = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
   assert.doesNotMatch(legacy, /html\[data-mode="dark"\] p, html\[data-mode="dark"\] span/);
-  assert.match(app, /\{task\?\.priority && <span className=\{`waiting-pool-dot priority-\$\{task\.priority\}`\}/);
   assert.match(css, /html:root \.next-workspace > \.settings-page \.settings-sections > section \{[^}]*background: var\(--color-panel\)/);
 });
 
 test("only live time and today markers use vivid red while date interactions stay blue", () => {
   const solid = css.match(/--today-red:\s*(#[\da-f]{6})/i)[1];
   const label = css.match(/--today-red-label:\s*(#[\da-f]{6})/i)[1];
-  assert.equal(solid, "#ff3b30");
-  assert.equal(label, "#3a1612");
+  assert.equal(solid, "#dc2626");
+  assert.equal(label, "#ffffff");
   assert.doesNotMatch(css.match(/html:root\[data-mode="dark"\] \{([^}]+)\}/)[1], /--today-red:/);
   for (const colors of [light, dark]) {
     assert.ok(contrast(label, solid) >= 4.5, "today/time label");
@@ -99,7 +98,8 @@ test("only live time and today markers use vivid red while date interactions sta
   assert.match(css, /\.timeline-week > button\.today\.selected \.timeline-week-date \{[^}]+background: var\(--today-red\)/);
   assert.match(css, /\.timeline-week-date > :is\(strong, span\) \{ color: inherit; \}/);
   const legacy = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
-  assert.match(legacy, /\.today-month-sheet \.month-grid > button\.today \.solar-day-number\{background:var\(--today-red\);/);
+  assert.match(legacy, /\.today-month-sheet \.month-grid > button\.today\.selected \.solar-day-number\{background:var\(--today-red\);color:#fff/);
+  assert.match(legacy, /\.today-month-sheet \.month-grid > button\.today:not\(\.selected\) \.solar-day-number\{background:transparent;color:var\(--today-red\)/);
   assert.match(css, /\.schedule-picker-calendar \.apple-date-grid button\.selected \{ color: #ffffff; background: var\(--color-primary\)/);
   assert.match(css, /--schedule-range-fill: var\(--color-selected-bg\); --schedule-range-node: var\(--color-primary\)/);
   assert.doesNotMatch(css, /button\.schedule-picker-confirm[^}]*var\(--today-red/);
@@ -310,22 +310,17 @@ test("toasts restore original light fills and edges without changing their ink o
   }
 });
 
-test("light nonworking time is a quiet fill without stripes or boundary borders", () => {
+test("light day timeline removes nonworking overlay bands while keeping grid layers", () => {
   const rules = [];
   postcss.parse(css).walkRules(rule => rules.push(rule));
-  const rule = rules.find(rule => rule.selector === 'html:root:not([data-mode="dark"]) .timeline-nonworking');
-  assert.ok(rule);
-  assert.deepEqual(Object.fromEntries(rule.nodes.map(node => [node.prop, node.value])), {
-    border: "0", "background-image": "none"
-  });
-  const shared = rules.find(rule => rule.selector === "html:root :is(.timeline-nonworking, .time-rail-break)");
-  assert.equal(shared.nodes.find(node => node.prop === "background-color")?.value, "var(--color-gray-bg)");
-  assert.ok(rules.indexOf(rule) > rules.findIndex(candidate => candidate.selector === "html:root .timeline-nonworking"));
+  assert.equal(rules.find(rule => rule.selector === 'html:root:not([data-mode="dark"]) .timeline-nonworking'), undefined);
+  assert.equal(rules.find(rule => rule.selector === "html:root :is(.timeline-nonworking, .time-rail-break)"), undefined);
   const legacy = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
-  assert.match(legacy, /\.timeline-nonworking:focus-visible \{[^}]*outline: 2px solid/);
+  const lightLegacyLines = legacy.split("\n").filter(line => /\.timeline-nonworking\b/.test(line) && !line.includes('data-mode="dark"'));
+  assert.deepEqual(lightLegacyLines, []);
 });
 
-test("light day timeline uses a white canvas and borderless nonworking bands and now label", () => {
+test("light day timeline uses a white canvas and borderless now label", () => {
   const scope = 'html:root:not([data-mode="dark"]) .today-page .is-timeline-view';
   const dayRules = new Map();
   postcss.parse(css).walkRules(rule => {
@@ -334,7 +329,7 @@ test("light day timeline uses a white canvas and borderless nonworking bands and
   assert.equal(dayRules.get('.hourly-timeline')['background-color'], '#fff');
   assert.equal(dayRules.get('.timeline-hour span')['border-top-color'], '#c5cdd7');
   assert.equal(dayRules.get('.timeline-hour span::after')['border-top'], '1px dashed #d1d8e0');
-  assert.deepEqual(dayRules.get('.timeline-nonworking'), { border: '0', 'border-radius': '0', background: '#f0f2f4' });
+  assert.equal(dayRules.get('.timeline-nonworking'), undefined);
   assert.equal(dayRules.get('.current-time-line')['border-top'], '2px solid var(--today-red)');
   const label = dayRules.get('.current-time-line > span');
   assert.equal(label.background, 'var(--today-red)');
@@ -351,17 +346,15 @@ test("light day grid stays above the create rail and below solid task blocks", (
   assert.equal(rules.get('html:root:not([data-mode="dark"]) .selection-create-track')['z-index'], '1');
   const legacy = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
   assert.match(legacy, /\.timeline-hours \{[^}]*z-index: 2;/);
-  assert.match(legacy, /\.timeline-nonworking \{[^}]*z-index: 0;/);
   assert.equal(rules.get('html:root:not([data-mode="dark"]) .selection-create-track').background, 'color-mix(in srgb, var(--color-selected-bg) 45%, white)');
   assert.equal(rules.get('html:root:not([data-mode="dark"]) .selection-create-track:is(:hover, :focus-visible)').background, 'var(--color-selected-bg)');
 });
 
-test("P0 reuses urgent red across badges, dropdowns and waiting-pool dots", () => {
+test("P0 reuses urgent red across badges and dropdowns", () => {
   for (const [suffix, role] of [["", "ink"], ["-accent", "solid"], ["-border", "edge"], ["-surface", "bg"]]) {
     assert.ok(css.includes(`--priority-urgent${suffix}: var(--color-red-${role});`));
   }
   assert.ok(css.includes(':is(.priority-badge, .timeline-fact-priority).priority-urgent { color: var(--priority-urgent); border-color: var(--priority-urgent-border); background: var(--priority-urgent-surface); }'));
-  assert.ok(css.includes('.waiting-pool-dot.priority-urgent { background: var(--priority-urgent-accent); }'));
   assert.ok(css.includes('.priority-select-control.priority-tone-urgent { --priority-tone: var(--priority-urgent); --priority-border: var(--priority-urgent-border); --priority-surface: var(--priority-urgent-surface); }'));
 });
 test("draft cards say draft and task status badges use explicit semantic fills", () => {

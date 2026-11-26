@@ -10,11 +10,13 @@ const text = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const functions = new Map();
 let centerEffect;
+let agendaEffect;
 function collect(node) {
-  if (ts.isFunctionDeclaration(node) && ["calendarCells", "returnToday", "selectCalendarDate", "openTimelineDate", "moveMonth", "pauseTimelineFollowing", "shanghaiClockParts", "shanghaiDateValue", "shiftDateValue", "weekDateValues", "requestDateSelection", "refreshSchedule"].includes(node.name?.text)) functions.set(node.name.text, node.getText(source));
+  if (ts.isFunctionDeclaration(node) && ["calendarCells", "returnToday", "selectCalendarDate", "openTimelineDate", "moveMonth", "pauseTimelineFollowing", "shanghaiClockParts", "shanghaiDateValue", "shiftDateValue", "weekDateValues", "requestDateSelection", "refreshSchedule", "applyNavigation", "requestNavigation", "switchGlobalScheduleView"].includes(node.name?.text)) functions.set(node.name.text, node.getText(source));
   if (ts.isCallExpression(node) && node.expression.getText(source) === "useEffect") {
     const effect = node.arguments[0]?.getText(source);
     if (effect?.includes("const enteringDate = timelineEntryDateRef.current === selectedDate")) centerEffect = effect;
+    if (effect?.includes("agendaListRef.current") && effect?.includes("runningAgendaKey")) agendaEffect = effect;
   }
   ts.forEachChild(node, collect);
 }
@@ -308,4 +310,125 @@ test("late schedules and stale failures cannot overwrite the newly selected day'
   assert.deepEqual(state.recurringOccurrences, ["2026-11-01"]);
   assert.equal(state.scheduleError, null);
   assert.equal(state.scheduleLoading, false);
+});
+
+test("global titlebar view switch jumps directly from tasks to day/week/month while preserving selectedDate and dirty guards", () => {
+  const actionsCalls = [];
+  const state = {
+    active: "任务",
+    todayView: "timeline",
+    selectedDate: "2026-11-26",
+    taskEditorDirty: false,
+    planPreview: null,
+    timelineReturnContext: { date: "2026-11-24", blockId: "block-1" },
+    pendingNavigation: null,
+    pendingPlanLeave: null,
+    requestedTaskView: null,
+    mobileNavOpen: false,
+    todayViewActionsRef: {
+      current: {
+        openDay: () => actionsCalls.push("day"),
+        openWeek: () => actionsCalls.push("week"),
+        openMonth: () => actionsCalls.push("month")
+      }
+    },
+    normalizeTodayNavigation: (active) => ({ active }),
+    refreshSchedule: async () => {},
+    setActive: (v) => { state.active = v; },
+    setTodayView: (v) => { state.todayView = v; },
+    setSelectedDate: (v) => { state.selectedDate = v; },
+    setScheduleLoading: () => {},
+    setRequestedTaskView: (v) => { state.requestedTaskView = v; },
+    setTimelineReturnContext: (v) => { state.timelineReturnContext = v; },
+    setMobileNavOpen: (v) => { state.mobileNavOpen = v; },
+    setPendingNavigation: (v) => { state.pendingNavigation = v; },
+    setPendingPlanLeave: (v) => { state.pendingPlanLeave = v; },
+    setPlanLeaveError: () => {}
+  };
+  const context = vm.createContext(state);
+  for (const name of ["applyNavigation", "requestNavigation", "switchGlobalScheduleView"]) {
+    vm.runInContext(compile(functions.get(name)), context);
+  }
+
+  // From tasks -> week: keeps selectedDate (2026-11-26) and clears stale timelineReturnContext.
+  state.switchGlobalScheduleView("week");
+  assert.equal(state.active, "今日");
+  assert.equal(state.todayView, "week");
+  assert.equal(state.selectedDate, "2026-11-26");
+  assert.equal(state.timelineReturnContext, null);
+
+  // Within 今日: routes directly to TodayPage view actions.
+  state.switchGlobalScheduleView("month");
+  state.switchGlobalScheduleView("timeline");
+  assert.deepEqual(actionsCalls, ["month", "day"]);
+
+  // From dirty task editor -> month: opens confirmation guard instead of abandoning edits.
+  state.active = "任务";
+  state.taskEditorDirty = true;
+  state.switchGlobalScheduleView("month");
+  assert.equal(state.active, "任务");
+  assert.deepEqual(JSON.parse(JSON.stringify(state.pendingNavigation)), { active: "今日", todayView: "month" });
+});
+
+test("today agenda list scrolls automatically to the active in-progress item while respecting manual scroll", () => {
+  assert.ok(agendaEffect);
+  const calls = [], frames = new Map();
+  let frameId = 0;
+  const items = [
+    { dataset: { agendaKey: "block:a" }, top: 0, height: 34 },
+    { dataset: { agendaKey: "block:b" }, top: 210, height: 34 },
+    { dataset: { agendaKey: "block:c" }, top: 320, height: 34 }
+  ];
+  const agendaList = {
+    scrollTop: 0,
+    clientHeight: 185,
+    scrollHeight: 400,
+    getBoundingClientRect() { return { top: 500 }; },
+    querySelectorAll(selector) {
+      assert.equal(selector, "[data-agenda-key]");
+      return items.map((item) => ({
+        dataset: item.dataset,
+        getBoundingClientRect() { return { top: 500 + item.top - agendaList.scrollTop, height: item.height }; }
+      }));
+    },
+    scrollTo(options) { calls.push({ ...options }); agendaList.scrollTop = options.top; }
+  };
+  const state = {
+    selectedDate: "2026-11-26",
+    today: "2026-11-26",
+    todayView: "timeline",
+    visible: true,
+    loading: false,
+    error: null,
+    runningAgendaKey: "block:b",
+    agendaListRef: { current: agendaList },
+    agendaLocatedTargetRef: { current: null },
+    agendaUserScrolledRef: { current: false },
+    window: {
+      requestAnimationFrame(fn) { frames.set(++frameId, fn); return frameId; },
+      cancelAnimationFrame(id) { frames.delete(id); },
+      matchMedia() { return { matches: false }; }
+    }
+  };
+  const context = vm.createContext(state);
+  const runEffect = vm.runInContext(compile(`(${agendaEffect})`), context);
+  const flush = () => { const ready = [...frames.values()]; frames.clear(); ready.forEach((fn) => fn()); };
+
+  // Initial locate centers block:b (top=210, height=34 inside 185 viewport => 210 - (185 - 34)/2 = 134.5)
+  runEffect(); flush();
+  assert.deepEqual(calls, [{ top: 134.5, behavior: "auto" }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(state.agendaLocatedTargetRef.current)), { date: "2026-11-26", key: "block:b" });
+
+  // Manual scroll prevents re-centering on the same active task.
+  state.agendaUserScrolledRef.current = true;
+  agendaList.scrollTop = 0;
+  runEffect(); flush();
+  assert.equal(calls.length, 1);
+
+  // Switching to the next active task re-engages locating smoothly.
+  state.runningAgendaKey = "block:c";
+  runEffect(); flush();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].behavior, "smooth");
+  assert.equal(calls[1].top, 215);
 });

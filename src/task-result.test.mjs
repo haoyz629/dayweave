@@ -57,11 +57,24 @@ test('today completion and cancellation act only on the block, not the whole-tas
   assert.equal(timelineTaskCompletionAction(recycled,recycledTask,'2026-10-21','2026-10-19',now),null);
 });
 
-test('recycled blocks remain visible only on today and past dates',()=>{
+test('recycled blocks stay hidden across past, today and future views until restored',()=>{
   const recycled={...block,task_status:'deleted'};
-  assert.deepEqual(visibleTaskScheduleBlocks([recycled], '2026-10-19','2026-10-19'),[recycled]);
-  assert.deepEqual(visibleTaskScheduleBlocks([recycled], '2026-10-18','2026-10-19'),[recycled]);
-  assert.deepEqual(visibleTaskScheduleBlocks([recycled], '2026-10-20','2026-10-19'),[]);
+  for (const date of ['2026-10-18', '2026-10-19', '2026-10-20']) {
+    for (const fact of [
+      {},
+      { execution_status: 'completed' },
+      { execution_status: 'not_started' },
+      { review: { outcome: 'not_started' } },
+      { execution_note: '保留备注', execution_captured_at: '2026-10-19T10:00:00+08:00' },
+      { execution_captured_at: '2026-10-19T10:00:00+08:00' },
+      { actual_minutes: 15 }
+    ]) {
+      assert.deepEqual(visibleTaskScheduleBlocks([{ ...recycled, ...fact }], date, '2026-10-19'), []);
+    }
+  }
+  const restored = { ...recycled, task_status: 'scheduled', execution_status: 'completed' };
+  assert.deepEqual(visibleTaskScheduleBlocks([restored], '2026-10-18', '2026-10-19'), [restored]);
+  assert.deepEqual(visibleTaskScheduleBlocks([restored], '2026-10-19', '2026-10-19'), [restored]);
 });
 
 test('historical actions use only that block outcome, regardless of task completion or record age',()=>{

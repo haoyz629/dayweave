@@ -39,7 +39,7 @@ function range(props = {}) {
   const changes = [];
   const globals = {
     React, Fragment: React.Fragment, ...controls,
-    Icon: () => null, MIN_TASK_BLOCK_MINUTES: 15,
+    Icon: () => null, TimeWheelTrigger: () => null, TimeWheelPopover: () => null, MIN_TASK_BLOCK_MINUTES: 15,
     useRef: value => ({ current: value }), useState: value => [typeof value === "function" ? value() : value, () => {}], useEffect() {},
     formatWorkloadMinutes: value => `${value} 分钟`
   };

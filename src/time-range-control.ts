@@ -296,3 +296,71 @@ export function focusedTimeRangePresentation(
   }
   return { kind: "collapsed", startWindow, endWindow, omittedMinutes };
 }
+
+export function parseClockMinutes(value: string, allowMidnight = false): number | null {
+  const trimmed = value.trim();
+  if (allowMidnight && trimmed === "24:00") return 24 * 60;
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(trimmed)) return null;
+  const [hour, minute] = trimmed.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+export function formatClockMinutes(minute: number, allowMidnight = false): string {
+  const maxMinute = allowMidnight ? 24 * 60 : 23 * 60 + 59;
+  const bounded = clamp(Math.round(minute), 0, maxMinute);
+  if (allowMidnight && bounded === 24 * 60) return "24:00";
+  return `${String(Math.floor(bounded / 60)).padStart(2, "0")}:${String(bounded % 60).padStart(2, "0")}`;
+}
+
+export function applyTimeWheelSelection(
+  edge: TimeRangeEdge,
+  selectedClock: string,
+  current: { start: string; end: string },
+  options: {
+    independent?: boolean;
+    minimumMinute?: number;
+    maximumMinute?: number;
+    minimumDuration?: number;
+    allowMidnightEnd?: boolean;
+  } = {}
+): { start: string; end: string } {
+  const allowMidnightEnd = Boolean(options.allowMidnightEnd);
+  const minimumMinute = options.minimumMinute ?? 0;
+  const maximumMinute = options.maximumMinute ?? (allowMidnightEnd ? 24 * 60 : 23 * 60 + 59);
+  const minimumDuration = Math.max(1, options.minimumDuration ?? 15);
+  const parsedSelected = parseClockMinutes(selectedClock, allowMidnightEnd && edge === "end");
+  if (parsedSelected === null) return current;
+
+  const currentStart = parseClockMinutes(current.start, false) ?? minimumMinute;
+  const currentEnd = parseClockMinutes(current.end, allowMidnightEnd)
+    ?? Math.min(maximumMinute, currentStart + minimumDuration);
+
+  if (options.independent) {
+    const edgeMax = edge === "end" && allowMidnightEnd ? 24 * 60 : 23 * 60 + 59;
+    const nextValue = formatClockMinutes(clamp(parsedSelected, minimumMinute, Math.min(maximumMinute, edgeMax)), allowMidnightEnd && edge === "end");
+    return edge === "start" ? { start: nextValue, end: current.end } : { start: current.start, end: nextValue };
+  }
+
+  const prevDuration = Math.max(minimumDuration, currentEnd - currentStart);
+  if (edge === "start") {
+    const startMax = Math.min(23 * 60 + 59, maximumMinute - minimumDuration);
+    const nextStart = clamp(parsedSelected, minimumMinute, startMax);
+    const nextEnd = nextStart + minimumDuration <= currentEnd
+      ? clamp(currentEnd, nextStart + minimumDuration, maximumMinute)
+      : Math.max(nextStart + minimumDuration, Math.min(maximumMinute, nextStart + prevDuration));
+    return {
+      start: formatClockMinutes(nextStart, false),
+      end: formatClockMinutes(nextEnd, allowMidnightEnd)
+    };
+  }
+
+  const endMin = minimumMinute + minimumDuration;
+  const nextEnd = clamp(parsedSelected, endMin, maximumMinute);
+  const nextStart = currentStart + minimumDuration <= nextEnd
+    ? clamp(currentStart, minimumMinute, nextEnd - minimumDuration)
+    : Math.min(nextEnd - minimumDuration, Math.max(minimumMinute, nextEnd - prevDuration));
+  return {
+    start: formatClockMinutes(nextStart, false),
+    end: formatClockMinutes(nextEnd, allowMidnightEnd)
+  };
+}

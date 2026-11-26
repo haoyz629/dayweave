@@ -1,46 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { availabilityWorkdayOn, calendarDayInfo, lunarDateLabel, solarTermProgressLabel } from "./calendar-data.ts";
+import { calendarDayInfo, lunarDateLabel, solarTermProgressLabel } from "./calendar-data.ts";
 import officialWorkdays from "./official-workdays-2026.json" with { type: "json" };
 
-test("official holidays override selected working weekdays", () => {
+test("official holidays mark calendar day state as rest", () => {
   for (const holiday of officialWorkdays.holidays) {
     for (const date of holiday.dates) {
-      assert.equal(availabilityWorkdayOn(date, [1, 2, 3, 4, 5, 6, 7]), false, date);
       assert.equal(calendarDayInfo(date)?.workState, "rest", date);
     }
   }
 });
 
-test("makeup workdays override unselected weekends and match calendar labels", () => {
+test("makeup workdays mark calendar day state as work", () => {
   for (const [date] of officialWorkdays.makeupWorkdays) {
-    assert.equal(availabilityWorkdayOn(date, [1, 2, 3, 4, 5]), true, date);
     assert.equal(calendarDayInfo(date)?.workState, "work", date);
   }
 });
 
-test("ordinary dates retain custom weekly settings", () => {
-  assert.equal(availabilityWorkdayOn("2026-10-09", [5]), true);
-  assert.equal(availabilityWorkdayOn("2026-10-09", [1]), false);
-  assert.equal(availabilityWorkdayOn("2026-10-11", [7]), true);
-  assert.equal(availabilityWorkdayOn("2026-10-11", [1, 2, 3, 4, 5]), false);
-  // A lunar festival without statutory leave must not override the settings.
-  assert.equal(availabilityWorkdayOn("2026-03-03", [2]), true);
-});
-
-test("disabled makeup override respects weekly settings without changing statutory leave", () => {
-  for (const [date] of officialWorkdays.makeupWorkdays) {
-    assert.equal(availabilityWorkdayOn(date, [1, 2, 3, 4, 5], false), false, date);
-    assert.equal(availabilityWorkdayOn(date, [1, 2, 3, 4, 5, 6, 7], false), true, date);
-  }
-  assert.equal(availabilityWorkdayOn("2026-10-01", [1, 2, 3, 4, 5, 6, 7], false), false);
-});
-
-test("dates outside official coverage fall back to weekly settings", () => {
-  assert.equal(availabilityWorkdayOn("2027-01-01", [5]), true);
-  assert.equal(availabilityWorkdayOn("2027-01-01", [1]), false);
-  assert.equal(availabilityWorkdayOn("2025-12-28", [7]), true);
-  assert.equal(availabilityWorkdayOn("2025-12-28", [1, 2, 3, 4, 5]), false);
+test("ordinary and uncovered dates omit statutory work or rest badges", () => {
+  assert.equal(calendarDayInfo("2026-10-09")?.workState ?? null, null);
+  assert.equal(calendarDayInfo("2027-01-01"), null);
+  assert.equal(calendarDayInfo("2025-12-28"), null);
 });
 
 test("heading lunar date includes month and avoids duplicating month on the first day", () => {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import bundled from "../data/holidays/2026.json" with { type: "json" };
 import original from "./official-workdays-2026.json" with { type: "json" };
-import { availabilityWorkdayOn, calendarDayInfo } from "./calendar-data.ts";
+import { calendarDayInfo } from "./calendar-data.ts";
 import { recurringRuleOccursOn } from "./calendar-task-placement.ts";
 import {
   getHolidayCalendarSnapshot, holidayDataKey, holidayYearMessage, installHolidayCalendarSnapshot,
@@ -35,10 +35,8 @@ test("one atomic snapshot updates calendar labels, availability and legal recurr
     assert.equal(notifications, 1);
     assert.equal(officialWorkdayOn("2027-01-01"), false);
     assert.equal(calendarDayInfo("2027-01-01").workState, "rest");
-    assert.equal(availabilityWorkdayOn("2027-01-01", [1, 2, 3, 4, 5, 6, 7]), false);
+    assert.equal(officialWorkdayOn("2027-01-02"), true);
     assert.equal(calendarDayInfo("2027-01-02").workState, "work");
-    assert.equal(availabilityWorkdayOn("2027-01-02", [1, 2, 3, 4, 5]), true);
-    assert.equal(availabilityWorkdayOn("2027-01-02", [1, 2, 3, 4, 5], false), false);
     assert.equal(recurringRuleOccursOn(rule, "2027-01-02"), true);
     assert.equal(recurringRuleOccursOn({ ...rule, interval_value: 2 }, "2027-01-02"), false);
     assert.equal(recurringRuleOccursOn({ ...rule, interval_value: 2 }, "2027-01-04"), true);
@@ -78,7 +76,6 @@ test("untrusted annual data rejects invalid dates, partial range, schema, source
 
 test("unknown is not no-holiday or an assertion that official arrangements are unpublished", () => {
   assert.equal(officialWorkdayOn("2027-01-04"), null);
-  assert.equal(availabilityWorkdayOn("2027-01-04", [1]), true);
   assert.equal(officialHolidayCoverageFor("2026-02-30"), false);
   assert.match(holidayYearMessage(2027, baseline), /暂未取得/);
   assert.match(holidayYearMessage(2027, { ...baseline, checking: true }), /正在检查并更新/);

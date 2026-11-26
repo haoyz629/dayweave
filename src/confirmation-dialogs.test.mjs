@@ -81,6 +81,7 @@ test("all TaskWorkspace, TodayPage, and App confirmation backdrops portal to doc
     "pendingPermanentTask && createPortal(",
     "pendingPermanentRecurringItem && createPortal(",
     "pendingRecycledCompletion && createPortal(",
+    "pendingTrashBlock && createPortal(",
     "pendingPlanLeave && planPreview && createPortal("
   ];
   for (const prefix of prefixes) {

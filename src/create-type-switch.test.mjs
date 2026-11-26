@@ -61,7 +61,7 @@ function editor({ saved = true } = {}) {
     committed: [],
     async confirmCreationDraft(draft) {
       db.delete(draft.id); state.committed.push(draft);
-      return { item_type: draft.item_type, item: { id: "created-1", status: "open" } };
+      return { item_type: draft.item_type, item: { id: "created-1", status: "scheduled", scheduled_dates: ["2026-09-25"] } };
     },
     async onRecurringChanged() {}, onTaskCommitted() {}, async onReload() {}, async showCommittedToast() {}
   };
@@ -401,6 +401,24 @@ test("historical single-day confirmation explains auto-completion and trusts bac
     assert.equal(toast[0], "历史任务已创建并自动完成");
     assert.equal(toast[4], false, "historical completion must not offer cancellation through undo");
   }
+});
+
+test("historical single-day untimed creation promises an execution record instead of a timeline block", async () => {
+  const { state, renderHistoryFields, historicalDialog } = editor();
+  state.newTaskForm = {
+    ...state.newTaskForm,
+    earliest_start_date: "2026-09-22",
+    earliest_start_time: null,
+    due_date: "2026-09-22",
+    due_time: null
+  };
+  const inlineHtml = renderHistoryFields();
+  assert.match(inlineHtml, /已完成任务及当天执行记录/);
+  assert.doesNotMatch(inlineHtml, /已完成任务及当天任务块/);
+  assert.equal(await state.commitNewTask(), false);
+  const markup = renderToStaticMarkup(historicalDialog());
+  assert.match(markup, /生成当天执行记录/);
+  assert.doesNotMatch(markup, /生成已完成任务块/);
 });
 
 test("multi-day creation cannot start in history even when its deadline is today or future", async () => {

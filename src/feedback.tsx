@@ -8,6 +8,31 @@ function FeedbackIcon({ info = false }: { info?: boolean }) {
   </svg>;
 }
 
+export function lockBackgroundElements(dialog: HTMLElement) {
+  const locked: HTMLElement[] = [];
+  for (let parent = dialog.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+    for (const sibling of parent.parentElement?.children ?? []) {
+      if (sibling !== parent && sibling instanceof HTMLElement && sibling.id !== "feedback-toast-viewport") {
+        const count = Number(sibling.dataset.inertLocks ?? "0");
+        sibling.dataset.inertLocks = String(count + 1);
+        sibling.inert = true;
+        locked.push(sibling);
+      }
+    }
+  }
+  return () => {
+    for (const sibling of locked) {
+      const next = Math.max(0, Number(sibling.dataset.inertLocks ?? "1") - 1);
+      if (next === 0) {
+        delete sibling.dataset.inertLocks;
+        sibling.inert = false;
+      } else {
+        sibling.dataset.inertLocks = String(next);
+      }
+    }
+  };
+}
+
 export function ToastViewport() {
   return createPortal(<div id="feedback-toast-viewport" className="feedback-toast-viewport" />, document.body);
 }
@@ -39,13 +64,17 @@ export function Toast({ title, description, tone = "info", actions = [], duratio
     started.current = performance.now();
     timer.current = window.setTimeout(() => dismiss.current(), remaining.current);
   }
+  const host = container === undefined ? document.getElementById("feedback-toast-viewport") : container;
   useEffect(() => {
+    if (host instanceof HTMLElement && host.inert) {
+      delete host.dataset.inertLocks;
+      host.inert = false;
+    }
     remaining.current = duration;
     started.current = null;
     resume();
     return pause;
-  }, [title, description, duration]);
-  const host = container === undefined ? document.getElementById("feedback-toast-viewport") : container;
+  }, [title, description, duration, host]);
   if (!host) return null;
   return createPortal(<div ref={element} className={`feedback-toast ${tone}${actions.length ? " has-actions" : ""}`} role={tone === "error" ? "alert" : "status"}
     onMouseEnter={pause} onMouseLeave={resume} onFocus={pause} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) resume(); }}>
@@ -70,15 +99,7 @@ export function ConfirmationDialog({ children, onCancel, busy = false, tone = "i
   useLayoutEffect(() => {
     const dialog = element.current!;
     const previousFocus = restoreFocus.current;
-    const background: { element: HTMLElement; inert: boolean }[] = [];
-    for (let parent = dialog.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
-      for (const sibling of parent.parentElement?.children ?? []) {
-        if (sibling !== parent && sibling instanceof HTMLElement) {
-          background.push({ element: sibling, inert: sibling.inert });
-          sibling.inert = true;
-        }
-      }
-    }
+    const unlockBackground = lockBackgroundElements(dialog);
     const controls = () => [...dialog.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex]:not([tabindex='-1'])")];
     const focusFirst = () => ((initialFocus ? dialog.querySelector<HTMLElement>(initialFocus) : null) ?? dialog.querySelector<HTMLButtonElement>(".dialog-actions button:not(:disabled)") ?? controls()[0] ?? dialog).focus({ preventScroll: true });
     focusFirst();
@@ -104,7 +125,7 @@ export function ConfirmationDialog({ children, onCancel, busy = false, tone = "i
     return () => {
       document.removeEventListener("focusin", containFocus);
       document.removeEventListener("keydown", keydown, true);
-      background.forEach(item => { item.element.inert = item.inert; });
+      unlockBackground();
       if (previousFocus?.isConnected && !previousFocus.closest("[inert]")) previousFocus.focus({ preventScroll: true });
     };
   }, []);

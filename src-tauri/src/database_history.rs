@@ -85,18 +85,31 @@ pub(super) fn audit_cursor(transaction: &Transaction<'_>, task_id: &str) -> AppR
         [task_id], |row| row.get(0))?)
 }
 
+fn linked_audit_info(
+    transaction: &Transaction<'_>,
+    task_id: &str,
+    audit_cursor: i64,
+    include_note_change: bool,
+) -> AppResult<(Option<String>, Option<String>, bool, bool)> {
+    Ok(transaction.query_row(
+        "SELECT CASE WHEN COUNT(*) > 0 THEN (SELECT status FROM tasks WHERE id = ?1) END, GROUP_CONCAT(id),
+            COALESCE(MAX(change_kind = 'status_changed' AND old_value = 'done' AND new_value IN ('open', 'scheduled') AND reason IS NULL), 0),
+            COALESCE(MAX(change_kind = 'undo_task_completed' AND old_value = 'done' AND new_value IN ('open', 'scheduled')), 0)
+         FROM task_changes WHERE task_id = ?1 AND rowid > ?2
+         AND (change_kind IN ('status_changed', 'soft_deleted', 'execution_resolved', 'undo_task_completed')
+              OR (?3 = 1 AND change_kind = 'completion_note_changed'))",
+        params![task_id, audit_cursor, include_note_change as i64],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    )?)
+}
+
 pub(super) fn record_capture_change(transaction: &Transaction<'_>, task_id: &str, plan_date: &str,
     before: &ExecutionSnapshot, audit_cursor: i64, timestamp: &str) -> AppResult<()> {
     let after = capture_snapshot(transaction, &before.id)?;
     let outcome_changed = before.execution_status != after.execution_status;
     let note_changed = before.execution_note.as_deref().unwrap_or_default().trim()
         != after.execution_note.as_deref().unwrap_or_default().trim();
-    let (task_status, audit_ids, reopened): (Option<String>, Option<String>, bool) = transaction.query_row(
-        "SELECT CASE WHEN COUNT(*) > 0 THEN (SELECT status FROM tasks WHERE id = ?1) END, GROUP_CONCAT(id),
-            COALESCE(MAX(change_kind = 'status_changed' AND old_value = 'done' AND new_value IN ('open', 'scheduled') AND reason IS NULL), 0)
-         FROM task_changes WHERE task_id = ?1 AND rowid > ?2
-         AND change_kind IN ('status_changed', 'soft_deleted', 'execution_resolved', 'undo_task_completed')",
-        params![task_id, audit_cursor], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+    let (task_status, audit_ids, reopened, _) = linked_audit_info(transaction, task_id, audit_cursor, false)?;
     if !outcome_changed && !note_changed && task_status.is_none() { return Ok(()); }
 
     let block_key = format!("block:{}", before.id);
@@ -117,6 +130,51 @@ pub(super) fn record_capture_change(transaction: &Transaction<'_>, task_id: &str
         note: if note_changed { after.execution_note } else { None } };
     record_task_change(transaction, task_id, "history_snapshot", snapshot.as_deref(),
         Some(&serde_json::to_string(&event)?), "system", audit_ids.as_deref())
+}
+
+pub(super) fn record_untimed_capture_change(
+    transaction: &Transaction<'_>,
+    task_id: &str,
+    plan_date: &str,
+    audit_cursor: i64,
+    timestamp: &str,
+    note: Option<&str>,
+    note_only: bool,
+) -> AppResult<()> {
+    let (task_status, audit_ids, status_reopened, undo_reopened) =
+        linked_audit_info(transaction, task_id, audit_cursor, note_only)?;
+    let clean_note = note.map(str::trim).filter(|value| !value.is_empty()).map(str::to_owned);
+    if task_status.is_none() && (!note_only || clean_note.is_none()) {
+        return Ok(());
+    }
+    let reopened = status_reopened || undo_reopened;
+    let (kind, status, recorded_task_status) = if reopened {
+        ("reopened", task_status.clone(), task_status)
+    } else if note_only {
+        ("note", None, None)
+    } else {
+        ("execution", task_status.clone(), task_status)
+    };
+    let event = TaskHistoryEventDto {
+        id: format!("capture:{}", Uuid::new_v4()),
+        occurred_at: Some(timestamp.into()),
+        plan_date: Some(plan_date.into()),
+        kind: kind.into(),
+        status,
+        note: clean_note,
+        review_note: None,
+        note_cleared: None,
+        task_status: recorded_task_status,
+    };
+    record_task_change(
+        transaction,
+        task_id,
+        "history_snapshot",
+        None,
+        Some(&serde_json::to_string(&event)?),
+        "system",
+        audit_ids.as_deref(),
+    )
 }
 
 
@@ -525,7 +583,7 @@ mod audit_note_tests {
         let events = db.get_task_metadata(&id).unwrap().history;
         assert!(events.iter().any(|e| e.note.as_deref() == Some("first no-block completion")));
         assert!(events.iter().any(|e| e.note.as_deref() == Some("revised no-block completion")));
-        assert_eq!(events.last().unwrap().status.as_deref(), Some("open"));
+        assert_eq!(events.last().unwrap().status.as_deref(), Some("scheduled"));
         // Old execution rows may be gone, but the resolution audit still contains a real note.
         db.connection.execute("INSERT INTO task_changes(id,task_id,change_kind,old_value,new_value,source,reason,created_at)
             VALUES ('legacy-resolution',?1,'execution_resolved','partial','wait','manual','legacy update note',?2)", params![id,now()]).unwrap();

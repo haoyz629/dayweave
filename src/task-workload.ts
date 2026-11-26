@@ -9,12 +9,6 @@ export type TaskWorkloadSchedule = {
   estimated_minutes: number | null;
 };
 
-type StoredTaskWorkload = {
-  earliest_start_at: string | null;
-  due_at: string | null;
-  estimated_minutes: number | null;
-};
-
 function dateDayNumber(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.slice(0, 10));
   if (!match) return null;
@@ -55,19 +49,26 @@ export function isCrossDayTask(schedule: Pick<TaskWorkloadSchedule, "earliest_st
   return Boolean(schedule.earliest_start_date && schedule.due_date && schedule.earliest_start_date !== schedule.due_date);
 }
 
+export function isCrossDayTimedTask(schedule: Pick<TaskWorkloadSchedule, "earliest_start_date" | "earliest_start_time" | "due_date" | "due_time">) {
+  return isCrossDayTask(schedule) && Boolean(schedule.earliest_start_time && schedule.due_time);
+}
+
 export function taskScheduleIsComplete(schedule: Pick<TaskWorkloadSchedule, "earliest_start_date" | "earliest_start_time" | "due_date" | "due_time">) {
-  return Boolean(
-    schedule.earliest_start_date
-    && schedule.earliest_start_time
-    && schedule.due_date
-    && schedule.due_time
-  );
+  if (!schedule.earliest_start_date || !schedule.due_date) return false;
+  return Boolean(schedule.earliest_start_time) === Boolean(schedule.due_time);
 }
 
 export function taskRangeIsValid(schedule: Pick<TaskWorkloadSchedule, "earliest_start_date" | "earliest_start_time" | "due_date" | "due_time">) {
-  if (!schedule.earliest_start_date || !schedule.earliest_start_time || !schedule.due_date || !schedule.due_time) return true;
+  if (!schedule.earliest_start_date || !schedule.due_date) return true;
   const days = taskDateSpanDays(schedule);
   if (days === null) return false;
+  if (!schedule.earliest_start_time && !schedule.due_time) return true;
+  if (!schedule.earliest_start_time || !schedule.due_time) return true;
+  if (days === 2) {
+    const start = clockMinute(schedule.earliest_start_time);
+    const end = clockMinute(schedule.due_time);
+    return start !== null && end !== null && ((1440 - start) >= MIN_TASK_WORKLOAD_MINUTES || end >= MIN_TASK_WORKLOAD_MINUTES);
+  }
   if (days > 1) return true;
   const duration = taskRangeDurationMinutes(schedule);
   return duration !== null && duration >= MIN_TASK_WORKLOAD_MINUTES;
@@ -92,18 +93,26 @@ export function totalWorkloadForDaily(dailyMinutes: number | null, days: number 
 }
 
 export function taskWorkloadIsValid(schedule: TaskWorkloadSchedule) {
-  const total = schedule.estimated_minutes;
-  if (total === null) return true;
-  if (!Number.isInteger(total) || total < 1 || total > MAX_TASK_WORKLOAD_MINUTES) return false;
   const days = taskDateSpanDays(schedule);
-  if (!isCrossDayTask(schedule) || days === null || days <= 1) return true;
-  const daily = inferredDailyWorkloadMinutes(total, schedule);
-  if (daily === null) return true;
-  const maximumDaily = Math.min(24 * 60, Math.floor(MAX_TASK_WORKLOAD_MINUTES / days));
-  return daily >= MIN_TASK_WORKLOAD_MINUTES && daily <= maximumDaily;
+  const untimed = !schedule.earliest_start_time && !schedule.due_time;
+  const total = schedule.estimated_minutes;
+  if (isCrossDayTask(schedule) && days !== null && days > 1) {
+    if (untimed) return true;
+    if (total === null) return false;
+    if (!Number.isInteger(total) || total < 1 || total > MAX_TASK_WORKLOAD_MINUTES) return false;
+    const daily = inferredDailyWorkloadMinutes(total, schedule);
+    const effectiveDaily = daily ?? (total / days);
+    const maximumDaily = Math.min(24 * 60, Math.floor(MAX_TASK_WORKLOAD_MINUTES / days));
+    return effectiveDaily >= MIN_TASK_WORKLOAD_MINUTES && effectiveDaily <= maximumDaily;
+  }
+  if (total === null) return true;
+  return Number.isInteger(total) && total >= 1 && total <= MAX_TASK_WORKLOAD_MINUTES;
 }
 
 export function normalizeTaskWorkloadAfterScheduleChange<T extends TaskWorkloadSchedule>(previous: T, next: T): T {
+  if (!next.earliest_start_time && !next.due_time) {
+    return next.estimated_minutes === null ? next : { ...next, estimated_minutes: null } as T;
+  }
   const nextSameDayMinutes = taskRangeDurationMinutes(next);
   if (nextSameDayMinutes !== null) return { ...next, estimated_minutes: nextSameDayMinutes } as T;
 
@@ -115,19 +124,6 @@ export function normalizeTaskWorkloadAfterScheduleChange<T extends TaskWorkloadS
   if (previousDailyMinutes === null) return next;
   const total = totalWorkloadForDaily(previousDailyMinutes, nextDays);
   return total === null ? next : { ...next, estimated_minutes: total } as T;
-}
-
-export function preferredDailyAllocationMinutes(task: StoredTaskWorkload | undefined, remainingMinutes: number) {
-  if (!task) return remainingMinutes;
-  const startDate = task.earliest_start_at?.slice(0, 10) ?? "";
-  const dueDate = task.due_at?.slice(0, 10) ?? "";
-  const dailyMinutes = inferredDailyWorkloadMinutes(task.estimated_minutes, {
-    earliest_start_date: startDate,
-    due_date: dueDate
-  });
-  return dailyMinutes === null || dailyMinutes < MIN_TASK_WORKLOAD_MINUTES
-    ? remainingMinutes
-    : Math.min(remainingMinutes, dailyMinutes);
 }
 
 export function formatWorkloadMinutes(minutes: number) {

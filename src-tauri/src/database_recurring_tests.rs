@@ -17,23 +17,28 @@ fn version_count(db: &Database) -> i64 {
 fn recurring_required_time_and_draft_confirmation_are_atomic() {
     let _clock = TestToday::new("2026-10-16");
     let mut db = Database::in_memory().unwrap();
-    for (time, duration) in [(None,None),(Some("09:00"),None),(None,Some(30)),(Some("23:45"),Some(30)),(Some("25:00"),Some(5)),(Some("09:00"),Some(0))] {
+    for (time, duration) in [(Some("09:00"),None),(None,Some(30)),(Some("23:45"),Some(30)),(Some("25:00"),Some(5)),(Some("09:00"),Some(0))] {
         let mut i = input("invalid"); i.display_time = time.map(str::to_owned); i.display_duration_minutes = duration;
         assert!(db.create_recurring_item(i).is_err());
     }
     let mut draft = TaskDraftInput { item_type: "recurring".into(), recurring_settings: Some(RecurringDraftSettings {
         frequency: "daily".into(), interval_value: 1, weekdays: vec![], month_day: None,
-        starts_on: "2026-10-16".into(), ends_on: None, display_time: None, display_duration_minutes: None,
+        starts_on: "2026-10-16".into(), ends_on: None, display_time: Some("09:00".into()), display_duration_minutes: None,
     }), title: "incomplete time".into(), notes: None, priority: None, earliest_start_date: None,
         earliest_start_time: None, due_date: None, due_time: None, total_workload_minutes: None,
         remaining_workload_minutes: None, field_states_json: "{}".into(), tags: vec![], recurrence: None };
-    let settings = draft.recurring_settings.as_mut().unwrap();
-    settings.display_time = None; settings.display_duration_minutes = None;
     let draft = db.create_manual_task_draft(draft).unwrap();
     assert_eq!(draft.validation_status, "needs_confirmation");
     assert!(db.confirm_creation_draft(&draft.id,&draft.confirmation_token).is_err());
     assert_eq!(version_count(&db), 0);
     assert_eq!(db.list_task_drafts(false).unwrap().len(), 1);
+    let mut untimed = input("untimed daily");
+    untimed.display_time = None;
+    untimed.display_duration_minutes = None;
+    let created_untimed = db.create_recurring_item(untimed).unwrap();
+    assert_eq!(created_untimed.display_time, None);
+    assert_eq!(created_untimed.display_duration_minutes, None);
+    assert_eq!(occurrence(&mut db, "2026-10-16").display_time, None);
     let mut valid = input("midnight boundary"); valid.display_time = Some("23:30".into());
     assert!(db.create_recurring_item(valid).is_ok());
 }

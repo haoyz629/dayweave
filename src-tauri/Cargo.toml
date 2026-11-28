@@ -1,6 +1,6 @@
 [package]
 name = "dayweave"
-version = "0.1.0"
+version = "0.2.0"
 description = "今序 · Dayweave — Windows 本地优先任务管理"
 authors = ["今序开发者"]
 edition = "2021"

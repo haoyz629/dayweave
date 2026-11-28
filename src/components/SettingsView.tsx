@@ -359,7 +359,7 @@ export function SettingsView({
             <dl className="dw-about-facts">
               <div>
                 <dt>版本</dt>
-                <dd className="font-mono">0.1.0</dd>
+                <dd className="font-mono">0.2.0</dd>
               </div>
               <div>
                 <dt>数据存储</dt>

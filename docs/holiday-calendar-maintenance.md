@@ -36,14 +36,12 @@ https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/{year}.json
 `data/holidays/2026.json` 是客户端内置兜底，不是线上更新源。人工修改内置文件时核对整份官方通知、来源与日期，保持内部结构有效并提高修订号。修改客户端内置兜底需要重新构建客户端；CDN 年度更新无需发布新安装包。
 
 ```powershell
-$env:TMP=$env:PI_SCRATCH_DIR
-$env:TEMP=$env:PI_SCRATCH_DIR
 node --experimental-strip-types scripts/validate-holidays.mjs
-node --experimental-strip-types --test src/*.test.mjs
-npm.cmd run build
-$env:PATH="$env:USERPROFILE\.cargo\bin;$env:PATH"
-cargo test --manifest-path .\src-tauri\Cargo.toml
+npm run test:frontend
+npm run build
+npm run test:rust
 # 显式联网测试：使用生产下载器和内存数据库，不触碰真实用户数据
+$env:PATH="$env:USERPROFILE\.cargo\bin;$env:PATH"
 cargo test --manifest-path .\src-tauri\Cargo.toml live_jsdelivr_download -- --ignored --nocapture
 ```
 
@@ -51,6 +49,6 @@ cargo test --manifest-path .\src-tauri\Cargo.toml live_jsdelivr_download -- --ig
 
 ## 数据行为边界
 
-缺失年份的工作时间暂按用户每周设置；法定工作日重复规则要求从起点至目标日期涉及的每一年都有覆盖，缺口不作推测。补齐后恢复未落地的规则推演，不移动或删除已保存任务块、单次执行结果及历史。
+未覆盖年份不预测调休；日历角标仅在已覆盖年份显示「休 / 班」，「每个法定工作日」重复规则在未覆盖年份暂按自然周一至周五工作、周六日休息回退推演。补齐年度数据后即恢复按法定休假与补班推演未落地的发生日，不移动或改写已保存的任务、已完成或已记录的重复发生快照。
 
 节气表目前只覆盖 2026 年；此更新流程不承诺未来年份节气显示，也不新增跨年节气算法。

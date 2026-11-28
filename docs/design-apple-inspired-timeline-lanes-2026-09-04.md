@@ -1,10 +1,12 @@
 ---
-status: accepted
+status: historical reference (v2 uses connected-component equal-width columns)
 date: 2026-09-04
 decision: adr/0003-adopt-non-exclusive-daily-timeline.md
 ---
 
 # Apple 日历式重叠事项布局设计
+
+> 2026-11-28 状态说明：非独占重叠排布原则（[ADR-0003](adr/0003-adopt-non-exclusive-daily-timeline.md)）继续有效；在当前 v2 实现（`src/utils/timelineLayout.ts` 的 `layoutOverlappingItems`）中，重叠时间块采用**连通分量贪心分列并等分宽度（`100% / totalCols`）**，不再执行向右跨列扩展。本文保留为历史布局算法设计参考。
 
 ## 定位
 

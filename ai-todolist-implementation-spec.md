@@ -1,7 +1,7 @@
 # 今序 · Dayweave——AI TodoList（Windows 本地优先）实施规格
 
-> 文档状态：历史实施规格及领域设计；当前界面能力以 [README](README.md) 和代码为准。
-> 当前界面只有“今日”“任务”主导航，设置由标题栏弹窗打开；没有 AI 助手、独立记录视图、AI 连接或外观设置入口。下文有关这些入口及其他未实现界面的描述保留为历史设计目标，不代表现有功能。
+> 文档状态：早期 v1 历史实施规格（已被 v2 改版取代）；当前实现以 [README](README.md)、[PRODUCT.md](PRODUCT.md)、[CONTEXT.md](CONTEXT.md)、[ADR-0008](docs/adr/0008-unified-mica-workbench-and-three-mode-scheduling.md) 和当前代码为准。
+> v2 版本已从前后端完整移除 AI 助手、AI 连接/API Key 配置、日计划草案、执行块、固定日程、独立复盘模块与周视图，并升级为 SQLite v3 三态任务编织工作台（`pool / flex / timeline` + 子任务 + 独立草稿箱 + 按日快照重复规则）。下文仅作为历史架构演变档案保留，不代表现有后端能力或功能规划。
 > 目标读者：后续开发对话、产品/技术实施者  
 > 语言与时区：简体中文；固定使用中国标准时间（`Asia/Shanghai`）
 > 决策快照：`docs/product-decision-baseline-2026-08-21.md`；领域修订见 `docs/adr/0003-adopt-non-exclusive-daily-timeline.md`、`docs/adr/0004-require-complete-task-time-and-remove-inbox.md`、`docs/adr/0005-single-day-direct-scheduling.md`、`docs/adr/0007-lightweight-review-and-backfill.md`；领域术语：`CONTEXT.md`

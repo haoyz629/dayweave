@@ -61,24 +61,16 @@ test("Windows and favicon ICOs include seven identical size-specific renders",()
   assert(asset("src-tauri/build.rs").includes('cargo:rerun-if-changed=icons/icon.ico'));
 });
 test("homepage uses the shared tile without a second CSS shadow",()=>{
-  const component=asset("src/logo.tsx"), css=asset("src/styles.css");
+  const component=asset("src/logo.tsx"), css=asset("src/styles/shell.css");
   assert(component.includes('from "./assets/logo-light.svg"'));
   assert(component.includes('from "./assets/logo-windows.png"'));
-  assert(css.includes('object-fit: contain; filter: none; box-shadow: none;'));
-  assert(!css.includes('.product-brand-logo img { filter: drop-shadow('));
+  assert(!css.includes('filter: drop-shadow('));
   assert(asset("index.html").includes('/src/assets/logo-favicon.ico'));
 });
-test("integrated brand keeps approved logo assets, shared separators and single-line native text",()=>{
-  const component=asset("src/logo.tsx"), css=asset("src/app-titlebar.css");
+test("integrated brand keeps approved logo assets and single-line native text",()=>{
+  const component=asset("src/logo.tsx"), titlebar=asset("src/components/TitleBar.tsx"), css=asset("src/styles/shell.css");
   assert(!component.includes('brand-wordmark.svg'));
-  const name = component.match(/<h1 className="product-brand-name">([\s\S]*?)<\/h1>/)?.[1];
-  assert(name, "Brand name heading is present");
-  assert.match(name, /今序[\s\S]+Dayweave/);
-  assert(component.includes('import { CopySeparator } from "./copy-separator";'));
-  const separator = "<CopySeparator />";
-  assert(name.includes(separator), "Brand name uses shared decorative separator markup");
-  assert(!component.includes("product-brand-copy"), "Compact Windows 11 titlebar omits second-line slogan");
-  assert.match(css,/product-brand-logo \{[^}]*width: 24px; height: 24px/);
-  assert.match(css,/product-brand-logo img \{ width: 100%; height: 100%; \}/);
+  assert(titlebar.includes('今序 · Dayweave'));
+  assert(css.includes('.dw-brand-logo'));
   assert(!css.includes('filter: drop-shadow('));
 });

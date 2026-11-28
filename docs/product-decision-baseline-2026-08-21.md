@@ -1,5 +1,7 @@
 # 今序冻结产品方案（2026-08-21）
 
+> 2026-11-28 取代说明：本文件为早期 v1 冻结产品快照。v2 架构已完成整体改版（详见 `adr/0008-unified-mica-workbench-and-three-mode-scheduling.md`），现行产品定位、领域术语、视觉规范与功能边界以 `README.md`、`PRODUCT.md`、`CONTEXT.md`、`DESIGN.md`、`dayweave-product-overview.md` 及当前代码为准。
+
 > 状态：历史冻结快照，未被后续 ADR 取代的边界继续有效；与后续已接受规则冲突时，以后续 ADR 为准。边界变更应同步 `CONTEXT.md`、`PRODUCT.md`、`DESIGN.md`、`frontend-requirements.md`、`dayweave-product-overview.md`、`ai-todolist-implementation-spec.md`、`README.md` 及相关 ADR。
 
 > 2026-09-03 更新说明：本文件保留为历史冻结快照。涉及时间块独占、固定日程阻塞、可用空档、工作时间硬限制、午休、任务间缓冲、重叠冲突和“排程”用户文案的条款，已由 `adr/0003-adopt-non-exclusive-daily-timeline.md` 取代；其余边界继续有效。

@@ -1,10 +1,12 @@
 ---
-status: accepted
+status: superseded by ADR-0008
 date: 2026-09-10
 supersedes: ADR-0001 的无日期确认规则
 ---
 
 # 正式任务要求完整时间并移除 Inbox
+
+> 2026-11-28 取代说明：v2 架构已由 `0008-unified-mica-workbench-and-three-mode-scheduling.md` 取代本 ADR；现行模型以 `pool`（待安排）/ `flex`（全天多日）/ `timeline`（时间轴）三态调度替代“正式任务必须具备完整起止日期时间”的硬性要求，同时保留独立草稿箱（`drafts`）承接未提交弹窗。下文保留为历史决策记录。
 
 > 后续规则：完整时间与移除 Inbox 的决定继续有效；正式保存后的安排流程按 `0005-single-day-direct-scheduling.md`。今天／未来单日任务保存即在同一事务内建立已确认计划及任务块，归入已安排，不再一律等待日计划确认；跨日任务仍从待安排池分配。所有日期无生成或重新排程入口，已有草案与历史／执行／复盘保护按 ADR-0005。
 

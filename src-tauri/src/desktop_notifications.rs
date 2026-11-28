@@ -38,7 +38,7 @@ pub fn task_reminder(
     let timing = if remaining > 0 { format!("{remaining} 分钟后{action}") } else { format!("现在{action}") };
     Ok((
         task_title.to_string(),
-        format!("{timing} · {}–{}{}{}{}", starts_at.format("%H:%M"), ends_at.format("%H:%M"), task_notes.filter(|value| !value.trim().is_empty()).map(|value| format!(" · {value}")).unwrap_or_default(), priority.and_then(|value| match value { "urgent" => Some("P0"), "high" => Some("P1"), "medium" => Some("P2"), "low" => Some("P3"), _ => None }).map(|value| format!(" · {value}")).unwrap_or_default(), if tags.is_empty() { String::new() } else { format!(" · {}", tags.join("、")) }),
+        format!("{timing} · {}–{}{}{}{}", starts_at.format("%H:%M"), ends_at.format("%H:%M"), task_notes.filter(|value| !value.trim().is_empty()).map(|value| format!(" · {value}")).unwrap_or_default(), priority.and_then(|value| match value { "P1" => Some("P1"), "P2" => Some("P2"), "urgent" => Some("P0"), "high" => Some("P1"), "medium" => Some("P2"), "low" => Some("P3"), _ => None }).map(|value| format!(" · {value}")).unwrap_or_default(), if tags.is_empty() { String::new() } else { format!(" · {}", tags.join("、")) }),
         ReminderTarget { date: starts_at.format("%Y-%m-%d").to_string(), block_id: block_id.into(), task_id: task_id.into() },
     ))
 }

@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: superseded by ADR-0008
 ---
 
 # 将任务生命周期与每日执行分开
+
+> 2026-11-28 取代说明：v2 架构已由 `0008-unified-mica-workbench-and-three-mode-scheduling.md` 取代本 ADR；现行模型采用单一 `tasks` 实体配合 `pool / flex / timeline` 三态调度、子任务与独立按日快照重复规则，不再区分独立的日计划、执行块与复盘记录。下文保留为历史决策记录。
 
 > 2026-09-03 修订：`0003-adopt-non-exclusive-daily-timeline.md` 取消了执行块对钟表时段的独占语义，但不改变本 ADR 的任务、执行与复盘分离边界。
 

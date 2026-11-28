@@ -1,29 +1,25 @@
-/* Light-mode dual-column time wheel picker matching Dayweave Precision Workbench tokens. */
+/* Light-mode dual-column time wheel picker — Unified Dayweave Tokens */
 .time-wheel-trigger {
   display: inline-grid;
   place-items: center;
   flex: none;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--color-muted, #52647a);
+  color: var(--w-text-2);
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: background-color var(--w-dur-fast) var(--w-ease), color var(--w-dur-fast) var(--w-ease);
 }
 .time-wheel-trigger:hover:not(:disabled) {
-  background: var(--color-group, #eef2f6);
-  color: var(--color-primary, #3168dc);
+  background: var(--w-hover);
+  color: var(--w-accent);
 }
 .time-wheel-trigger.is-active {
-  background: var(--color-selected-bg, #dce9ff);
-  color: var(--color-selected-ink, #1544a5);
-}
-.time-wheel-trigger:focus-visible {
-  outline: 2px solid var(--color-primary, #3168dc);
-  outline-offset: 1px;
+  background: var(--w-accent-soft);
+  color: var(--w-accent-ink);
 }
 .time-wheel-trigger:disabled {
   opacity: 0.4;
@@ -32,93 +28,48 @@
 
 .time-wheel-popover {
   position: fixed;
-  z-index: 950;
+  z-index: var(--z-popover);
   inset: auto;
   margin: 0;
-  width: 228px;
-  padding: 0;
-  border: 1px solid var(--color-edge, #cbd5e1);
-  border-radius: 12px;
-  background: var(--color-panel, #ffffff);
-  color: var(--color-ink, #172b4d);
-  box-shadow: 0 14px 34px -8px rgb(15 23 42 / 18%), 0 2px 8px rgb(15 23 42 / 7%);
-  font-family: var(--jx-font-sans);
+  width: 168px;
+  padding: 8px;
+  border: 1px solid var(--w-border-strong);
+  border-radius: var(--w-radius-lg);
+  background: var(--w-surface);
+  color: var(--w-text);
+  box-shadow: var(--w-shadow-float);
+  font-family: var(--w-font-sans);
   overflow: hidden;
   user-select: none;
-  animation: time-wheel-in 140ms cubic-bezier(.16, 1, .3, 1);
+  animation: dw-pop-in 130ms var(--w-ease);
 }
 .time-wheel-popover::backdrop {
   background: transparent;
-}
-@keyframes time-wheel-in {
-  from {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.98);
-  }
-}
-
-.time-wheel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--color-hairline, #e2e8f0);
-  background: var(--color-surface-subtle, #f8fafc);
-}
-.time-wheel-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.time-wheel-title .time-range-marker {
-  border-color: var(--color-primary, #3168dc);
-  background: var(--color-panel, #ffffff);
-}
-.time-wheel-title .time-range-marker.end {
-  border-color: var(--color-primary, #3168dc);
-  background: var(--color-primary, #3168dc);
-}
-.time-wheel-title strong {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-ink-soft, #334155);
-}
-.time-wheel-readout {
-  padding: 2px 7px;
-  border: 1px solid #bfdbfe;
-  border-radius: 6px;
-  background: #eff6ff;
-  color: var(--color-selected-ink, #1544a5);
-  font: 600 12px/15px var(--jx-font-mono);
-  font-variant-numeric: tabular-nums;
 }
 
 .time-wheel-columns {
   position: relative;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  padding: 0 8px;
-  background: var(--color-panel, #ffffff);
+  column-gap: 12px;
 }
 .time-wheel-selection-band {
   position: absolute;
   z-index: 0;
-  top: calc(26px + 68px);
-  right: 8px;
-  left: 8px;
+  top: calc(20px + 68px);
+  right: 0;
+  left: 0;
   height: 34px;
   display: grid;
   place-items: center;
-  border: 1px solid #bfdbfe;
-  border-radius: 8px;
-  background: #eff6ff;
+  border-radius: var(--w-radius-sm);
+  background: var(--w-accent-soft);
   pointer-events: none;
 }
 .time-wheel-selection-band > span {
-  color: var(--color-selected-ink, #1544a5);
-  font: 700 14px/1 var(--jx-font-mono);
-  opacity: 0.72;
+  color: var(--w-accent-ink);
+  font: 600 13px/1 var(--w-font-mono);
+  transform: translateY(-1px);
 }
 
 .time-wheel-column {
@@ -131,11 +82,10 @@
 .time-wheel-column-label {
   display: grid;
   place-items: center;
-  height: 26px;
-  color: var(--color-muted, #52647a);
+  height: 20px;
+  color: var(--w-text-3);
   font-size: 11px;
-  font-weight: 600;
-  border-bottom: 1px solid #f1f5f9;
+  font-weight: 500;
 }
 
 .time-wheel-list {
@@ -145,9 +95,14 @@
   overscroll-behavior: contain;
   scroll-snap-type: y mandatory;
   scrollbar-width: none;
+  border-radius: var(--w-radius-sm);
   cursor: grab;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 22%, black 78%, transparent 100%);
-  mask-image: linear-gradient(to bottom, transparent 0%, black 22%, black 78%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%);
+}
+.time-wheel-list:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--w-accent-border);
 }
 .time-wheel-list::-webkit-scrollbar {
   display: none;
@@ -158,11 +113,6 @@
 }
 .time-wheel-list.is-animating {
   scroll-snap-type: none;
-}
-.time-wheel-list:focus-visible {
-  outline: 2px solid var(--color-primary, #3168dc);
-  outline-offset: -2px;
-  border-radius: 6px;
 }
 
 .time-wheel-spacer {
@@ -177,99 +127,60 @@
   height: 34px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--w-radius-sm);
   background: transparent;
-  color: var(--color-muted, #4a5c75);
-  font: 500 13.5px/1 var(--jx-font-mono);
+  color: var(--w-text-2);
+  font: 400 13px/1 var(--w-font-mono);
   font-variant-numeric: tabular-nums;
   scroll-snap-align: center;
   cursor: pointer;
-  transition: color 140ms cubic-bezier(.22, 1, .36, 1), opacity 140ms cubic-bezier(.22, 1, .36, 1), transform 140ms cubic-bezier(.22, 1, .36, 1);
+  transition: background-color var(--w-dur-fast) var(--w-ease), color var(--w-dur-fast) var(--w-ease), opacity var(--w-dur-fast) var(--w-ease);
 }
 .time-wheel-item[data-distance="1"] {
-  opacity: 0.76;
-  transform: scale(0.93);
+  opacity: 0.72;
 }
 .time-wheel-item[data-distance="2"] {
-  font-size: 12.5px;
-  opacity: 0.42;
-  transform: scale(0.84);
+  opacity: 0.36;
 }
 .time-wheel-item:hover:not(:disabled):not(.is-selected) {
-  color: var(--color-ink, #0f172a);
+  background: var(--w-hover);
+  color: var(--w-text);
   opacity: 1;
 }
 .time-wheel-item.is-selected {
-  color: var(--color-selected-ink, #1544a5);
-  font-size: 15px;
-  font-weight: 700;
-  opacity: 1;
-  transform: scale(1.02);
-}
-.time-wheel-item.is-nearest {
-  color: var(--color-primary, #3168dc);
+  color: var(--w-accent-ink);
   font-size: 14px;
   font-weight: 600;
-  opacity: 0.92;
+  opacity: 1;
+}
+.time-wheel-item.is-nearest {
+  color: var(--w-accent);
+  font-weight: 500;
+  opacity: 0.9;
 }
 .time-wheel-item:disabled {
-  opacity: 0.25;
+  opacity: 0.28;
   cursor: not-allowed;
 }
 
 .time-wheel-footer {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 7px 10px;
-  border-top: 1px solid var(--color-hairline, #e2e8f0);
-  background: var(--color-surface-subtle, #f8fafc);
-}
-.time-wheel-footer > span {
-  min-width: 0;
-  color: var(--color-muted, #52647a);
-  font-size: 10.5px;
-  line-height: 1.3;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  justify-content: flex-end;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--w-border);
 }
 .time-wheel-done {
-  flex: none;
-  height: 24px;
-  padding: 0 9px;
-  border: 1px solid #bfdbfe;
-  border-radius: 6px;
-  background: #eff6ff;
-  color: var(--color-selected-ink, #1544a5);
-  font: 600 11.5px/1 var(--jx-font-sans);
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--w-radius-sm);
+  background: transparent;
+  color: var(--w-accent-ink);
+  font: 500 12px/1 var(--w-font-sans);
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease;
+  transition: background-color var(--w-dur-fast) var(--w-ease);
 }
 .time-wheel-done:hover {
-  border-color: var(--color-primary, #3168dc);
-  background: #dceaff;
-}
-.time-wheel-done:focus-visible {
-  outline: 2px solid var(--color-primary, #3168dc);
-  outline-offset: 1px;
-}
-
-/* Highlight any host time input container while its wheel popover is active. */
-html:root:not([data-mode="dark"]) :is(.selection-time-box, .task-time-range-box, .block-editor-input-box):has(> .time-wheel-trigger.is-active) > input,
-html:root:not([data-mode="dark"]) .schedule-picker-rows .schedule-boundary-time-control:has(> .time-wheel-trigger.is-active) {
-  border-color: var(--color-primary, #3168dc);
-  background: var(--color-panel, #ffffff);
-  box-shadow: 0 0 0 2.5px rgb(49 104 220 / 14%);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .time-wheel-popover,
-  .time-wheel-trigger,
-  .time-wheel-item,
-  .time-wheel-done {
-    animation: none;
-    transition: none;
-  }
+  background: var(--w-accent-soft);
 }

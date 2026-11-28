@@ -1,4 +1,5 @@
 import { KeyboardEvent, PointerEvent as ReactPointerEvent, RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { tip } from "./components/TooltipHost";
 import { parseClockMinutes, TimeRangeEdge } from "./time-range-control";
 import "./time-wheel-picker.css";
 
@@ -50,13 +51,13 @@ export function TimeWheelTrigger({
       aria-expanded={active}
       aria-controls={active ? controlsId : undefined}
       aria-label={label}
-      title="打开时间滚轴"
+      {...tip("打开时间滚轴", { side: "top" })}
       onClick={(event) => {
         event.stopPropagation();
         onToggle();
       }}
     >
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="m7 15 5 5 5-5" />
         <path d="m7 9 5-5 5 5" />
       </svg>
@@ -426,7 +427,6 @@ export function TimeWheelPopover({
   }));
   const hourIndex = clampIndex(activeHour, hourOptions.length);
   const minuteIndex = activeHour === 24 ? 0 : nearestMinuteIndex(activeMinute);
-  const displayClock = `${pad2(activeHour)}:${pad2(activeMinute)}`;
 
   useLayoutEffect(() => {
     const popover = popoverRef.current;
@@ -445,8 +445,8 @@ export function TimeWheelPopover({
       if (!popover || !anchor) return;
       const anchorRect = anchor.getBoundingClientRect();
       const popRect = popover.getBoundingClientRect();
-      const width = popRect.width || 228;
-      const height = popRect.height || 274;
+      const width = popRect.width || 168;
+      const height = popRect.height || 240;
       const padding = 12;
       const spaceBelow = window.innerHeight - anchorRect.bottom - padding;
       const spaceAbove = anchorRect.top - padding;
@@ -525,13 +525,6 @@ export function TimeWheelPopover({
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
     >
-      <header className="time-wheel-header">
-        <span className="time-wheel-title">
-          <i className={`time-range-marker ${edge}`} aria-hidden="true" />
-          <strong>{edge === "start" ? "开始时间" : "结束时间"}</strong>
-        </span>
-        <output className="time-wheel-readout">{displayClock}</output>
-      </header>
       <div className="time-wheel-columns">
         <div className="time-wheel-selection-band" aria-hidden="true">
           <span>:</span>
@@ -562,7 +555,6 @@ export function TimeWheelPopover({
         />
       </div>
       <footer className="time-wheel-footer">
-        <span>{exactFiveMinute ? "滚轮 5 分 · 可手写 1 分" : `精确 ${displayClock} · 滚轮按 5 分`}</span>
         <button
           type="button"
           className="time-wheel-done"

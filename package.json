@@ -6,10 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "test:create-type-switch": "node --experimental-strip-types --test src/create-type-switch.test.mjs",
-    "test:recycle-retention": "node --experimental-strip-types --test src/recycle-retention.test.mjs",
-    "test:task-workload": "node --test src/task-workload.test.mjs",
-    "test:ui-copy": "node --test src/ui-copy.test.mjs",
+    "test:frontend": "node --experimental-strip-types --test src/utils/workbench.test.mjs src/calendar-data.test.mjs src/official-holiday-calendar.test.mjs src/logo-assets.test.mjs",
+    "test:interactions": "node scripts/test-interactions.cjs core && node scripts/test-interactions.cjs calendar && node scripts/test-interactions.cjs trash && node scripts/test-interactions.cjs consistency",
     "test:rust": "set \"PATH=%USERPROFILE%\\.cargo\\bin;%PATH%\" && cd src-tauri && cargo test",
     "tauri": "tauri",
     "tauri:dev": "set \"PATH=%USERPROFILE%\\.cargo\\bin;%PATH%\" && tauri dev",
@@ -17,7 +15,6 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
-    "@tauri-apps/plugin-opener": "^2.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

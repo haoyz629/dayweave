@@ -29,14 +29,14 @@ export function HolidayCalendarSettings({ compact = false, onResult }: { compact
     <ul>
       <li>自动检查更新，已下载日历可离线使用。</li>
       <li>缺失年份不显示法定休/班标记，也不推测调休。</li>
-      <li>法定工作日重复事项待对应年份补齐后恢复推演。</li>
+      <li>未收录年份的法定工作日重复任务，待数据更新后自动生成。</li>
     </ul>
     <small>日历仅供参考，以国务院公告为准；更新不影响已有任务和执行记录。</small>
   </>;
-  const updateButton = <button type="button" className="quiet-button" disabled={busy} onClick={() => void check()}>{busy ? "正在检查…" : compact ? "检查更新" : "检查节假日更新"}</button>;
+  const updateButton = <button type="button" className={compact ? "dw-btn-ghost" : "quiet-button"} disabled={busy} onClick={() => void check()}>{busy ? "正在检查…" : compact ? "检查更新" : "检查节假日更新"}</button>;
   return <div className={`holiday-calendar-settings${compact ? " is-compact" : ""}`} aria-label="法定节假日数据">
     {compact ? <>
-      <div className="settings-dialog-row"><span className="settings-field-copy"><strong>法定节假日数据</strong><small>已覆盖 {snapshot.years.map((data) => data.year).join("、")} 年 · 最近检查：{checkedAt}</small></span><div className="settings-holiday-actions"><button type="button" className="settings-text-button" aria-expanded={detailsOpen} aria-controls="settings-holiday-details" onClick={() => setDetailsOpen(!detailsOpen)}>{detailsOpen ? "收起详情" : "查看详情"}</button>{updateButton}</div></div>
+      <div className="settings-dialog-row"><span className="settings-field-copy"><strong>已覆盖 {snapshot.years.map((data) => data.year).join("、")} 年法定节假日安排</strong><small>最近成功检查：{checkedAt}</small></span><div className="settings-holiday-actions"><button type="button" className="settings-text-button" aria-expanded={detailsOpen} aria-controls="settings-holiday-details" onClick={() => setDetailsOpen(!detailsOpen)}>{detailsOpen ? "收起详情" : "查看详情"}</button>{updateButton}</div></div>
       {detailsOpen && <div id="settings-holiday-details" className="settings-holiday-details">{details}</div>}
     </> : <><div className="holiday-calendar-heading"><h3>法定节假日数据</h3>{updateButton}</div>{details}</>}
     {(busy || (!onResult && (snapshot.lastError || message))) && <p className={!busy && snapshot.lastError ? "holiday-update-error" : ""} role="status">{busy ? "正在获取已发布的年度安排，原有数据继续可用…" : snapshot.lastError || message}</p>}

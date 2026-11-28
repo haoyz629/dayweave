@@ -4,11 +4,11 @@ use thiserror::Error;
 pub enum AppError {
     #[error("数据库错误：{0}")]
     Database(#[from] rusqlite::Error),
-    #[error("结构化操作无效：{0}")]
+    #[error("{0}")]
     Schema(String),
-    #[error("领域规则不允许此操作：{0}")]
+    #[error("{0}")]
     Domain(String),
-    #[error("找不到指定对象：{0}")]
+    #[error("{0}")]
     NotFound(String),
     #[error("操作确认无效或已过期")]
     InvalidConfirmation,

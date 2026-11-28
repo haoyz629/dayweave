@@ -1,10 +1,12 @@
 ---
-status: accepted
+status: superseded by ADR-0008
 date: 2026-10-16
 supersedes: 复盘一级入口、每日完整表单、实际耗时必填／默认计划时长、整项完成先复盘及全历史只读边界
 ---
 
 # 轻量执行记录、可靠草稿与最近 7 天补录
+
+> 2026-11-28 取代说明：v2 架构已由 `0008-unified-mica-workbench-and-three-mode-scheduling.md` 取代本 ADR；独立复盘记录、复盘表单草稿与 7 天补录机制已从前后端移除，改为就地标记完成、子任务勾选与重复按日快照。下文保留为历史决策记录。
 
 ## Context
 
